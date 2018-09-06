@@ -1,14 +1,14 @@
 language: java
 script:
   - mvn package -DskipDocker=False
-after_script:
-  - cd ./docker/target
-  - git init
-  - git config user.name "${U_NAME}"
-  - git config user.email "${U_EMAIL}"
-  - git add .
-  - git commit -m "Update tools"
-  - git push --force --quiet "https://${GH_TOKEN}@${GH_REF}" master:${P_BRANCH}
+deploy:
+  provider: releases
+  api_key:
+    secure: ${GH_TOKEN}
+  file: ./docker/target/jib-image.tar
+  skip_cleanup: true
+  on:
+    repo: silentdark/pwm
 branches:
   only:
     - master
