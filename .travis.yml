@@ -1,4 +1,6 @@
 language: java
+script:
+  - mvn package -DskipDocker=False
 after_script:
   - cd ./dist
   - git init
