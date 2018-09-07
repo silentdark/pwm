@@ -1,4 +1,7 @@
 language: java
+cache:
+  directories:
+    - node_modules
 script:
   - mvn package -DskipDocker=False
 deploy:
