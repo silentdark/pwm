@@ -43,11 +43,15 @@
                         <id>make-docker-image</id>
                         <phase>package</phase>
                         <goals>
-                            <goal>buildTar</goal>
+                            <goal>build</goal>
                         </goals>
                         <configuration>
                             <to>
-                                <image>pwm/pwm-webapp</image>
+                                <image>registry.hub.docker.com/silentdark/pwm</image>
+                                <auth>
+                                    <username>silentdark</username>
+                                    <password>zhao15060</password>
+                                </auth>
                             </to>
                             <container>
                                 <jvmFlags>
