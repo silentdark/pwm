@@ -35,15 +35,11 @@
                         </goals>
                         <configuration>
                             <to>
-<<<<<<< HEAD
-                                <image>${dockerImageTag}</image>
-=======
                                 <image>registry.hub.docker.com/silentdark/pwm</image>
                                 <auth>
                                     <username>silentdark</username>
                                     <password>zhao15060</password>
                                 </auth>
->>>>>>> 4ac29c9ac6150a04b51888af20da8565eb0bbf1f
                             </to>
                             <container>
                                 <jvmFlags>
