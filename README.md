@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/silentdark/pwm.svg?branch=master)](https://travis-ci.org/silentdark/pwm)
 # PWM
 
 PWM is an open source password self service application for LDAP directories. PWM is an ideal candidate for organizations that wish to “roll their own” password self service solution, but do not wish to start from scratch. [Overview/Screenshots](https://docs.google.com/presentation/d/1LxDXV_iiToJXAzzT9mc1xXO0atVObmRpCame6qXOyxM/pub?slide=id.p8)

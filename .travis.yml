@@ -1,0 +1,17 @@
+language: java
+cache:
+  directories:
+    - node_modules
+script:
+  - mvn package -DskipDocker=False
+deploy:
+  provider: releases
+  api_key:
+    secure: ${GH_TOKEN}
+  file: ./docker/target/jib-image.tar
+  skip_cleanup: true
+  on:
+    repo: silentdark/pwm
+branches:
+  only:
+    - master

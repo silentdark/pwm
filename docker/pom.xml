@@ -31,11 +31,19 @@
                         <id>make-docker-image</id>
                         <phase>package</phase>
                         <goals>
-                            <goal>buildTar</goal>
+                            <goal>build</goal>
                         </goals>
                         <configuration>
                             <to>
+<<<<<<< HEAD
                                 <image>${dockerImageTag}</image>
+=======
+                                <image>registry.hub.docker.com/silentdark/pwm</image>
+                                <auth>
+                                    <username>silentdark</username>
+                                    <password>zhao15060</password>
+                                </auth>
+>>>>>>> 4ac29c9ac6150a04b51888af20da8565eb0bbf1f
                             </to>
                             <container>
                                 <jvmFlags>
@@ -47,7 +55,7 @@
                                     <arg>-applicationPath</arg>
                                     <arg>/config</arg>
                                 </args>
-                                <format>docker</format>
+                                <format>Docker</format>
                                 <ports>8443</ports>
                             </container>
                             <!--<useCurrentTimestamp>true</useCurrentTimestamp>-->
