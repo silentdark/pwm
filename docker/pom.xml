@@ -51,7 +51,7 @@
                                     <arg>-applicationPath</arg>
                                     <arg>/config</arg>
                                 </args>
-                                <format>Docker</format>
+                                <format>docker</format>
                                 <ports>8443</ports>
                             </container>
                             <!--<useCurrentTimestamp>true</useCurrentTimestamp>-->
