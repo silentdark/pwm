@@ -52,7 +52,7 @@
                                     <arg>-applicationPath</arg>
                                     <arg>/config</arg>
                                 </entrypoint>
-                                <format>docker</format>
+                                <format>Docker</format>
                                 <ports>8443</ports>
                             </container>
                         </configuration>
