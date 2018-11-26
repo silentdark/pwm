@@ -1,7 +1,7 @@
 language: java
 cache:
   directories:
-    - node_modules
+    - '$HOME/.m2/repository'
 script:
   - mvn package -DskipDocker=False
 deploy:

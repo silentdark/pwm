@@ -31,14 +31,18 @@
                         <id>make-docker-image</id>
                         <phase>package</phase>
                         <goals>
-                            <goal>buildTar</goal>
+                            <goal>build</goal>
                         </goals>
                         <configuration>
                             <from>
                                 <image>adoptopenjdk/openjdk11</image>
                             </from>
                             <to>
-                                <image>${dockerImageTag}</image>
+                                <image>registry.hub.docker.com/silentdark/pwm</image>
+                                <auth>
+                                    <username>silentdark</username>
+                                    <password>zhao15060</password>
+                                </auth>
                             </to>
                             <container>
                                 <entrypoint>
