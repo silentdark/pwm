@@ -346,6 +346,7 @@ public class MainClass
             if ( !commandExceuted )
             {
                 out( "unknown command '" + workingArgs.iterator().next() + "'" );
+                out( "use 'help' for command list" );
             }
         }
     }
@@ -535,7 +536,7 @@ public class MainClass
             }
         }
 
-        LOGGER.debug( "using applicationPath " + applicationPath.getAbsolutePath() );
+        LOGGER.debug( () -> "using applicationPath " + applicationPath.getAbsolutePath() );
         return applicationPath;
     }
 }
