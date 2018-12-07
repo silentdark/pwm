@@ -20,41 +20,20 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-package password.pwm.health;
+package password.pwm.util;
 
-import password.pwm.i18n.Health;
-import password.pwm.util.i18n.LocaleHelper;
+import org.junit.Test;
+import password.pwm.config.stored.StoredConfigurationImpl;
+import password.pwm.error.PwmUnrecoverableException;
 
-import java.util.Locale;
-
-public enum HealthStatus
+public class LDAPPermissionCalculatorTest
 {
-    WARN( 4 ),
-    CAUTION( 3 ),
-    CONFIG( 2 ),
-    GOOD( 1 ),
-    INFO( 0 ),
-    DEBUG( -1 ),;
-
-    private int severityLevel;
-
-    HealthStatus( final int severityLevel )
+    @Test
+    public void testDefaultPermissionCalculator()
+            throws PwmUnrecoverableException
     {
-        this.severityLevel = severityLevel;
-    }
-
-    public String getKey( )
-    {
-        return HealthStatus.class.getSimpleName() + "_" + this.toString();
-    }
-
-    public String getDescription( final Locale locale, final password.pwm.config.Configuration config )
-    {
-        return LocaleHelper.getLocalizedMessage( locale, this.getKey(), config, Health.class );
-    }
-
-    public int getSeverityLevel( )
-    {
-        return severityLevel;
+        final StoredConfigurationImpl defaultConfig = StoredConfigurationImpl.newStoredConfiguration();
+        final LDAPPermissionCalculator ldapPermissionCalculator = new LDAPPermissionCalculator( defaultConfig );
+        ldapPermissionCalculator.getPermissionRecords();
     }
 }
