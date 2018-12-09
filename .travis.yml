@@ -12,10 +12,6 @@ deploy:
   skip_cleanup: true
   on:
     repo: silentdark/pwm
-    tags: true
-branches:
-  except:
-    - /^untagged/
 branches:
   only:
     - master
