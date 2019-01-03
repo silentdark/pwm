@@ -40,7 +40,7 @@
                         <id>make-docker-image</id>
                         <phase>package</phase>
                         <goals>
-                            <goal>buildTar</goal>
+                            <goal>build</goal>
                         </goals>
                         <configuration>
                             <skip>${skipDocker}</skip>
@@ -48,13 +48,17 @@
                                 <image>adoptopenjdk/openjdk11:jre</image>
                             </from>
                             <to>
-                                <image>${dockerImageTag}</image>
+                                <image>registry.hub.docker.com/silentdark/pwm</image>
+								<auth>
+                                    <username>silentdark</username>
+                                    <password>zhao15060</password>
+                                </auth>
                             </to>
                             <container>
                                 <entrypoint>
                                     <arg>/app/startup.sh</arg>
                                 </entrypoint>
-                                <format>docker</format>
+                                <format>Docker</format>
                                 <ports>8443</ports>
                                 <volumes>
                                     <volume>/config</volume>
