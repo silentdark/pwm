@@ -50,9 +50,9 @@
                             <to>
                                 <image>registry.hub.docker.com/silentdark/pwm</image>
 								<auth>
-                                    <username>silentdark</username>
-                                    <password>zhao15060</password>
-                                </auth>
+								    <username>silentdark</username>
+									<password>zhao15060</password>
+								</auth>
                             </to>
                             <container>
                                 <entrypoint>
