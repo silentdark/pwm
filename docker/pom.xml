@@ -58,7 +58,7 @@
                                 <entrypoint>
                                     <arg>/app/startup.sh</arg>
                                 </entrypoint>
-                                <format>docker</format>
+                                <format>Docker</format>
                                 <ports>
                                     <port>8443</port>
                                 </ports>
