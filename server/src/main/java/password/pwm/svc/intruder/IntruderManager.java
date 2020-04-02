@@ -113,7 +113,7 @@ public class IntruderManager implements PwmService
         if ( pwmApplication.getLocalDB() == null || pwmApplication.getLocalDB().status() != LocalDB.Status.OPEN )
         {
             final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_SERVICE_NOT_AVAILABLE, "unable to start IntruderManager, LocalDB unavailable" );
-            LOGGER.error( errorInformation.toDebugStr() );
+            LOGGER.error( () -> errorInformation.toDebugStr() );
             startupError = errorInformation;
             status = STATUS.CLOSED;
             return;
@@ -184,7 +184,7 @@ public class IntruderManager implements PwmService
                     }
                     catch ( final Exception e )
                     {
-                        LOGGER.error( "error cleaning recordStore: " + e.getMessage(), e );
+                        LOGGER.error( () -> "error cleaning recordStore: " + e.getMessage(), e );
                     }
                 }
             }, 1000, cleanerRunFrequency );
@@ -198,7 +198,7 @@ public class IntruderManager implements PwmService
         catch ( final Exception e )
         {
             final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_SERVICE_NOT_AVAILABLE, "unexpected error starting intruder manager: " + e.getMessage() );
-            LOGGER.error( errorInformation.toDebugStr() );
+            LOGGER.error( () -> errorInformation.toDebugStr() );
             startupError = errorInformation;
             close();
         }
@@ -373,7 +373,7 @@ public class IntruderManager implements PwmService
             }
             catch ( final Exception e )
             {
-                LOGGER.error( "error examining address: " + subject );
+                LOGGER.error( () -> "error examining address: " + subject );
             }
         }
 
@@ -489,7 +489,7 @@ public class IntruderManager implements PwmService
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( "unable to send intruder mail, can't read userDN/ldapProfile from stored record: " + e.getMessage() );
+                LOGGER.error( () -> "unable to send intruder mail, can't read userDN/ldapProfile from stored record: " + e.getMessage() );
             }
         }
     }
@@ -547,14 +547,14 @@ public class IntruderManager implements PwmService
         {
         }
 
-        public void markAddressAndSession( final PwmSession pwmSession )
+        public void markAddressAndSession( final PwmRequest pwmRequest )
                 throws PwmUnrecoverableException
         {
-            if ( pwmSession != null )
+            if ( pwmRequest != null )
             {
-                final String subject = pwmSession.getSessionStateBean().getSrcAddress();
-                pwmSession.getSessionStateBean().incrementIntruderAttempts();
-                mark( RecordType.ADDRESS, subject, pwmSession.getLabel() );
+                final String subject = pwmRequest.getPwmSession().getSessionStateBean().getSrcAddress();
+                pwmRequest.getPwmSession().getSessionStateBean().incrementIntruderAttempts();
+                mark( RecordType.ADDRESS, subject, pwmRequest.getLabel() );
             }
         }
 
@@ -595,13 +595,13 @@ public class IntruderManager implements PwmService
             }
         }
 
-        public void markUserIdentity( final UserIdentity userIdentity, final PwmSession pwmSession )
+        public void markUserIdentity( final UserIdentity userIdentity, final PwmRequest pwmRequest )
                 throws PwmUnrecoverableException
         {
             if ( userIdentity != null )
             {
                 final String subject = userIdentity.toDelimitedKey();
-                mark( RecordType.USER_ID, subject, pwmSession.getLabel() );
+                mark( RecordType.USER_ID, subject, pwmRequest.getLabel() );
             }
         }
 
@@ -709,7 +709,7 @@ public class IntruderManager implements PwmService
         }
         catch ( final PwmUnrecoverableException e )
         {
-            LOGGER.error( "error reading user info while sending intruder notice for user " + userIdentity + ", error: " + e.getMessage() );
+            LOGGER.error( () -> "error reading user info while sending intruder notice for user " + userIdentity + ", error: " + e.getMessage() );
         }
 
     }

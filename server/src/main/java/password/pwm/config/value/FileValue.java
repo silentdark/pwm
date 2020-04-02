@@ -22,6 +22,7 @@ package password.pwm.config.value;
 
 import lombok.Builder;
 import lombok.Value;
+import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.StoredValue;
 import password.pwm.config.stored.StoredConfigXmlConstants;
@@ -52,7 +53,6 @@ public class FileValue extends AbstractValue implements StoredValue
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( FileValue.class );
 
-    private static final int ENCODING_LINE_LENGTH = 120;
     private static final String XML_ELEMENT_FILE_INFORMATION = "FileInformation";
     private static final String XML_ELEMENT_FILE_CONTENT = "FileContent";
 
@@ -131,7 +131,7 @@ public class FileValue extends AbstractValue implements StoredValue
                             }
                             catch ( final IOException e )
                             {
-                                LOGGER.error( "error reading file contents item: " + e.getMessage(), e );
+                                LOGGER.error( () -> "error reading file contents item: " + e.getMessage(), e );
                             }
                         }
                     }
@@ -164,12 +164,12 @@ public class FileValue extends AbstractValue implements StoredValue
             try
             {
                 final String encodedLineBreaks = StringUtil.insertRepeatedLineBreaks(
-                        fileContent.toEncodedString(), ENCODING_LINE_LENGTH );
+                        fileContent.toEncodedString(), PwmConstants.XML_OUTPUT_LINE_WRAP_LENGTH );
                 fileContentElement.addText( encodedLineBreaks );
             }
             catch ( final IOException e )
             {
-                LOGGER.error( "unexpected error writing setting to xml, IO error during base64 encoding: " + e.getMessage() );
+                LOGGER.error( () -> "unexpected error writing setting to xml, IO error during base64 encoding: " + e.getMessage() );
             }
             valueElement.addContent( fileContentElement );
 

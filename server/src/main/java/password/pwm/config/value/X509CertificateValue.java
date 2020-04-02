@@ -20,6 +20,7 @@
 
 package password.pwm.config.value;
 
+import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.StoredValue;
 import password.pwm.config.stored.StoredConfigXmlConstants;
@@ -69,7 +70,7 @@ public class X509CertificateValue extends AbstractValue implements StoredValue
                     }
                     catch ( final Exception e )
                     {
-                        LOGGER.error( "error decoding certificate: " + e.getMessage() );
+                        LOGGER.error( () -> "error decoding certificate: " + e.getMessage() );
                     }
                 }
                 return new X509CertificateValue( certificates.toArray( new X509Certificate[ certificates.size() ] ) );
@@ -116,12 +117,12 @@ public class X509CertificateValue extends AbstractValue implements StoredValue
             try
             {
                 final String b64Value = X509Utils.certificateToBase64( value );
-                final String splitValue = StringUtil.insertRepeatedLineBreaks( b64Value, 80 );
+                final String splitValue = StringUtil.insertRepeatedLineBreaks( b64Value, PwmConstants.XML_OUTPUT_LINE_WRAP_LENGTH );
                 valueElement.addText( splitValue );
             }
             catch ( final CertificateEncodingException e )
             {
-                LOGGER.error( "error encoding certificate: " + e.getMessage() );
+                LOGGER.error( () -> "error encoding certificate: " + e.getMessage() );
             }
             returnList.add( valueElement );
         }
@@ -161,7 +162,7 @@ public class X509CertificateValue extends AbstractValue implements StoredValue
             }
             catch ( final PwmUnrecoverableException | CertificateEncodingException e )
             {
-                LOGGER.warn( "error generating hash for certificate: " + e.getMessage() );
+                LOGGER.warn( () -> "error generating hash for certificate: " + e.getMessage() );
             }
         }
         return sb.toString();

@@ -118,40 +118,6 @@ public class PwmApplication
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmApplication.class );
     private static final String DEFAULT_INSTANCE_ID = "-1";
 
-    public enum AppAttribute
-    {
-        INSTANCE_ID( "context_instanceID" ),
-        INSTALL_DATE( "DB_KEY_INSTALL_DATE" ),
-        CONFIG_HASH( "configurationSettingHash" ),
-        LAST_LDAP_ERROR( "lastLdapError" ),
-        // TOKEN_COUNTER( "tokenCounter" ), deprecated
-        REPORT_STATUS( "reporting.status" ),
-        // REPORT_CLEAN_FLAG("reporting.cleanFlag"), deprecated
-        SMS_ITEM_COUNTER( "smsQueue.itemCount" ),
-        EMAIL_ITEM_COUNTER( "itemQueue.itemCount" ),
-        LOCALDB_IMPORT_STATUS( "localDB.import.status" ),
-        WORDLIST_METADATA( "wordlist.metadata" ),
-        SEEDLIST_METADATA( "seedlist.metadata" ),
-        HTTPS_SELF_CERT( "https.selfCert" ),
-        CONFIG_LOGIN_HISTORY( "config.loginHistory" ),
-        LOCALDB_LOGGER_STORAGE_FORMAT( "localdb.logger.storage.format" ),
-
-        TELEMETRY_LAST_PUBLISH_TIMESTAMP( "telemetry.lastPublish.timestamp" );
-
-        private final String key;
-
-        AppAttribute( final String key )
-        {
-            this.key = key;
-        }
-
-        public String getKey( )
-        {
-            return key;
-        }
-    }
-
-
     private String instanceID = DEFAULT_INSTANCE_ID;
     private String runtimeNonce = PwmRandom.getInstance().randomUUID().toString();
 
@@ -169,11 +135,12 @@ public class PwmApplication
 
     private PwmScheduler pwmScheduler;
 
-    public PwmApplication( final PwmEnvironment pwmEnvironment )
+    private PwmApplication( final PwmEnvironment pwmEnvironment, final LocalDB localDB )
             throws PwmUnrecoverableException
     {
-        pwmEnvironment.verifyIfApplicationPathIsSetProperly();
+        this.localDB = localDB;
         this.pwmEnvironment = pwmEnvironment;
+        pwmEnvironment.verifyIfApplicationPathIsSetProperly();
 
         try
         {
@@ -181,9 +148,19 @@ public class PwmApplication
         }
         catch ( final PwmUnrecoverableException e )
         {
-            LOGGER.fatal( e.getMessage() );
+            LOGGER.fatal( () -> e.getMessage() );
             throw e;
         }
+    }
+
+    public static PwmApplication createPwmApplication( final PwmEnvironment pwmEnvironment ) throws PwmUnrecoverableException
+    {
+        return new PwmApplication( pwmEnvironment, null );
+    }
+
+    public static PwmApplication createPwmApplication( final PwmEnvironment pwmEnvironment, final LocalDB localDB ) throws PwmUnrecoverableException
+    {
+        return new PwmApplication( pwmEnvironment, localDB );
     }
 
     private void initialize( )
@@ -221,7 +198,7 @@ public class PwmApplication
                     break;
 
                 case ERROR:
-                    LOGGER.fatal( "starting up in ERROR mode! Check log or health check information for cause" );
+                    LOGGER.fatal( () -> "starting up in ERROR mode! Check log or health check information for cause" );
                     break;
 
                 default:
@@ -261,11 +238,14 @@ public class PwmApplication
         {
             if ( getApplicationMode() == PwmApplicationMode.ERROR || getApplicationMode() == PwmApplicationMode.NEW )
             {
-                LOGGER.warn( "skipping LocalDB open due to application mode " + getApplicationMode() );
+                LOGGER.warn( () -> "skipping LocalDB open due to application mode " + getApplicationMode() );
             }
             else
             {
-                this.localDB = Initializer.initializeLocalDB( this );
+                if ( localDB == null )
+                {
+                    this.localDB = Initializer.initializeLocalDB( this, pwmEnvironment );
+                }
             }
         }
 
@@ -313,7 +293,7 @@ public class PwmApplication
         }
         catch ( final PwmException e )
         {
-            LOGGER.error( "error outputting log to debug: " + e.getMessage() );
+            LOGGER.error( () -> "error outputting log to debug: " + e.getMessage() );
         }
 
 
@@ -346,7 +326,7 @@ public class PwmApplication
         }
         catch ( final PwmException e )
         {
-            LOGGER.warn( "unable to submit start alert event " + e.getMessage() );
+            LOGGER.warn( () -> "unable to submit start alert event " + e.getMessage() );
         }
 
         try
@@ -356,7 +336,7 @@ public class PwmApplication
         }
         catch ( final Exception e )
         {
-            LOGGER.error( "error generating about application bean: " + e.getMessage(), e );
+            LOGGER.error( () -> "error generating about application bean: " + e.getMessage(), e );
         }
 
         try
@@ -365,7 +345,7 @@ public class PwmApplication
         }
         catch ( final Exception e )
         {
-            LOGGER.warn( "error while clearing configmanager-intruder-username from intruder table: " + e.getMessage() );
+            LOGGER.warn( () -> "error while clearing configmanager-intruder-username from intruder table: " + e.getMessage() );
         }
 
         if ( !pwmEnvironment.isInternalRuntimeInstance() )
@@ -455,13 +435,13 @@ public class PwmApplication
                     tomcatSourceFile = new File( tomcatSourceFileStr );
                     if ( !tomcatSourceFile.exists() )
                     {
-                        LOGGER.error( "can not output tomcat configuration file, source file does not exist: " + tomcatSourceFile.getAbsolutePath() );
+                        LOGGER.error( () -> "can not output tomcat configuration file, source file does not exist: " + tomcatSourceFile.getAbsolutePath() );
                         return;
                     }
                 }
                 else
                 {
-                    LOGGER.error( "can not output tomcat configuration file, source file parameter '"
+                    LOGGER.error( () -> "can not output tomcat configuration file, source file parameter '"
                             + PwmEnvironment.ApplicationParameter.AutoWriteTomcatConfSourceFile.toString() + "' is not specified." );
                     return;
                 }
@@ -700,7 +680,7 @@ public class PwmApplication
             }
             catch ( final Exception e )
             {
-                LOGGER.error( "error retrieving installation date from localDB: " + e.getMessage() );
+                LOGGER.error( () -> "error retrieving installation date from localDB: " + e.getMessage() );
             }
         }
         return Instant.now();
@@ -785,7 +765,7 @@ public class PwmApplication
         final SmsQueueManager smsQueue = getSmsQueue();
         if ( smsQueue == null )
         {
-            LOGGER.error( sessionLabel, "SMS queue is unavailable, unable to send SMS to: " + to );
+            LOGGER.error( sessionLabel, () -> "SMS queue is unavailable, unable to send SMS to: " + to );
             return;
         }
 
@@ -801,15 +781,20 @@ public class PwmApplication
         }
         catch ( final PwmUnrecoverableException e )
         {
-            LOGGER.warn( "unable to add sms to queue: " + e.getMessage() );
+            LOGGER.warn( () -> "unable to add sms to queue: " + e.getMessage() );
         }
     }
 
     public void shutdown( )
     {
+        shutdown( true );
+    }
+
+    public void shutdown( final boolean leaveLocalDbOpen )
+    {
         pwmScheduler.shutdown();
 
-        LOGGER.warn( "shutting down" );
+        LOGGER.warn( () -> "shutting down" );
         {
             // send system audit event
             try
@@ -825,7 +810,7 @@ public class PwmApplication
             }
             catch ( final PwmException e )
             {
-                LOGGER.warn( "unable to submit shutdown alert event " + e.getMessage() );
+                LOGGER.warn( () -> "unable to submit shutdown alert event " + e.getMessage() );
             }
         }
 
@@ -841,12 +826,16 @@ public class PwmApplication
             }
             catch ( final Exception e )
             {
-                LOGGER.error( "error closing localDBLogger: " + e.getMessage(), e );
+                LOGGER.error( () -> "error closing localDBLogger: " + e.getMessage(), e );
             }
             localDBLogger = null;
         }
 
-        if ( localDB != null )
+        if ( leaveLocalDbOpen )
+        {
+            LOGGER.trace( () -> "skipping close of LocalDB (restart request)" );
+        }
+        else if ( localDB != null )
         {
             try
             {
@@ -855,7 +844,7 @@ public class PwmApplication
             }
             catch ( final Exception e )
             {
-                LOGGER.fatal( "error closing localDB: " + e, e );
+                LOGGER.fatal( () -> "error closing localDB: " + e, e );
             }
             localDB = null;
         }
@@ -882,11 +871,10 @@ public class PwmApplication
 
     private static class Initializer
     {
-
-        public static LocalDB initializeLocalDB( final PwmApplication pwmApplication ) throws PwmUnrecoverableException
+        public static LocalDB initializeLocalDB( final PwmApplication pwmApplication, final PwmEnvironment pwmEnvironment ) throws PwmUnrecoverableException
         {
             final File databaseDirectory;
-            // see if META-INF isn't already there, then use WEB-INF.
+
             try
             {
                 final String localDBLocationSetting = pwmApplication.getConfig().readAppProperty( AppProperty.LOCALDB_LOCATION );
@@ -895,7 +883,7 @@ public class PwmApplication
             catch ( final Exception e )
             {
                 pwmApplication.lastLocalDBFailure = new ErrorInformation( PwmError.ERROR_LOCALDB_UNAVAILABLE, "error locating configured LocalDB directory: " + e.getMessage() );
-                LOGGER.warn( pwmApplication.lastLocalDBFailure.toDebugStr() );
+                LOGGER.warn( () -> pwmApplication.lastLocalDBFailure.toDebugStr() );
                 throw new PwmUnrecoverableException( pwmApplication.lastLocalDBFailure );
             }
 
@@ -905,12 +893,12 @@ public class PwmApplication
             try
             {
                 final boolean readOnly = pwmApplication.getApplicationMode() == PwmApplicationMode.READ_ONLY;
-                return LocalDBFactory.getInstance( databaseDirectory, readOnly, pwmApplication, pwmApplication.getConfig() );
+                return LocalDBFactory.getInstance( databaseDirectory, readOnly, pwmEnvironment, pwmApplication.getConfig() );
             }
             catch ( final Exception e )
             {
                 pwmApplication.lastLocalDBFailure = new ErrorInformation( PwmError.ERROR_LOCALDB_UNAVAILABLE, "unable to initialize LocalDB: " + e.getMessage() );
-                LOGGER.warn( pwmApplication.lastLocalDBFailure.toDebugStr() );
+                LOGGER.warn( () -> pwmApplication.lastLocalDBFailure.toDebugStr() );
                 throw new PwmUnrecoverableException( pwmApplication.lastLocalDBFailure );
             }
         }
@@ -930,7 +918,7 @@ public class PwmApplication
     {
         if ( localDB == null || localDB.status() != LocalDB.Status.OPEN )
         {
-            LOGGER.error( "error retrieving key '" + appAttribute.getKey() + "', localDB unavailable: " );
+            LOGGER.error( () -> "error retrieving key '" + appAttribute.getKey() + "', localDB unavailable: " );
             return null;
         }
 
@@ -946,7 +934,7 @@ public class PwmApplication
         }
         catch ( final Exception e )
         {
-            LOGGER.error( "error retrieving key '" + appAttribute.getKey() + "' value from localDB: " + e.getMessage() );
+            LOGGER.error( () -> "error retrieving key '" + appAttribute.getKey() + "' value from localDB: " + e.getMessage() );
         }
         return null;
     }
@@ -955,7 +943,7 @@ public class PwmApplication
     {
         if ( localDB == null || localDB.status() != LocalDB.Status.OPEN )
         {
-            LOGGER.error( "error writing key '" + appAttribute.getKey() + "', localDB unavailable: " );
+            LOGGER.error( () -> "error writing key '" + appAttribute.getKey() + "', localDB unavailable: " );
             return;
         }
 
@@ -978,14 +966,14 @@ public class PwmApplication
         }
         catch ( final Exception e )
         {
-            LOGGER.error( "error retrieving key '" + appAttribute.getKey() + "' installation date from localDB: " + e.getMessage() );
+            LOGGER.error( () -> "error retrieving key '" + appAttribute.getKey() + "' installation date from localDB: " + e.getMessage() );
             try
             {
                 localDB.remove( LocalDB.DB.PWM_META, appAttribute.getKey() );
             }
             catch ( final Exception e2 )
             {
-                LOGGER.error( "error removing bogus appAttribute value for key " + appAttribute.getKey() + ", error: " + localDB );
+                LOGGER.error( () -> "error removing bogus appAttribute value for key " + appAttribute.getKey() + ", error: " + localDB );
             }
         }
     }

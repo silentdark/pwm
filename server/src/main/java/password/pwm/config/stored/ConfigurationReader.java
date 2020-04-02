@@ -20,6 +20,7 @@
 
 package password.pwm.config.stored;
 
+import password.pwm.AppAttribute;
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.PwmApplicationMode;
@@ -85,7 +86,7 @@ public class ConfigurationReader
         catch ( final PwmUnrecoverableException e )
         {
             this.configFileError = e.getErrorInformation();
-            LOGGER.warn( "error reading configuration file: " + e.getMessage() );
+            LOGGER.warn( () -> "error reading configuration file: " + e.getMessage() );
         }
 
         if ( storedConfiguration == null )
@@ -124,7 +125,7 @@ public class ConfigurationReader
 
         if ( !configFile.exists() )
         {
-            LOGGER.warn( "configuration file '" + configFile.getAbsolutePath() + "' does not exist" );
+            LOGGER.warn( () -> "configuration file '" + configFile.getAbsolutePath() + "' does not exist" );
             return null;
         }
 
@@ -251,7 +252,7 @@ public class ConfigurationReader
             }
             catch ( final Exception e )
             {
-                LOGGER.error( sessionLabel, "error trying to parse previous config epoch property: " + e.getMessage() );
+                LOGGER.error( sessionLabel, () -> "error trying to parse previous config epoch property: " + e.getMessage() );
             }
 
             final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( storedConfiguration );
@@ -334,7 +335,7 @@ public class ConfigurationReader
         if ( pwmApplication != null )
         {
             final String actualChecksum = storedConfiguration.valueHash();
-            pwmApplication.writeAppAttribute( PwmApplication.AppAttribute.CONFIG_HASH, actualChecksum );
+            pwmApplication.writeAppAttribute( AppAttribute.CONFIG_HASH, actualChecksum );
         }
 
         LOGGER.trace( () -> "renaming file " + tempWriteFile.getAbsolutePath() + " to " + configFile.getAbsolutePath() );

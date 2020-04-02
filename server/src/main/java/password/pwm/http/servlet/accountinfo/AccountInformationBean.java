@@ -88,7 +88,7 @@ public class AccountInformationBean implements Serializable
         builder.formData( makeFormInfo( pwmRequest, locale ) );
         builder.auditData( makeAuditInfo(
                 pwmRequest.getPwmApplication(),
-                pwmRequest.getSessionLabel(),
+                pwmRequest.getLabel(),
                 userInfo,
                 pwmRequest.getLocale()
         ) );
@@ -103,7 +103,7 @@ public class AccountInformationBean implements Serializable
             throws PwmUnrecoverableException
     {
         final PwmPasswordPolicy pwmPasswordPolicy = pwmRequest.getPwmSession().getUserInfo().getPasswordPolicy();
-        final MacroMachine macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( pwmRequest.getPwmApplication() );
+        final MacroMachine macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine();
         final List<String> rules = PasswordRequirementsTag.getPasswordRequirementsStrings( pwmPasswordPolicy, pwmRequest.getConfig(), pwmRequest.getLocale(), macroMachine );
         return Collections.unmodifiableList( rules );
     }
@@ -156,7 +156,7 @@ public class AccountInformationBean implements Serializable
         {
             final Map<FormConfiguration, List<String>> ldapValues = FormUtility.populateFormMapFromLdap(
                     formConfiguration,
-                    pwmRequest.getSessionLabel(),
+                    pwmRequest.getLabel(),
                     pwmRequest.getPwmSession().getUserInfo(),
                     FormUtility.Flag.ReturnEmptyValues
             );

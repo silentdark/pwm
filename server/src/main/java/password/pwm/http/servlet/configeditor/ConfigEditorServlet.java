@@ -64,7 +64,6 @@ import password.pwm.http.JspUrl;
 import password.pwm.http.ProcessStatus;
 import password.pwm.http.PwmHttpRequestWrapper;
 import password.pwm.http.PwmRequest;
-import password.pwm.http.PwmSession;
 import password.pwm.http.bean.ConfigManagerBean;
 import password.pwm.http.servlet.AbstractPwmServlet;
 import password.pwm.http.servlet.ControlledPwmServlet;
@@ -295,7 +294,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         else if ( theSetting == null )
         {
             final String errorStr = "readSettingAsString request for unknown key: " + key;
-            LOGGER.warn( errorStr );
+            LOGGER.warn( () -> errorStr );
             pwmRequest.outputJsonResult( RestResultBean.fromError( new ErrorInformation( PwmError.ERROR_INTERNAL, errorStr ) ) );
             return ProcessStatus.Halt;
         }
@@ -407,7 +406,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             catch ( final Exception e )
             {
                 final String errorMsg = "error writing default value for setting " + setting.toString() + ", error: " + e.getMessage();
-                LOGGER.error( errorMsg, e );
+                LOGGER.error( () -> errorMsg, e );
                 throw new IllegalStateException( errorMsg, e );
             }
             returnMap.put( "key", key );
@@ -484,10 +483,9 @@ public class ConfigEditorServlet extends ControlledPwmServlet
 
     @ActionHandler( action = "finishEditing" )
     private ProcessStatus restFinishEditing( final PwmRequest pwmRequest )
-            throws IOException, ServletException, PwmUnrecoverableException
+            throws IOException, PwmUnrecoverableException
     {
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
-        final PwmSession pwmSession = pwmRequest.getPwmSession();
         final List<String> validationErrors = StoredConfigurationUtil.validateValues( configManagerBean.getStoredConfiguration() );
         if ( !validationErrors.isEmpty() )
         {
@@ -498,7 +496,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                     }
             );
             pwmRequest.outputJsonResult( RestResultBean.fromError( errorInfo, pwmRequest ) );
-            LOGGER.error( pwmSession, errorInfo );
+            LOGGER.error( pwmRequest, errorInfo );
             return ProcessStatus.Halt;
         }
         else
@@ -508,14 +506,14 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                 ConfigManagerServlet.saveConfiguration( pwmRequest, configManagerBean.getStoredConfiguration() );
                 configManagerBean.setStoredConfiguration( null );
                 configManagerBean.setStoredConfiguration( null );
-                LOGGER.debug( pwmSession, () -> "save configuration operation completed" );
+                LOGGER.debug( pwmRequest, () -> "save configuration operation completed" );
                 pwmRequest.outputJsonResult( RestResultBean.forSuccessMessage( pwmRequest, Message.Success_Unknown ) );
             }
             catch ( final PwmUnrecoverableException e )
             {
                 final ErrorInformation errorInfo = e.getErrorInformation();
                 pwmRequest.outputJsonResult( RestResultBean.fromError( errorInfo, pwmRequest ) );
-                LOGGER.error( pwmSession, errorInfo );
+                LOGGER.error( pwmRequest, errorInfo );
             }
         }
 
@@ -556,7 +554,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                 }
                 catch ( final Exception e )
                 {
-                    LOGGER.error( "error updating notesText: " + e.getMessage() );
+                    LOGGER.error( () -> "error updating notesText: " + e.getMessage() );
                 }
             }
             {
@@ -572,7 +570,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                     catch ( final IllegalArgumentException e )
                     {
                         modifer.writeConfigProperty( ConfigurationProperty.LDAP_TEMPLATE, PwmSettingTemplate.DEFAULT.toString() );
-                        LOGGER.error( "unknown template set request: " + requestedTemplate );
+                        LOGGER.error( () -> "unknown template set request: " + requestedTemplate );
                     }
                 }
             }
@@ -720,13 +718,13 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         else
         {
             final Map<String, String> testParams = pwmRequest.readBodyAsJsonStringMap();
-            final SmsItemBean testSmsItem = new SmsItemBean( testParams.get( "to" ), testParams.get( "message" ), pwmRequest.getSessionLabel() );
+            final SmsItemBean testSmsItem = new SmsItemBean( testParams.get( "to" ), testParams.get( "message" ), pwmRequest.getLabel() );
             try
             {
                 final String responseBody = SmsQueueManager.sendDirectMessage(
                         pwmRequest.getPwmApplication(),
                         config,
-                        pwmRequest.getSessionLabel(),
+                        pwmRequest.getLabel(),
                         testSmsItem
                 );
                 returnRecords.add( new HealthRecord( HealthStatus.INFO, HealthTopic.SMS, "message sent" ) );
@@ -753,7 +751,6 @@ public class ConfigEditorServlet extends ControlledPwmServlet
     {
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
         final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( configManagerBean.getStoredConfiguration() );
-
 
         final String key = pwmRequest.readParameterAsString( "key" );
         final PwmSetting setting = PwmSetting.forKey( key );
@@ -790,12 +787,13 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                         alias
                 );
 
+                configManagerBean.setStoredConfiguration( modifier.newStoredConfiguration() );
                 pwmRequest.outputJsonResult( RestResultBean.forSuccessMessage( pwmRequest, Message.Success_Unknown ) );
                 return ProcessStatus.Halt;
             }
             catch ( final PwmException e )
             {
-                LOGGER.error( pwmRequest, "error during https certificate upload: " + e.getMessage() );
+                LOGGER.error( pwmRequest, () -> "error during https certificate upload: " + e.getMessage() );
                 pwmRequest.respondWithError( e.getErrorInformation(), false );
                 return ProcessStatus.Halt;
             }
@@ -905,7 +903,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final LinkedHashMap<String, Object> returnMap = new LinkedHashMap<>( generateSettingData(
                 pwmRequest.getPwmApplication(),
                 configManagerBean.getStoredConfiguration(),
-                pwmRequest.getSessionLabel(),
+                pwmRequest.getLabel(),
                 pwmRequest.getLocale()
         )
         );
@@ -991,11 +989,11 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             final MacroMachine macroMachine;
             if ( pwmRequest.isAuthenticated() )
             {
-                macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( pwmRequest.getPwmApplication() );
+                macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine();
             }
             else
             {
-                macroMachine = MacroMachine.forNonUserSpecific( pwmRequest.getPwmApplication(), pwmRequest.getSessionLabel() );
+                macroMachine = MacroMachine.forNonUserSpecific( pwmRequest.getPwmApplication(), pwmRequest.getLabel() );
             }
             final String input = inputMap.get( "input" );
             final String output = macroMachine.expandMacros( input );
@@ -1092,7 +1090,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
     {
         final RestRandomPasswordServer.JsonInput jsonInput = JsonUtil.deserialize( pwmRequest.readRequestBodyAsString(), RestRandomPasswordServer.JsonInput.class );
         final RandomPasswordGenerator.RandomGeneratorConfig randomConfig = RestRandomPasswordServer.jsonInputToRandomConfig( jsonInput, PwmPasswordPolicy.defaultPolicy() );
-        final PasswordData randomPassword = RandomPasswordGenerator.createRandomPassword( pwmRequest.getSessionLabel(), randomConfig, pwmRequest.getPwmApplication() );
+        final PasswordData randomPassword = RandomPasswordGenerator.createRandomPassword( pwmRequest.getLabel(), randomConfig, pwmRequest.getPwmApplication() );
         final RestRandomPasswordServer.JsonOutput outputMap = new RestRandomPasswordServer.JsonOutput();
         outputMap.setPassword( randomPassword.getStringValue() );
 

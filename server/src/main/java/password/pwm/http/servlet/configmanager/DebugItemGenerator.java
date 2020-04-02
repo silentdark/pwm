@@ -42,6 +42,7 @@ import password.pwm.http.ContextManager;
 import password.pwm.http.servlet.admin.AppDashboardData;
 import password.pwm.http.servlet.admin.UserDebugDataBean;
 import password.pwm.http.servlet.admin.UserDebugDataReader;
+import password.pwm.ldap.LdapConnectionService;
 import password.pwm.ldap.LdapDebugDataGenerator;
 import password.pwm.svc.PwmService;
 import password.pwm.svc.cache.CacheService;
@@ -88,6 +89,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -109,6 +111,7 @@ public class DebugItemGenerator
             ThreadDumpDebugItemGenerator.class,
             FileInfoDebugItemGenerator.class,
             LogDebugItemGenerator.class,
+            LogJsonItemGenerator.class,
             LdapDebugItemGenerator.class,
             LDAPPermissionItemGenerator.class,
             LocalDBDebugGenerator.class,
@@ -117,8 +120,10 @@ public class DebugItemGenerator
             ClusterInfoDebugGenerator.class,
             CacheServiceDebugItemGenerator.class,
             RootFileSystemDebugItemGenerator.class,
+            LdapConnectionsDebugItemGenerator.class,
             StatisticsDataDebugItemGenerator.class,
-            StatisticsEpsDataDebugItemGenerator.class
+            StatisticsEpsDataDebugItemGenerator.class,
+            BuildInformationDebugItemGenerator.class
     ) );
 
     private final PwmApplication pwmApplication;
@@ -176,7 +181,7 @@ public class DebugItemGenerator
             catch ( final Throwable e )
             {
                 final String errorMsg = "unexpected error executing debug item output class '" + serviceClass.getName() + "', error: " + e.toString();
-                LOGGER.error( sessionLabel, errorMsg, e );
+                LOGGER.error( sessionLabel, () -> errorMsg, e );
                 debugGeneratorLogFile.appendLine( errorMsg );
                 final Writer stackTraceOutput = new StringWriter();
                 e.printStackTrace( new PrintWriter( stackTraceOutput ) );
@@ -198,7 +203,7 @@ public class DebugItemGenerator
         }
         catch ( final Exception e )
         {
-            LOGGER.error( "error generating " + debugFileName + ": " + e.getMessage() );
+            LOGGER.error( () -> "error generating " + debugFileName + ": " + e.getMessage() );
         }
 
         zipOutput.flush();
@@ -403,11 +408,22 @@ public class DebugItemGenerator
         @Override
         public void outputItem( final DebugItemInput debugItemInput, final OutputStream outputStream ) throws Exception
         {
+            final Locale locale = PwmConstants.DEFAULT_LOCALE;
             final PwmApplication pwmApplication = debugItemInput.getPwmApplication();
             final Set<HealthRecord> records = pwmApplication.getHealthMonitor().getHealthRecords();
-            final String recordJson = JsonUtil.serializeCollection( records, JsonUtil.Flag.PrettyPrint );
+
+            final List<HealthDebugInfo> outputInfos = new ArrayList<>();
+            records.forEach( healthRecord -> outputInfos.add( new HealthDebugInfo( healthRecord, healthRecord.getDetail( locale,  debugItemInput.obfuscatedConfiguration ) ) ) );
+            final String recordJson = JsonUtil.serializeCollection( outputInfos, JsonUtil.Flag.PrettyPrint );
             outputStream.write( recordJson.getBytes( PwmConstants.DEFAULT_CHARSET ) );
         }
+    }
+
+    @Value
+    private static class HealthDebugInfo
+    {
+        private final HealthRecord healthRecord;
+        private final String message;
     }
 
     static class ThreadDumpDebugItemGenerator implements Generator
@@ -490,7 +506,7 @@ public class DebugItemGenerator
                 }
                 catch ( final Exception e )
                 {
-                    LOGGER.error( debugItemInput.getSessionLabel(), "unable to generate webInfPath fileMd5sums during zip debug building: " + e.getMessage() );
+                    LOGGER.error( debugItemInput.getSessionLabel(), () -> "unable to generate webInfPath fileMd5sums during zip debug building: " + e.getMessage() );
                 }
             }
 
@@ -502,7 +518,7 @@ public class DebugItemGenerator
                 }
                 catch ( final Exception e )
                 {
-                    LOGGER.error( debugItemInput.getSessionLabel(), "unable to generate appPath fileMd5sums during zip debug building: " + e.getMessage() );
+                    LOGGER.error( debugItemInput.getSessionLabel(), () -> "unable to generate appPath fileMd5sums during zip debug building: " + e.getMessage() );
                 }
             }
 
@@ -554,35 +570,65 @@ public class DebugItemGenerator
         @Override
         public void outputItem( final DebugItemInput debugItemInput, final OutputStream outputStream ) throws Exception
         {
-            final PwmApplication pwmApplication = debugItemInput.getPwmApplication();
-            final long maxByteCount = JavaHelper.silentParseLong( pwmApplication.getConfig().readAppProperty( AppProperty.CONFIG_MANAGER_ZIPDEBUG_MAXLOGBYTES ), 10_000_000 );
-            final int maxSeconds = JavaHelper.silentParseInt( pwmApplication.getConfig().readAppProperty( AppProperty.CONFIG_MANAGER_ZIPDEBUG_MAXLOGSECONDS ), 60 );
-            final LocalDBSearchQuery searchParameters = LocalDBSearchQuery.builder()
-                    .minimumLevel( PwmLogLevel.TRACE )
-                    .maxEvents( Integer.MAX_VALUE )
-                    .maxQueryTime( TimeDuration.of( maxSeconds, TimeDuration.Unit.SECONDS ) )
-                    .build();
+            final Instant startTime = Instant.now();
+            final Function<PwmLogEvent, String> logEventFormatter = PwmLogEvent::toLogString;
 
-            final LocalDBSearchResults searchResults = pwmApplication.getLocalDBLogger().readStoredEvents( searchParameters );
-            final CountingOutputStream countingOutputStream = new CountingOutputStream( outputStream );
+            outputLogs( debugItemInput.getPwmApplication(), outputStream, logEventFormatter );
+            LOGGER.trace( () ->  "debug log output completed in " + TimeDuration.compactFromCurrent( startTime ) );
+        }
+    }
 
-            final Writer writer = new OutputStreamWriter( countingOutputStream, PwmConstants.DEFAULT_CHARSET );
+    static class LogJsonItemGenerator implements Generator
+    {
+        @Override
+        public String getFilename( )
+        {
+            return "debug.json";
+        }
+
+        @Override
+        public void outputItem( final DebugItemInput debugItemInput, final OutputStream outputStream ) throws Exception
+        {
+            final Instant startTime = Instant.now();
+            final Function<PwmLogEvent, String> logEventFormatter = pwmLogEvent -> JsonUtil.serialize( pwmLogEvent );
+
+            outputLogs( debugItemInput.getPwmApplication(), outputStream, logEventFormatter );
+            LOGGER.trace( () ->  "debug json output completed in " + TimeDuration.compactFromCurrent( startTime ) );
+        }
+    }
+
+    private static void outputLogs(
+            final PwmApplication pwmApplication,
+            final OutputStream outputStream,
+            final Function<PwmLogEvent, String> logEventFormatter
+    )
+            throws Exception
+    {
+        final long maxByteCount = JavaHelper.silentParseLong( pwmApplication.getConfig().readAppProperty( AppProperty.CONFIG_MANAGER_ZIPDEBUG_MAXLOGBYTES ), 10_000_000 );
+        final int maxSeconds = JavaHelper.silentParseInt( pwmApplication.getConfig().readAppProperty( AppProperty.CONFIG_MANAGER_ZIPDEBUG_MAXLOGSECONDS ), 60 );
+        final LocalDBSearchQuery searchParameters = LocalDBSearchQuery.builder()
+                .minimumLevel( PwmLogLevel.TRACE )
+                .maxEvents( Integer.MAX_VALUE )
+                .maxQueryTime( TimeDuration.of( maxSeconds, TimeDuration.Unit.SECONDS ) )
+                .build();
+
+        final LocalDBSearchResults searchResults = pwmApplication.getLocalDBLogger().readStoredEvents( searchParameters );
+        final CountingOutputStream countingOutputStream = new CountingOutputStream( outputStream );
+
+        final Writer writer = new OutputStreamWriter( countingOutputStream, PwmConstants.DEFAULT_CHARSET );
+        {
+            while ( searchResults.hasNext() && countingOutputStream.getByteCount() < maxByteCount )
             {
-                while ( searchResults.hasNext() && countingOutputStream.getByteCount() < maxByteCount )
-                {
-                    final PwmLogEvent event = searchResults.next();
-                    writer.write( event.toLogString() );
-                    writer.write( "\n" );
-                }
-
-                final String outputMsg = "debug output " + searchResults.getReturnedEvents() + " lines in " + searchResults.getSearchTime().asCompactString();
-                writer.write( "\n#" + outputMsg + "\n" );
-                LOGGER.trace( () ->  outputMsg );
+                final PwmLogEvent event = searchResults.next();
+                final String output = logEventFormatter.apply( event );
+                writer.write( output );
+                writer.write( "\n" );
             }
 
-            // do not close writer because underlying stream should not be closed.
-            writer.flush();
         }
+
+        // do not close writer because underlying stream should not be closed.
+        writer.flush();
     }
 
     static class LDAPPermissionItemGenerator implements Generator
@@ -773,6 +819,25 @@ public class DebugItemGenerator
         }
     }
 
+    static class LdapConnectionsDebugItemGenerator implements Generator
+    {
+        @Override
+        public String getFilename()
+        {
+            return "ldap-connections.json";
+        }
+
+        @Override
+        public void outputItem( final DebugItemInput debugItemInput, final OutputStream outputStream ) throws Exception
+        {
+            final PwmApplication pwmApplication = debugItemInput.getPwmApplication();
+            final List<LdapConnectionService.ConnectionInfo> connectionInfos = pwmApplication.getLdapConnectionService().getConnectionInfos();
+            final Writer writer = new OutputStreamWriter( outputStream, PwmConstants.DEFAULT_CHARSET );
+            writer.write( JsonUtil.serializeCollection( connectionInfos, JsonUtil.Flag.PrettyPrint ) );
+            writer.flush();
+        }
+    }
+
     static class StatisticsEpsDataDebugItemGenerator implements Generator
     {
         @Override
@@ -815,6 +880,23 @@ public class DebugItemGenerator
                 }
             }
             csvPrinter.flush();
+        }
+    }
+
+    static class BuildInformationDebugItemGenerator implements Generator
+    {
+        @Override
+        public String getFilename( )
+        {
+            return "build.properties";
+        }
+
+        @Override
+        public void outputItem( final DebugItemInput debugItemInput, final OutputStream outputStream ) throws Exception
+        {
+            final Properties outputProps = new JavaHelper.SortedProperties();
+            outputProps.putAll( PwmConstants.BUILD_MANIFEST );
+            outputProps.store( outputStream, JavaHelper.toIsoDate( Instant.now() ) );
         }
     }
 

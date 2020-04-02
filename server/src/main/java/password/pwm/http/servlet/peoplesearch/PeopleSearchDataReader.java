@@ -302,7 +302,7 @@ class PeopleSearchDataReader
         }
         catch ( final Exception e )
         {
-            LOGGER.warn( pwmRequest, "error de-serializing configured app property json for detail links: " + e.getMessage() );
+            LOGGER.warn( pwmRequest, () -> "error de-serializing configured app property json for detail links: " + e.getMessage() );
             return Collections.emptyList();
         }
         final List<LinkReferenceBean> returnList = new ArrayList<>();
@@ -571,7 +571,7 @@ class PeopleSearchDataReader
                         }
                         else
                         {
-                            bean.setValues( Collections.<String>emptyList() );
+                            bean.setValues( Collections.emptyList() );
                         }
                     }
                 }
@@ -592,12 +592,12 @@ class PeopleSearchDataReader
         final ChaiProvider chaiProvider = pwmRequest.getPwmApplication().getProxiedChaiUser( userIdentity ).getChaiProvider();
         final UserInfo userInfo = UserInfoFactory.newUserInfo(
                 pwmRequest.getPwmApplication(),
-                pwmRequest.getSessionLabel(),
+                pwmRequest.getLabel(),
                 locale,
                 userIdentity,
                 chaiProvider
         );
-        return MacroMachine.forUser( pwmRequest.getPwmApplication(), pwmRequest.getSessionLabel(), userInfo, null );
+        return MacroMachine.forUser( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userInfo, null );
     }
 
     void checkIfUserIdentityViewable(
@@ -615,7 +615,7 @@ class PeopleSearchDataReader
                 filterString = filterString.replace( "**", "*" );
             }
 
-            return LdapPermissionTester.testQueryMatch( pwmRequest.getPwmApplication(), pwmRequest.getSessionLabel(), userIdentity, filterString );
+            return LdapPermissionTester.testQueryMatch( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userIdentity, filterString );
         };
 
         final boolean result = storeDataInCache( CacheIdentifier.checkIfViewable, userIdentity.toDelimitedKey(), Boolean.class, cacheLoader );
@@ -624,7 +624,7 @@ class PeopleSearchDataReader
             if ( !result )
             {
                 final String msg = "attempt to read data of out-of-scope userDN '" + userIdentity.toDisplayString() + "' by user " + userIdentity.toDisplayString();
-                LOGGER.warn( pwmRequest, msg );
+                LOGGER.warn( pwmRequest, () -> msg );
                 throw PwmUnrecoverableException.newException( PwmError.ERROR_SERVICE_NOT_AVAILABLE, msg );
             }
         }
@@ -693,7 +693,7 @@ class PeopleSearchDataReader
         final boolean useProxy = useProxy();
         return useProxy
                 ? pwmRequest.getPwmApplication().getProxiedChaiUser( userIdentity )
-                : pwmRequest.getPwmSession().getSessionManager().getActor( pwmRequest.getPwmApplication(), userIdentity );
+                : pwmRequest.getPwmSession().getSessionManager().getActor( userIdentity );
     }
 
     private UserSearchResults doDetailLookup(
@@ -731,7 +731,7 @@ class PeopleSearchDataReader
         }
         catch ( final ChaiException e )
         {
-            LOGGER.error( "unexpected error during detail lookup of '" + userIdentity + "', error: " + e.getMessage() );
+            LOGGER.error( () -> "unexpected error during detail lookup of '" + userIdentity + "', error: " + e.getMessage() );
             throw PwmUnrecoverableException.fromChaiException( e );
         }
     }
@@ -817,13 +817,13 @@ class PeopleSearchDataReader
             final List<FormConfiguration> searchForm = peopleSearchConfiguration.getResultForm();
             final int maxResults = peopleSearchConfiguration.getResultLimit();
             final Locale locale = pwmRequest.getLocale();
-            results = userSearchEngine.performMultiUserSearchFromForm( locale, searchConfiguration, maxResults, searchForm, pwmRequest.getSessionLabel() );
+            results = userSearchEngine.performMultiUserSearchFromForm( locale, searchConfiguration, maxResults, searchForm, pwmRequest.getLabel() );
             sizeExceeded = results.isSizeExceeded();
         }
         catch ( final PwmOperationalException e )
         {
             final ErrorInformation errorInformation = e.getErrorInformation();
-            LOGGER.error( pwmRequest.getSessionLabel(), errorInformation.toDebugStr() );
+            LOGGER.error( pwmRequest.getLabel(), () -> errorInformation.toDebugStr() );
             throw new PwmUnrecoverableException( errorInformation );
         }
 
@@ -992,7 +992,7 @@ class PeopleSearchDataReader
             }
             catch ( final Exception e )
             {
-                LOGGER.error( pwmRequest, "error exporting csv row data: " + e.getMessage() );
+                LOGGER.error( pwmRequest, () -> "error exporting csv row data: " + e.getMessage() );
             }
         }
 

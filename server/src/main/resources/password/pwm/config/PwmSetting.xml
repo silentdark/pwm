@@ -579,7 +579,7 @@
             <value><![CDATA[@LDAP:DN@]]></value>
         </default>
     </setting>
-    <setting hidden="true" key="ldap.search.timeoutSeconds" level="2">
+    <setting hidden="false" key="ldap.search.timeoutSeconds" level="2">
         <default>
             <value>30</value>
         </default>
@@ -980,9 +980,7 @@
         </properties>
     </setting>
     <setting hidden="false" key="sms.responseOkRegex" level="2">
-        <default>
-            <value />
-        </default>
+        <default/>
     </setting>
     <setting hidden="false" key="sms.senderID" level="1">
         <default>

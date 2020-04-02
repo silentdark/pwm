@@ -36,6 +36,7 @@ import password.pwm.util.logging.PwmLogger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 class DataStoreRecordStore implements RecordStore
 {
@@ -68,7 +69,7 @@ class DataStoreRecordStore implements RecordStore
         }
         catch ( final PwmDataStoreException e )
         {
-            LOGGER.error( "error reading stored intruder record: " + e.getMessage() );
+            LOGGER.error( () -> "error reading stored intruder record: " + e.getMessage() );
             if ( e.getError() == PwmError.ERROR_DB_UNAVAILABLE )
             {
                 throw new PwmUnrecoverableException( e.getErrorInformation() );
@@ -87,7 +88,7 @@ class DataStoreRecordStore implements RecordStore
         }
         catch ( final Exception e )
         {
-            LOGGER.error( "error decoding IntruderRecord:" + e.getMessage() );
+            LOGGER.error( () -> "error decoding IntruderRecord:" + e.getMessage() );
         }
 
         //read failed, try to delete record
@@ -132,9 +133,9 @@ class DataStoreRecordStore implements RecordStore
 
     private class RecordIterator implements ClosableIterator<IntruderRecord>
     {
-        private final ClosableIterator<String> dbIterator;
+        private final ClosableIterator<Map.Entry<String, String>> dbIterator;
 
-        private RecordIterator( final ClosableIterator<String> dbIterator )
+        private RecordIterator( final ClosableIterator<Map.Entry<String, String>> dbIterator )
         {
             this.dbIterator = dbIterator;
         }
@@ -148,7 +149,7 @@ class DataStoreRecordStore implements RecordStore
         @Override
         public IntruderRecord next( )
         {
-            final String key = dbIterator.next();
+            final String key = dbIterator.next().getKey();
             try
             {
                 return read( key );
@@ -204,7 +205,7 @@ class DataStoreRecordStore implements RecordStore
             }
             catch ( final PwmException e )
             {
-                LOGGER.error( "unable to perform removal of identified stale records: " + e.getMessage() );
+                LOGGER.error( () -> "unable to perform removal of identified stale records: " + e.getMessage() );
             }
             recordsRemoved += recordsToRemove.size();
             recordsToRemove.clear();
@@ -220,11 +221,11 @@ class DataStoreRecordStore implements RecordStore
     private List<String> discoverPurgableKeys( final TimeDuration maxRecordAge )
     {
         final List<String> recordsToRemove = new ArrayList<>();
-        try ( ClosableIterator<String> dbIterator = dataStore.iterator() )
+        try ( ClosableIterator<Map.Entry<String, String>> dbIterator = dataStore.iterator() )
         {
             while ( intruderManager.status() == PwmService.STATUS.OPEN && dbIterator.hasNext() && recordsToRemove.size() < MAX_REMOVALS_PER_CYCLE )
             {
-                final String key = dbIterator.next();
+                final String key = dbIterator.next().getKey();
                 final IntruderRecord record = read( key );
                 if ( record != null )
                 {
@@ -241,7 +242,7 @@ class DataStoreRecordStore implements RecordStore
         }
         catch ( final PwmDataStoreException | PwmUnrecoverableException e )
         {
-            LOGGER.error( "unable to perform intruder table cleanup: " + e.getMessage() );
+            LOGGER.error( () -> "unable to perform intruder table cleanup: " + e.getMessage() );
         }
         return recordsToRemove;
     }

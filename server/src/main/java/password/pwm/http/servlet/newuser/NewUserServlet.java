@@ -273,7 +273,7 @@ public class NewUserServlet extends ControlledPwmServlet
             {
                 final MacroMachine macroMachine = NewUserUtils.createMacroMachineForNewUser(
                         pwmApplication,
-                        pwmRequest.getSessionLabel(),
+                        pwmRequest.getLabel(),
                         newUserBean.getNewUserForm(),
                         null
                 );
@@ -295,12 +295,12 @@ public class NewUserServlet extends ControlledPwmServlet
         }
         catch ( final PwmOperationalException e )
         {
-            LOGGER.error( pwmRequest, "error during user creation: " + e.getMessage() );
+            LOGGER.error( pwmRequest, () -> "error during user creation: " + e.getMessage() );
             if ( newUserProfile.readSettingAsBoolean( PwmSetting.NEWUSER_DELETE_ON_FAIL ) )
             {
                 NewUserUtils.deleteUserAccount( newUserDN, pwmRequest );
             }
-            LOGGER.error( pwmSession, e.getErrorInformation().toDebugStr() );
+            LOGGER.error( pwmRequest, () -> e.getErrorInformation().toDebugStr() );
             pwmRequest.respondWithError( e.getErrorInformation() );
         }
     }
@@ -450,7 +450,6 @@ public class NewUserServlet extends ControlledPwmServlet
     private ProcessStatus handleEnterCodeRequest( final PwmRequest pwmRequest )
             throws PwmUnrecoverableException, IOException, ServletException, ChaiUnavailableException
     {
-        final PwmSession pwmSession = pwmRequest.getPwmSession();
         final NewUserBean newUserBean = getNewUserBean( pwmRequest );
         final NewUserProfile newUserProfile = getNewUserProfile( pwmRequest );
         final String userEnteredCode = pwmRequest.readParameterAsString( PwmConstants.PARAM_TOKEN );
@@ -505,7 +504,7 @@ public class NewUserServlet extends ControlledPwmServlet
                     }
                     catch ( final PwmUnrecoverableException | PwmOperationalException e )
                     {
-                        LOGGER.error( pwmRequest, "while reading stored form data in token payload, form validation error occurred: " + e.getMessage() );
+                        LOGGER.error( pwmRequest, () -> "while reading stored form data in token payload, form validation error occurred: " + e.getMessage() );
                         errorInformation = e.getErrorInformation();
                     }
                 }
@@ -527,7 +526,7 @@ public class NewUserServlet extends ControlledPwmServlet
 
         if ( errorInformation != null )
         {
-            LOGGER.debug( pwmSession, errorInformation );
+            LOGGER.debug( pwmRequest, errorInformation );
             setLastError( pwmRequest, errorInformation );
             return ProcessStatus.Continue;
         }
@@ -719,7 +718,7 @@ public class NewUserServlet extends ControlledPwmServlet
             final boolean forceLogoutOnChange = newUserProfile.readSettingAsBoolean( PwmSetting.NEWUSER_LOGOUT_AFTER_CREATION );
             if ( forceLogoutOnChange )
             {
-                LOGGER.trace( pwmSession, () -> "logging out user; account created" );
+                LOGGER.trace( pwmRequest, () -> "logging out user; account created" );
                 pwmRequest.sendRedirect( PwmServletDefinition.Logout );
                 return ProcessStatus.Halt;
             }
@@ -728,7 +727,7 @@ public class NewUserServlet extends ControlledPwmServlet
         final String configuredRedirectUrl = newUserProfile.readSettingAsString( PwmSetting.NEWUSER_REDIRECT_URL );
         if ( !StringUtil.isEmpty( configuredRedirectUrl ) && StringUtil.isEmpty( pwmRequest.getPwmSession().getSessionStateBean().getForwardURL() ) )
         {
-            final MacroMachine macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( pwmRequest.getPwmApplication() );
+            final MacroMachine macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine();
             final String macroedUrl = macroMachine.expandMacros( configuredRedirectUrl );
             pwmRequest.sendRedirect( macroedUrl );
             return ProcessStatus.Halt;

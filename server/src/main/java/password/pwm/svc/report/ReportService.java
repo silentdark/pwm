@@ -20,6 +20,7 @@
 
 package password.pwm.svc.report;
 
+import password.pwm.AppAttribute;
 import password.pwm.PwmApplication;
 import password.pwm.PwmApplicationMode;
 import password.pwm.bean.SessionLabel;
@@ -130,7 +131,7 @@ public class ReportService implements PwmService
         }
         catch ( final Exception e )
         {
-            LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "unable to init cache service" );
+            LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> "unable to init cache service" );
             status = STATUS.CLOSED;
             return;
         }
@@ -168,11 +169,11 @@ public class ReportService implements PwmService
     {
         try
         {
-            pwmApplication.writeAppAttribute( PwmApplication.AppAttribute.REPORT_STATUS, reportStatus.get() );
+            pwmApplication.writeAppAttribute( AppAttribute.REPORT_STATUS, reportStatus.get() );
         }
         catch ( final Exception e )
         {
-            LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "error writing cached report dredge info into memory: " + e.getMessage() );
+            LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> "error writing cached report dredge info into memory: " + e.getMessage() );
         }
     }
 
@@ -349,7 +350,8 @@ public class ReportService implements PwmService
                     {
                         if ( executorService != null )
                         {
-                            LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "directory unavailable error during background SearchLDAP, will retry; error: " + e.getMessage() );
+                            LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL,
+                                    () -> "directory unavailable error during background SearchLDAP, will retry; error: " + e.getMessage() );
                             pwmApplication.getPwmScheduler().scheduleJob( new ReadLDAPTask(), executorService, TimeDuration.of( 10, TimeDuration.Unit.MINUTES ) );
                             errorProcessed = true;
                         }
@@ -358,7 +360,7 @@ public class ReportService implements PwmService
 
                 if ( !errorProcessed )
                 {
-                    LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "error during background ReadData: " + e.getMessage() );
+                    LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> "error during background ReadData: " + e.getMessage() );
                 }
             }
             finally
@@ -443,13 +445,13 @@ public class ReportService implements PwmService
                 {
                     if ( executorService != null )
                     {
-                        LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "directory unavailable error during background ReadData, will retry; error: " + e.getMessage() );
+                        LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> "directory unavailable error during background ReadData, will retry; error: " + e.getMessage() );
                         pwmApplication.getPwmScheduler().scheduleJob( new ProcessWorkQueueTask(), executorService, TimeDuration.of( 10, TimeDuration.Unit.MINUTES ) );
                     }
                 }
                 else
                 {
-                    LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "error during background ReadData: " + e.getMessage() );
+                    LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> "error during background ReadData: " + e.getMessage() );
                 }
             }
             finally
@@ -529,13 +531,25 @@ public class ReportService implements PwmService
                                 TimeDuration.of( avgTracker.avgAsLong(), TimeDuration.Unit.MILLISECONDS ).pause();
                             }
                         }
+                        catch ( final PwmUnrecoverableException e )
+                        {
+
+                        }
                         catch ( final Exception e )
                         {
                             String errorMsg = "error while updating report cache for " + userIdentity.toString() + ", cause: ";
-                            errorMsg += e instanceof PwmException ? ( ( PwmException ) e ).getErrorInformation().toDebugStr() : e.getMessage();
-                            final ErrorInformation errorInformation;
-                            errorInformation = new ErrorInformation( PwmError.ERROR_REPORTING_ERROR, errorMsg );
-                            LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, errorInformation.toDebugStr(), e );
+                            errorMsg += e instanceof PwmException
+                                    ? ( ( PwmException ) e ).getErrorInformation().toDebugStr()
+                                    : e.getMessage();
+                            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_REPORTING_ERROR, errorMsg );
+                            if ( e instanceof PwmException )
+                            {
+                                LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> errorInformation.toDebugStr() );
+                            }
+                            else
+                            {
+                                LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> errorInformation.toDebugStr(), e );
+                            }
                             reportStatus.updateAndGet( reportStatusInfo -> reportStatusInfo.toBuilder()
                                     .lastError( errorInformation )
                                     .errors( reportStatusInfo.getErrors() + 1 )
@@ -627,7 +641,7 @@ public class ReportService implements PwmService
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "error during initialization: " + e.getMessage() );
+                LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> "error during initialization: " + e.getMessage() );
                 status = STATUS.CLOSED;
                 return;
             }
@@ -645,12 +659,12 @@ public class ReportService implements PwmService
         {
             try
             {
-                final ReportStatusInfo localReportStatus = pwmApplication.readAppAttribute( PwmApplication.AppAttribute.REPORT_STATUS, ReportStatusInfo.class );
+                final ReportStatusInfo localReportStatus = pwmApplication.readAppAttribute( AppAttribute.REPORT_STATUS, ReportStatusInfo.class );
                 reportStatus.set( localReportStatus );
             }
             catch ( final Exception e )
             {
-                LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "error loading cached report status info into memory: " + e.getMessage() );
+                LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> "error loading cached report status info into memory: " + e.getMessage() );
             }
 
             boolean clearFlag = false;
@@ -663,7 +677,7 @@ public class ReportService implements PwmService
             {
                 if ( !Objects.equals( reportStatus.get().getSettingsHash(), settings.getSettingsHash() ) )
                 {
-                    LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "configuration has changed, will clear cached report data" );
+                    LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> "configuration has changed, will clear cached report data" );
                     clearFlag = true;
                 }
             }
@@ -700,7 +714,7 @@ public class ReportService implements PwmService
             }
             catch ( final LocalDBException | PwmUnrecoverableException e )
             {
-                LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, "error during clear operation: " + e.getMessage() );
+                LOGGER.error( SessionLabel.REPORTING_SESSION_LABEL, () -> "error during clear operation: " + e.getMessage() );
             }
             finally
             {

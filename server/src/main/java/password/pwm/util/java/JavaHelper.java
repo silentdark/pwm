@@ -45,8 +45,7 @@ import java.lang.management.ThreadInfo;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.ByteBuffer;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
+
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -163,6 +162,12 @@ public class JavaHelper
         return Collections.unmodifiableList( returnList );
     }
 
+    public static <E extends Enum<E>> Map<String, String> enumMapToStringMap( final Map<E, String> inputMap )
+    {
+        return Collections.unmodifiableMap( inputMap.entrySet().stream()
+                .collect( Collectors.toMap( entry -> entry.getKey().name(), Map.Entry::getValue, ( a, b ) -> b, LinkedHashMap::new ) ) );
+    }
+
     public static <E extends Enum<E>> E readEnumFromString( final Class<E> enumClass, final E defaultValue, final String input )
     {
         return readEnumFromString( enumClass, input ).orElse( defaultValue );
@@ -191,7 +196,7 @@ public class JavaHelper
         }
         catch ( final Throwable e )
         {
-            LOGGER.warn( "unexpected error translating input=" + input + " to enumClass=" + enumClass.getSimpleName() + ", error: " + e.getMessage() );
+            LOGGER.warn( () -> "unexpected error translating input=" + input + " to enumClass=" + enumClass.getSimpleName() + ", error: " + e.getMessage() );
         }
 
         return Optional.empty();
@@ -255,7 +260,7 @@ public class JavaHelper
 
         final String errorMsg = "unhandled switch statement on parameter class=" + className + ", value=" + paramValue;
         final UnsupportedOperationException exception = new UnsupportedOperationException( errorMsg );
-        LOGGER.warn( errorMsg, exception );
+        LOGGER.warn( () -> errorMsg, exception );
         throw exception;
     }
 
@@ -321,14 +326,13 @@ public class JavaHelper
             return "";
         }
 
-        final DateFormat dateFormat = new SimpleDateFormat(
+        final PwmDateFormat dateFormat = PwmDateFormat.newPwmDateFormat(
                 PwmConstants.DEFAULT_DATETIME_FORMAT_STR,
-                PwmConstants.DEFAULT_LOCALE
+                PwmConstants.DEFAULT_LOCALE,
+                PwmConstants.DEFAULT_TIMEZONE
         );
 
-        dateFormat.setTimeZone( PwmConstants.DEFAULT_TIMEZONE );
-
-        return dateFormat.format( date );
+        return dateFormat.format( date.toInstant() );
     }
 
     public static Instant parseIsoToInstant( final String input )
@@ -350,7 +354,7 @@ public class JavaHelper
         }
         catch ( final InterruptedException e )
         {
-            LOGGER.warn( "unexpected error shutting down executor service " + executor.getClass().toString() + " error: " + e.getMessage() );
+            LOGGER.warn( () -> "unexpected error shutting down executor service " + executor.getClass().toString() + " error: " + e.getMessage() );
         }
     }
 

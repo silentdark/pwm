@@ -381,12 +381,12 @@ public enum PwmSetting
             "sms.gatewayURL", PwmSettingSyntax.STRING, PwmSettingCategory.SMS_GATEWAY ),
     SMS_GATEWAY_CERTIFICATES(
             "sms.gatewayCertificates", PwmSettingSyntax.X509CERT, PwmSettingCategory.SMS_GATEWAY ),
+    SMS_GATEWAY_METHOD(
+            "sms.gatewayMethod", PwmSettingSyntax.SELECT, PwmSettingCategory.SMS_GATEWAY ),
     SMS_GATEWAY_USER(
             "sms.gatewayUser", PwmSettingSyntax.STRING, PwmSettingCategory.SMS_GATEWAY ),
     SMS_GATEWAY_PASSWORD(
             "sms.gatewayPassword", PwmSettingSyntax.PASSWORD, PwmSettingCategory.SMS_GATEWAY ),
-    SMS_GATEWAY_METHOD(
-            "sms.gatewayMethod", PwmSettingSyntax.SELECT, PwmSettingCategory.SMS_GATEWAY ),
     SMS_GATEWAY_AUTHMETHOD(
             "sms.gatewayAuthMethod", PwmSettingSyntax.SELECT, PwmSettingCategory.SMS_GATEWAY ),
     SMS_REQUEST_DATA(
@@ -1531,7 +1531,7 @@ public enum PwmSetting
                 }
                 catch ( final IllegalArgumentException e )
                 {
-                    LOGGER.error( "unknown flag for setting " + pwmSetting.getKey() + ", error: unknown flag value: " + value );
+                    LOGGER.error( () -> "unknown flag for setting " + pwmSetting.getKey() + ", error: unknown flag value: " + value );
                 }
 
             }
@@ -1701,7 +1701,7 @@ public enum PwmSetting
                 catch ( final PatternSyntaxException e )
                 {
                     final String errorMsg = "error compiling regex constraints for setting " + pwmSetting.toString() + ", error: " + e.getMessage();
-                    LOGGER.error( errorMsg, e );
+                    LOGGER.error( () -> errorMsg, e );
                     throw new IllegalStateException( errorMsg, e );
                 }
             }

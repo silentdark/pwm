@@ -54,15 +54,14 @@ public class CertificateChecker implements HealthChecker
     @Override
     public List<HealthRecord> doHealthCheck( final PwmApplication pwmApplication )
     {
-        final List<HealthRecord> records = new ArrayList<>();
-        records.addAll( doHealthCheck( pwmApplication.getConfig() ) );
+        final List<HealthRecord> records = new ArrayList<>( doHealthCheck( pwmApplication.getConfig() ) );
         try
         {
             records.addAll( doActionHealthCheck( pwmApplication.getConfig() ) );
         }
         catch ( final PwmUnrecoverableException e )
         {
-            LOGGER.error( "error while checking action certificates: " + e.getMessage(), e );
+            LOGGER.error( () -> "error while checking action certificates: " + e.getMessage(), e );
         }
         return records;
     }

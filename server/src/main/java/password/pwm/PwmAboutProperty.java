@@ -72,6 +72,8 @@ public enum PwmAboutProperty
     app_secureHashAlgorithm( null, pwmApplication -> pwmApplication.getSecureService().getDefaultHashAlgorithm().toString() ),
     app_ldapProfileCount( null, pwmApplication -> Integer.toString( pwmApplication.getConfig().getLdapProfiles().size() ) ),
     app_ldapConnectionCount( null, pwmApplication -> Integer.toString( pwmApplication.getLdapConnectionService().connectionCount() ) ),
+    app_activeSessionCount( "Active Session Count", pwmApplication -> Integer.toString( pwmApplication.getSessionTrackService().sessionCount() ) ),
+    app_activeRequestCount( "Active Request Count", pwmApplication -> Integer.toString( pwmApplication.getInprogressRequests().get() ) ),
 
     build_Time( "Build Time", pwmApplication -> PwmConstants.BUILD_TIME ),
     build_Number( "Build Number", pwmApplication -> PwmConstants.BUILD_NUMBER ),
@@ -142,8 +144,11 @@ public enum PwmAboutProperty
                 }
                 catch ( final Throwable t )
                 {
-                    aboutMap.put( pwmAboutProperty.name(), LocaleHelper.getLocalizedMessage( null, Display.Value_NotApplicable, null ) );
-                    LOGGER.trace( () -> "error generating about value for '" + pwmAboutProperty.name() + "', error: " + t.getMessage() );
+                    if ( !( t instanceof NullPointerException ) )
+                    {
+                        aboutMap.put( pwmAboutProperty.name(), LocaleHelper.getLocalizedMessage( null, Display.Value_NotApplicable, null ) );
+                        LOGGER.trace( () -> "error generating about value for '" + pwmAboutProperty.name() + "', error: " + t.getMessage() );
+                    }
                 }
             }
         }

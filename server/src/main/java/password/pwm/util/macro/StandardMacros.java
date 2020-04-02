@@ -29,20 +29,18 @@ import password.pwm.config.PwmSetting;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.ldap.UserInfo;
 import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.PwmDateFormat;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmRandom;
 
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -227,7 +225,7 @@ public abstract class StandardMacros
 
             if ( pwmApplication == null )
             {
-                LOGGER.error( "could not replace value for '" + matchValue + "', pwmApplication is null" );
+                LOGGER.error( () -> "could not replace value for '" + matchValue + "', pwmApplication is null" );
                 return "";
             }
 
@@ -252,29 +250,22 @@ public abstract class StandardMacros
         {
             final List<String> parameters = splitMacroParameters( matchValue, "CurrentTime" );
 
-            final DateFormat dateFormat;
+            final String dateFormatStr;
             if ( parameters.size() > 0 && !parameters.get( 0 ).isEmpty() )
             {
-                try
-                {
-                    dateFormat = new SimpleDateFormat( parameters.get( 0 ) );
-                }
-                catch ( final IllegalArgumentException e )
-                {
-                    throw new MacroParseException( e.getMessage() );
-                }
+                dateFormatStr = parameters.get( 0 );
             }
             else
             {
-                dateFormat = new SimpleDateFormat( PwmConstants.DEFAULT_DATETIME_FORMAT_STR );
+                dateFormatStr = PwmConstants.DEFAULT_DATETIME_FORMAT_STR;
             }
 
             final TimeZone tz;
             if ( parameters.size() > 1 && !parameters.get( 1 ).isEmpty() )
             {
                 final String desiredTz = parameters.get( 1 );
-                final List<String> avalibleIDs = Arrays.asList( TimeZone.getAvailableIDs() );
-                if ( !avalibleIDs.contains( desiredTz ) )
+                final List<String> availableIDs = Arrays.asList( TimeZone.getAvailableIDs() );
+                if ( !availableIDs.contains( desiredTz ) )
                 {
                     throw new MacroParseException( "unknown timezone" );
                 }
@@ -290,8 +281,15 @@ public abstract class StandardMacros
                 throw new MacroParseException( "too many parameters" );
             }
 
-            dateFormat.setTimeZone( tz );
-            return dateFormat.format( new Date() );
+            try
+            {
+                final PwmDateFormat pwmDateFormat = PwmDateFormat.newPwmDateFormat( dateFormatStr, PwmConstants.DEFAULT_LOCALE, tz );
+                return pwmDateFormat.format( Instant.now() );
+            }
+            catch ( final IllegalArgumentException e )
+            {
+                throw new MacroParseException( e.getMessage() );
+            }
         }
     }
 
@@ -365,7 +363,7 @@ public abstract class StandardMacros
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( "error reading pwdExpirationTime during macro replacement: " + e.getMessage() );
+                LOGGER.error( () -> "error reading pwdExpirationTime during macro replacement: " + e.getMessage() );
                 return "";
             }
 
@@ -379,7 +377,7 @@ public abstract class StandardMacros
             {
                 try
                 {
-                    final DateFormat dateFormat = new SimpleDateFormat( datePattern );
+                    final PwmDateFormat dateFormat = PwmDateFormat.newPwmDateFormat( datePattern );
                     return dateFormat.format( pwdExpirationTime );
                 }
                 catch ( final IllegalArgumentException e )
@@ -425,7 +423,7 @@ public abstract class StandardMacros
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( "error reading pwdExpirationTime during macro replacement: " + e.getMessage() );
+                LOGGER.error( () -> "error reading pwdExpirationTime during macro replacement: " + e.getMessage() );
                 return "";
             }
         }
@@ -449,7 +447,7 @@ public abstract class StandardMacros
 
             if ( userInfo == null )
             {
-                LOGGER.error( "could not replace value for '" + matchValue + "', userInfoBean is null" );
+                LOGGER.error( () -> "could not replace value for '" + matchValue + "', userInfoBean is null" );
                 return "";
             }
 
@@ -462,7 +460,7 @@ public abstract class StandardMacros
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( "error reading pwdExpirationTime during macro replacement: " + e.getMessage() );
+                LOGGER.error( () -> "error reading pwdExpirationTime during macro replacement: " + e.getMessage() );
                 return "";
             }
         }
@@ -495,7 +493,7 @@ public abstract class StandardMacros
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( "error reading username during macro replacement: " + e.getMessage() );
+                LOGGER.error( () -> "error reading username during macro replacement: " + e.getMessage() );
                 return "";
             }
         }
@@ -557,7 +555,7 @@ public abstract class StandardMacros
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( "error reading user email address during macro replacement: " + e.getMessage() );
+                LOGGER.error( () -> "error reading user email address during macro replacement: " + e.getMessage() );
                 return "";
             }
         }
@@ -590,7 +588,7 @@ public abstract class StandardMacros
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( "error decrypting in memory password during macro replacement: " + e.getMessage() );
+                LOGGER.error( () -> "error decrypting in memory password during macro replacement: " + e.getMessage() );
                 return "";
             }
         }
@@ -599,8 +597,8 @@ public abstract class StandardMacros
         {
             return new MacroDefinitionFlag[]
                     {
-                    MacroDefinitionFlag.SensitiveValue,
-            };
+                            MacroDefinitionFlag.SensitiveValue,
+                    };
         }
     }
 
@@ -662,7 +660,7 @@ public abstract class StandardMacros
             }
             catch ( final MalformedURLException e )
             {
-                LOGGER.error( "unable to parse configured/detected site URL: " + e.getMessage() );
+                LOGGER.error( () -> "unable to parse configured/detected site URL: " + e.getMessage() );
             }
             return "";
         }
@@ -819,7 +817,7 @@ public abstract class StandardMacros
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( "error reading otp setup time during macro replacement: " + e.getMessage() );
+                LOGGER.error( () -> "error reading otp setup time during macro replacement: " + e.getMessage() );
             }
 
             return "";
@@ -847,7 +845,7 @@ public abstract class StandardMacros
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( "error reading response setup time macro replacement: " + e.getMessage() );
+                LOGGER.error( () -> "error reading response setup time macro replacement: " + e.getMessage() );
             }
             return "";
         }

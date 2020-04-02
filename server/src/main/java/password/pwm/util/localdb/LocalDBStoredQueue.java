@@ -713,7 +713,7 @@ LocalDBStoredQueue implements Queue<String>, Deque<String>
             final String storedVersion = localDB.get( db, KEY_VERSION );
             if ( storedVersion == null || !VALUE_VERSION.equals( storedVersion ) )
             {
-                LOGGER.warn( "values in db " + db + " use an outdated format, the stored events will be purged!" );
+                LOGGER.warn( () -> "values in db " + db + " use an outdated format, the stored events will be purged!" );
                 return false;
             }
             return true;
@@ -1037,13 +1037,14 @@ LocalDBStoredQueue implements Queue<String>, Deque<String>
                     sb.append( "  tailPosition=" ).append( tailPosition ).append( ", headPosition=" ).append( headPosition ).append( ", db=" ).append( db );
                     sb.append( ", size=" ).append( internalSize() ).append( "\n" );
 
-                    try ( LocalDB.LocalDBIterator<String> keyIter = localDB.iterator( db ) )
+                    try ( LocalDB.LocalDBIterator<Map.Entry<String, String>> localDBIterator = localDB.iterator( db ) )
                     {
                         int rowCount = 0;
-                        while ( keyIter.hasNext() && rowCount < DEBUG_MAX_ROWS )
+                        while ( localDBIterator.hasNext() && rowCount < DEBUG_MAX_ROWS )
                         {
-                            final String key = keyIter.next();
-                            String value = localDB.get( db, key );
+                            final Map.Entry<String, String> entry = localDBIterator.next();
+                            final String key = entry.getKey();
+                            String value = entry.getValue();
                             value = value == null ? "" : value;
                             value = value.length() < DEBUG_MAX_WIDTH ? value : value.substring( 0, DEBUG_MAX_WIDTH ) + "...";
                             final String row = key + " " + value;
@@ -1054,7 +1055,7 @@ LocalDBStoredQueue implements Queue<String>, Deque<String>
                 }
                 catch ( final LocalDBException e )
                 {
-                    LOGGER.error( "error generating logMsg: " + e.getMessage() );
+                    LOGGER.error( () -> "error generating logMsg: " + e.getMessage() );
                 }
 
                 return sb.toString();
@@ -1089,7 +1090,7 @@ LocalDBStoredQueue implements Queue<String>, Deque<String>
                             }
                             catch ( final Exception e )
                             {
-                                LOGGER.error( "unexpected error during output of debug message during stored queue repair operation: " + e.getMessage(), e );
+                                LOGGER.error( () -> "unexpected error during output of debug message during stored queue repair operation: " + e.getMessage(), e );
                             }
                         }
                     },
@@ -1124,12 +1125,14 @@ LocalDBStoredQueue implements Queue<String>, Deque<String>
             {
                 if ( headTrim > 0 )
                 {
-                    LOGGER.warn( "trimmed " + headTrim + " from head position against database " + db );
+                    final int headTrimFinal = headTrim;
+                    LOGGER.warn( () -> "trimmed " + headTrimFinal + " from head position against database " + db );
                 }
 
                 if ( tailTrim > 0 )
                 {
-                    LOGGER.warn( "trimmed " + tailTrim + " from tail position against database " + db );
+                    final int tailTrimFinal = tailTrim;
+                    LOGGER.warn( () -> "trimmed " + tailTrimFinal + " from tail position against database " + db );
                 }
             }
 

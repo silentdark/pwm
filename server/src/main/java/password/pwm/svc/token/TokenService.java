@@ -75,6 +75,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TimerTask;
 import java.util.concurrent.ExecutorService;
 
@@ -187,7 +188,7 @@ public class TokenService implements PwmService
             final String errorMsg = "unable to start token manager: " + e.getErrorInformation().getDetailedErrorMsg();
             final ErrorInformation newErrorInformation = new ErrorInformation( e.getError(), errorMsg );
             errorInformation = newErrorInformation;
-            LOGGER.error( newErrorInformation.toDebugStr() );
+            LOGGER.error( () -> newErrorInformation.toDebugStr() );
             status = STATUS.CLOSED;
             return;
         }
@@ -267,7 +268,7 @@ public class TokenService implements PwmService
             }
             catch ( final PwmOperationalException e )
             {
-                LOGGER.error( sessionLabel, "error clearing claimed token: " + e.getMessage() );
+                LOGGER.error( sessionLabel, () -> "error clearing claimed token: " + e.getMessage() );
             }
         }
 
@@ -289,16 +290,16 @@ public class TokenService implements PwmService
 
         try
         {
-            final TokenPayload storedToken = tokenMachine.retrieveToken( tokenMachine.keyFromKey( tokenKey ) );
-            if ( storedToken != null )
+            final Optional<TokenPayload> storedToken = tokenMachine.retrieveToken( sessionLabel, tokenMachine.keyFromKey( tokenKey ) );
+            if ( storedToken.isPresent() )
             {
 
-                if ( testIfTokenIsExpired( sessionLabel, storedToken ) )
+                if ( testIfTokenIsExpired( sessionLabel, storedToken.get() ) )
                 {
                     throw new PwmOperationalException( new ErrorInformation( PwmError.ERROR_TOKEN_EXPIRED ) );
                 }
 
-                return storedToken;
+                return storedToken.get();
             }
         }
         catch ( final PwmException e )
@@ -374,12 +375,12 @@ public class TokenService implements PwmService
         final Instant issueDate = theToken.getIssueTime();
         if ( issueDate == null )
         {
-            LOGGER.error( sessionLabel, "retrieved token has no issueDate, marking as expired: " + theToken.toDebugString() );
+            LOGGER.error( sessionLabel, () -> "retrieved token has no issueDate, marking as expired: " + theToken.toDebugString() );
             return true;
         }
         if ( theToken.getExpiration() == null )
         {
-            LOGGER.error( sessionLabel, "retrieved token has no expiration timestamp, marking as expired: " + theToken.toDebugString() );
+            LOGGER.error( sessionLabel, () -> "retrieved token has no expiration timestamp, marking as expired: " + theToken.toDebugString() );
             return true;
         }
         return theToken.getExpiration().isBefore( Instant.now() );
@@ -404,7 +405,7 @@ public class TokenService implements PwmService
             }
             catch ( final Exception e )
             {
-                LOGGER.warn( "unexpected error while cleaning expired stored tokens: " + e.getMessage(), e );
+                LOGGER.warn( () -> "unexpected error while cleaning expired stored tokens: " + e.getMessage(), e );
             }
         }
     }
@@ -430,7 +431,7 @@ public class TokenService implements PwmService
         }
         catch ( final Exception e )
         {
-            LOGGER.error( "unexpected error reading size of token storage table: " + e.getMessage() );
+            LOGGER.error( () -> "unexpected error reading size of token storage table: " + e.getMessage() );
         }
 
         return -1;
@@ -446,8 +447,8 @@ public class TokenService implements PwmService
         {
             tokenKey = makeRandomCode( configuration );
             LOGGER.trace( sessionLabel, () -> "generated new token random code, checking for uniqueness" );
-            final TokenPayload existingPayload = machine.retrieveToken( tokenMachine.keyFromKey( tokenKey ) );
-            if ( existingPayload != null )
+            final Optional<TokenPayload> existingPayload = machine.retrieveToken( sessionLabel, tokenMachine.keyFromKey( tokenKey ) );
+            if ( existingPayload.isPresent() )
             {
                 tokenKey = null;
             }

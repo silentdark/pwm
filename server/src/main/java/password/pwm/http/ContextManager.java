@@ -45,6 +45,7 @@ import password.pwm.util.PwmScheduler;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.localdb.LocalDB;
 import password.pwm.util.logging.PwmLogManager;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.X509Utils;
@@ -63,7 +64,6 @@ import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -197,6 +197,11 @@ public class ContextManager implements Serializable
 
     public void initialize( )
     {
+        this.initialize( null );
+    }
+
+    private void initialize( final LocalDB preExistingLocalDB )
+    {
         final Instant startTime = Instant.now();
 
         try
@@ -274,7 +279,7 @@ public class ContextManager implements Serializable
                     .setFlags( applicationFlags )
                     .setParams( applicationParams )
                     .createPwmEnvironment();
-            pwmApplication = new PwmApplication( pwmEnvironment );
+            pwmApplication = PwmApplication.createPwmApplication( pwmEnvironment, preExistingLocalDB );
         }
         catch ( final Exception e )
         {
@@ -359,7 +364,7 @@ public class ContextManager implements Serializable
 
         try
         {
-            LOGGER.fatal( SESSION_LABEL, startupErrorInformation.getDetailedErrorMsg() );
+            LOGGER.fatal( SESSION_LABEL, () -> startupErrorInformation.getDetailedErrorMsg() );
         }
         catch ( final Exception e2 )
         {
@@ -381,7 +386,7 @@ public class ContextManager implements Serializable
             }
             catch ( final Exception e )
             {
-                LOGGER.error( "unexpected error attempting to close application: " + e.getMessage() );
+                LOGGER.error( () -> "unexpected error attempting to close application: " + e.getMessage() );
             }
         }
         taskMaster.shutdown();
@@ -393,7 +398,7 @@ public class ContextManager implements Serializable
 
     public void requestPwmApplicationRestart( )
     {
-        LOGGER.debug( () -> "immediate restart requested" );
+        LOGGER.debug( SESSION_LABEL, () -> "immediate restart requested" );
         taskMaster.schedule( new RestartFlagWatcher(), 0, TimeUnit.MILLISECONDS );
     }
 
@@ -447,7 +452,7 @@ public class ContextManager implements Serializable
                     }
                     catch ( final Exception e )
                     {
-                        LOGGER.error( SESSION_LABEL, "error importing " + silentPropertiesFile.getAbsolutePath() + ", error: " + e.getMessage() );
+                        LOGGER.error( SESSION_LABEL, () -> "error importing " + silentPropertiesFile.getAbsolutePath() + ", error: " + e.getMessage() );
                     }
 
                     final String appendValue = success ? ".imported" : ".error";
@@ -461,7 +466,7 @@ public class ContextManager implements Serializable
                     }
                     catch ( final IOException e )
                     {
-                        LOGGER.error( SESSION_LABEL, "error renaming file " + source.toString() + " to " + dest.toString() + ", error: " + e.getMessage() );
+                        LOGGER.error( SESSION_LABEL, () -> "error renaming file " + source.toString() + " to " + dest.toString() + ", error: " + e.getMessage() );
                     }
                 }
             }
@@ -478,6 +483,7 @@ public class ContextManager implements Serializable
 
         private void doRestart( )
         {
+            final boolean reloadLocalDB = Boolean.parseBoolean( pwmApplication.getConfig().readAppProperty( AppProperty.LOCALDB_RELOAD_WHEN_APP_RESTARTED ) );
             final Instant startTime = Instant.now();
 
             if ( restartInProgressFlag.get() )
@@ -494,6 +500,10 @@ public class ContextManager implements Serializable
             }
 
             final PwmApplication oldPwmApplication = pwmApplication;
+            final LocalDB oldLocalDB = reloadLocalDB
+                    ? null
+                    : pwmApplication.getLocalDB();
+
             pwmApplication = null;
 
             try
@@ -515,16 +525,16 @@ public class ContextManager implements Serializable
                         // prevent restart watcher from detecting in-progress restart in a loop
                         taskMaster.shutdown();
 
-                        oldPwmApplication.shutdown();
+                        oldPwmApplication.shutdown( oldLocalDB != null );
                     }
                     catch ( final Exception e )
                     {
-                        LOGGER.error( SESSION_LABEL, "unexpected error attempting to close application: " + e.getMessage() );
+                        LOGGER.error( SESSION_LABEL, () -> "unexpected error attempting to close application: " + e.getMessage() );
                     }
                 }
                 catch ( final Exception e )
                 {
-                    LOGGER.fatal( "unexpected error during shutdown: " + e.getMessage(), e );
+                    LOGGER.fatal( () -> "unexpected error during shutdown: " + e.getMessage(), e );
                 }
 
                 {
@@ -535,7 +545,7 @@ public class ContextManager implements Serializable
                             + ") now starting new application instance ("
                             + timeDuration.asCompactString() + ")" );
                 }
-                initialize();
+                initialize( oldLocalDB );
 
                 {
                     final TimeDuration timeDuration = TimeDuration.fromCurrent( startTime );
@@ -606,7 +616,7 @@ public class ContextManager implements Serializable
 
     private static void outputError( final String outputText )
     {
-        final String msg = PwmConstants.PWM_APP_NAME + " " + JavaHelper.toIsoDate( new Date() ) + " " + outputText;
+        final String msg = PwmConstants.PWM_APP_NAME + " " + JavaHelper.toIsoDate( Instant.now() ) + " " + outputText;
         System.out.println( msg );
         System.out.println( msg );
     }
@@ -728,7 +738,7 @@ public class ContextManager implements Serializable
             }
             catch ( final Exception e )
             {
-                LOGGER.error( SESSION_LABEL, "error trying to auto-import certs: " + e.getMessage() );
+                LOGGER.error( SESSION_LABEL, () -> "error trying to auto-import certs: " + e.getMessage() );
             }
         }
 

@@ -291,7 +291,7 @@ public abstract class StringUtil
         }
         catch ( final UnsupportedEncodingException e )
         {
-            LOGGER.error( "unexpected error during url encoding: " + e.getMessage() );
+            LOGGER.error( () -> "unexpected error during url encoding: " + e.getMessage() );
             return input;
         }
     }
@@ -304,7 +304,7 @@ public abstract class StringUtil
         }
         catch ( final UnsupportedEncodingException e )
         {
-            LOGGER.error( "unexpected error during url decoding: " + e.getMessage() );
+            LOGGER.error( () -> "unexpected error during url decoding: " + e.getMessage() );
             return input;
         }
     }
@@ -506,14 +506,22 @@ public abstract class StringUtil
 
     public static String truncate( final String input, final int length )
     {
+        return truncate( input, length, null );
+    }
+
+    public static String truncate( final String input, final int length, final String appendIfTruncated )
+    {
         if ( input == null )
         {
             return "";
         }
 
-        return input.length() > length
-                ? input.substring( 0, length )
-                : input;
+        if ( input.length() > length )
+        {
+            return input.substring( 0, length ) + ( appendIfTruncated == null ? "" : appendIfTruncated );
+        }
+
+        return input;
     }
 
     public static int convertStrToInt( final String string, final int defaultValue )
