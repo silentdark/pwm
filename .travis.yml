@@ -1,8 +1,11 @@
 language: java
+before_install:
+  - nvm install 14.16.1
 cache:
   directories:
     - .autoconf
     - $HOME/.m2
+    - $HOME/.npm
 script:
   - mvn clean package
 #deploy:
