@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ public class LocalDbAuditVault implements AuditVault
     private int maxBulkRemovals = 105;
 
     private ExecutorService executorService;
-    private volatile PwmService.STATUS status = PwmService.STATUS.NEW;
+    private volatile PwmService.STATUS status = PwmService.STATUS.CLOSED;
 
 
     public LocalDbAuditVault(
@@ -59,6 +59,7 @@ public class LocalDbAuditVault implements AuditVault
     {
     }
 
+    @Override
     public void init(
             final PwmApplication pwmApplication,
             final LocalDB localDB,
@@ -79,6 +80,7 @@ public class LocalDbAuditVault implements AuditVault
         pwmApplication.getPwmScheduler().scheduleFixedRateJob( new TrimmerThread(), executorService, TimeDuration.SECONDS_10, jobFrequency );
     }
 
+    @Override
     public void close( )
     {
         executorService.shutdown();
@@ -102,6 +104,7 @@ public class LocalDbAuditVault implements AuditVault
         return auditDB.size();
     }
 
+    @Override
     public Iterator<AuditRecord> readVault( )
     {
         return new IteratorWrapper( auditDB.descendingIterator() );
@@ -184,6 +187,7 @@ public class LocalDbAuditVault implements AuditVault
         return null;
     }
 
+    @Override
     public void add( final AuditRecord record )
     {
         if ( record == null )

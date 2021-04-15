@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,12 @@ package password.pwm;
 
 import com.novell.ldapchai.ChaiConstant;
 import org.apache.commons.csv.CSVFormat;
-import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
 
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -74,7 +73,7 @@ public abstract class PwmConstants
     public static final String CONFIGMANAGER_INTRUDER_USERNAME = "ConfigurationManagerLogin";
 
     public static final Locale DEFAULT_LOCALE = new Locale( readPwmConstantsBundle( "locale.defaultLocale" ) );
-    public static final Charset DEFAULT_CHARSET = Charset.forName( "UTF8" );
+    public static final Charset DEFAULT_CHARSET = StandardCharsets.UTF_8;
     public static final List<String> HIGHLIGHT_LOCALES = StringUtil.splitAndTrim( readPwmConstantsBundle( "locale.highlightList" ), "," );
 
     public static final CSVFormat DEFAULT_CSV_FORMAT = CSVFormat.DEFAULT;
@@ -95,6 +94,9 @@ public abstract class PwmConstants
     public static final String PROFILE_ID_ALL = "all";
     public static final String PROFILE_ID_DEFAULT = "default";
 
+    public static final String DOMAIN_ID_DEFAULT = "default";
+    public static final String DOMAIN_ID_PLACEHOLDER = "default";
+
     public static final String TOKEN_KEY_PWD_CHG_DATE = "_lastPwdChange";
 
     public static final String HTTP_BASIC_AUTH_PREFIX = readPwmConstantsBundle( "httpHeaderAuthorizationBasic" );
@@ -113,10 +115,11 @@ public abstract class PwmConstants
 
     public static final String LOG_REMOVED_VALUE_REPLACEMENT = readPwmConstantsBundle( "log.removedValue" );
 
-    public static final Collection<Locale> INCLUDED_LOCALES;
+    public static final Collection<Locale> INCLUDED_LOCALES = Collections.emptyList();
 
     static
     {
+        /*
         final List<Locale> localeList = new ArrayList<>();
         final String inputString = readPwmConstantsBundle( "includedLocales" );
         final List<String> inputList = JsonUtil.deserializeStringList( inputString );
@@ -125,6 +128,8 @@ public abstract class PwmConstants
             localeList.add( new Locale( localeKey ) );
         }
         INCLUDED_LOCALES = Collections.unmodifiableCollection( localeList );
+
+         */
     }
 
     public static final String URL_JSP_CONFIG_GUIDE = "WEB-INF/jsp/configguide-%1%.jsp";
@@ -155,6 +160,7 @@ public abstract class PwmConstants
     public static final String PARAM_SIGNED_FORM = "signedForm";
     public static final String PARAM_USERKEY = "userKey";
     public static final String PARAM_METHOD_CHOICE = "methodChoice";
+    public static final String PARAM_FORMAT_JSON_PRETTY = "jsonPrettyFormat";
 
 
     public static final String COOKIE_PERSISTENT_CONFIG_LOGIN = "CONFIG-AUTH";
@@ -282,7 +288,7 @@ public abstract class PwmConstants
         json( "application/json" ),
         html( "text/html" ),;
 
-        private String headerValue;
+        private final String headerValue;
 
         AcceptValue( final String headerValue )
         {

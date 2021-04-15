@@ -3,7 +3,7 @@
  ~ http://www.pwm-project.org
  ~
  ~ Copyright (c) 2006-2009 Novell, Inc.
- ~ Copyright (c) 2009-2019 The PWM Project
+ ~ Copyright (c) 2009-2020 The PWM Project
  ~
  ~ Licensed under the Apache License, Version 2.0 (the "License");
  ~ you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@
 <% final ConfigGuideBean configGuideBean = JspUtility.getSessionBean(pageContext, ConfigGuideBean.class);%>
 <html lang="<pwm:value name="<%=PwmValue.localeCode%>"/>" dir="<pwm:value name="<%=PwmValue.localeDir%>"/>">
 <%@ include file="fragment/header.jsp" %>
-<body class="nihilo">
+<body>
 <div id="wrapper">
     <%@ include file="fragment/configguide-header.jsp"%>
     <div id="centerbody">
@@ -84,7 +84,7 @@
                         <td><b>Secure (SSL) Connection</b>
                         </td>
                         <td>
-                            <%if (Boolean.parseBoolean(configGuideBean.getFormData().get(ConfigGuideFormField.PARAM_LDAP_SECURE))) {%>
+                            <%if (ConfigGuideForm.readCheckedFormField(configGuideBean.getFormData().get(ConfigGuideFormField.PARAM_LDAP_SECURE))) {%>
                             <pwm:display key="Value_True"/>
                             <% } else { %>
                             <pwm:display key="Value_False"/>
@@ -107,10 +107,10 @@
                         </td>
                     </tr>
                     <tr>
-                        <td><b>Administrator Group DN</b>
+                        <td><b>Administrator User DN</b>
                         </td>
                         <td>
-                            <%=StringUtil.escapeHtml(configGuideBean.getFormData().get(ConfigGuideFormField.PARAM_LDAP_ADMIN_GROUP))%>
+                            <%=StringUtil.escapeHtml(configGuideBean.getFormData().get(ConfigGuideFormField.PARAM_LDAP_ADMIN_USER))%>
                         </td>
                     </tr>
                     <tr>

@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,13 +33,13 @@ import password.pwm.config.profile.PwmPasswordPolicy;
 import password.pwm.config.value.data.UserPermission;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.ldap.LdapOperationsHelper;
-import password.pwm.ldap.LdapPermissionTester;
+import password.pwm.ldap.permission.UserPermissionUtility;
 import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.UserInfoFactory;
 import password.pwm.svc.PwmService;
 import password.pwm.svc.pwnotify.PwNotifyUserStatus;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.password.PasswordUtility;
 
 import java.util.Collections;
@@ -89,13 +89,13 @@ public class UserDebugDataReader
             /* disregard */
         }
 
-        final MacroMachine macroMachine = MacroMachine.forUser( pwmApplication, locale, sessionLabel, userIdentity );
+        final MacroRequest macroRequest = MacroRequest.forUser( pwmApplication, locale, sessionLabel, userIdentity );
 
         final PwNotifyUserStatus pwNotifyUserStatus = readPwNotifyUserStatus( pwmApplication, userIdentity, sessionLabel );
 
         return UserDebugDataBean.builder()
                 .userInfo( userInfo )
-                .publicUserInfoBean( PublicUserInfoBean.fromUserInfoBean( userInfo, pwmApplication.getConfig(), locale, macroMachine ) )
+                .publicUserInfoBean( PublicUserInfoBean.fromUserInfoBean( userInfo, pwmApplication.getConfig(), locale, macroRequest ) )
                 .permissions( permissions )
                 .profiles( profiles )
                 .ldapPasswordPolicy( ldapPasswordPolicy )
@@ -122,7 +122,7 @@ public class UserDebugDataReader
             if ( !setting.isHidden() && !setting.getCategory().isHidden() && !setting.getCategory().hasProfiles() )
             {
                 final List<UserPermission> userPermission = pwmApplication.getConfig().readSettingAsUserPermission( permission.getPwmSetting() );
-                final boolean result = LdapPermissionTester.testUserPermissions(
+                final boolean result = UserPermissionUtility.testUserPermission(
                         pwmApplication,
                         sessionLabel,
                         userIdentity,

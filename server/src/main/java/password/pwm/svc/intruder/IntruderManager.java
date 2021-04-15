@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,9 +34,8 @@ import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
 import password.pwm.error.PwmUnrecoverableException;
+import password.pwm.health.HealthMessage;
 import password.pwm.health.HealthRecord;
-import password.pwm.health.HealthStatus;
-import password.pwm.health.HealthTopic;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmSession;
 import password.pwm.ldap.UserInfo;
@@ -52,9 +51,9 @@ import password.pwm.svc.stats.StatisticsManager;
 import password.pwm.util.DataStore;
 import password.pwm.util.DataStoreFactory;
 import password.pwm.util.PwmScheduler;
-import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.db.DatabaseDataStore;
 import password.pwm.util.db.DatabaseTable;
+import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.ClosableIterator;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.JsonUtil;
@@ -62,7 +61,7 @@ import password.pwm.util.java.TimeDuration;
 import password.pwm.util.localdb.LocalDB;
 import password.pwm.util.localdb.LocalDBDataStore;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.secure.PwmRandom;
 
 import java.net.InetAddress;
@@ -81,13 +80,13 @@ public class IntruderManager implements PwmService
     private static final PwmLogger LOGGER = PwmLogger.forClass( IntruderManager.class );
 
     private PwmApplication pwmApplication;
-    private STATUS status = STATUS.NEW;
+    private STATUS status = STATUS.CLOSED;
     private ErrorInformation startupError;
     private Timer timer;
 
     private final Map<RecordType, RecordManager> recordManagers = new HashMap<>();
 
-    private ServiceInfoBean serviceInfo = new ServiceInfoBean( Collections.emptyList() );
+    private ServiceInfoBean serviceInfo = ServiceInfoBean.builder().build();
 
     public IntruderManager( )
     {
@@ -109,7 +108,6 @@ public class IntruderManager implements PwmService
     {
         this.pwmApplication = pwmApplication;
         final Configuration config = pwmApplication.getConfig();
-        status = STATUS.OPENING;
         if ( pwmApplication.getLocalDB() == null || pwmApplication.getLocalDB().status() != LocalDB.Status.OPEN )
         {
             final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_SERVICE_NOT_AVAILABLE, "unable to start IntruderManager, LocalDB unavailable" );
@@ -164,7 +162,7 @@ public class IntruderManager implements PwmService
                     return;
             }
             LOGGER.info( () -> debugMsg );
-            serviceInfo = new ServiceInfoBean( Collections.singletonList( storageMethodUsed ) );
+            serviceInfo = ServiceInfoBean.builder().storageMethod( storageMethodUsed ).build();
         }
         final RecordStore recordStore;
         {
@@ -286,7 +284,10 @@ public class IntruderManager implements PwmService
     {
         if ( startupError != null && status != STATUS.OPEN )
         {
-            return Collections.singletonList( new HealthRecord( HealthStatus.WARN, HealthTopic.Application, "unable to start: " + startupError.toDebugStr() ) );
+            return Collections.singletonList( HealthRecord.forMessage(
+                    HealthMessage.ServiceClosed,
+                    this.getClass().getSimpleName(),
+                    startupError.toDebugStr() ) );
         }
         return Collections.emptyList();
     }
@@ -367,13 +368,13 @@ public class IntruderManager implements PwmService
                 final InetAddress inetAddress = InetAddress.getByName( subject );
                 if ( inetAddress.isAnyLocalAddress() || inetAddress.isLoopbackAddress() || inetAddress.isLinkLocalAddress() )
                 {
-                    LOGGER.debug( () -> "disregarding local address intruder attempt from: " + subject );
+                    LOGGER.debug( sessionLabel, () -> "disregarding local address intruder attempt from: " + subject );
                     return;
                 }
             }
             catch ( final Exception e )
             {
-                LOGGER.error( () -> "error examining address: " + subject );
+                LOGGER.error( sessionLabel, () -> "error examining address: " + subject );
             }
         }
 
@@ -388,7 +389,7 @@ public class IntruderManager implements PwmService
                     userIdentity,
                     sessionLabel
             );
-            pwmApplication.getAuditManager().submit( auditRecord );
+            pwmApplication.getAuditManager().submit( sessionLabel, auditRecord );
         }
         else
         {
@@ -398,7 +399,7 @@ public class IntruderManager implements PwmService
             messageObj.put( "subject", subject );
             final String message = JsonUtil.serializeMap( messageObj );
             final SystemAuditRecord auditRecord = new AuditRecordFactory( pwmApplication ).createSystemAuditRecord( AuditEvent.INTRUDER_ATTEMPT, message );
-            pwmApplication.getAuditManager().submit( auditRecord );
+            pwmApplication.getAuditManager().submit( sessionLabel, auditRecord );
         }
 
         try
@@ -417,7 +418,7 @@ public class IntruderManager implements PwmService
                             userIdentity,
                             sessionLabel
                     );
-                    pwmApplication.getAuditManager().submit( auditRecord );
+                    pwmApplication.getAuditManager().submit( sessionLabel, auditRecord );
                     sendAlert( manager.readIntruderRecord( subject ), sessionLabel );
                 }
                 else
@@ -428,7 +429,7 @@ public class IntruderManager implements PwmService
                     messageObj.put( "subject", subject );
                     final String message = JsonUtil.serializeMap( messageObj );
                     final SystemAuditRecord auditRecord = new AuditRecordFactory( pwmApplication ).createSystemAuditRecord( AuditEvent.INTRUDER_LOCK, message );
-                    pwmApplication.getAuditManager().submit( auditRecord );
+                    pwmApplication.getAuditManager().submit( sessionLabel, auditRecord );
                 }
 
 
@@ -489,7 +490,7 @@ public class IntruderManager implements PwmService
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( () -> "unable to send intruder mail, can't read userDN/ldapProfile from stored record: " + e.getMessage() );
+                LOGGER.error( sessionLabel, () -> "unable to send intruder mail, can't read userDN/ldapProfile from stored record: " + e.getMessage() );
             }
         }
     }
@@ -698,22 +699,23 @@ public class IntruderManager implements PwmService
                     userIdentity, locale
             );
 
-            final MacroMachine macroMachine = MacroMachine.forUser(
+            final MacroRequest macroRequest = MacroRequest.forUser(
                     pwmApplication,
                     sessionLabel,
                     userInfo,
                     null
             );
 
-            pwmApplication.getEmailQueue().submitEmail( configuredEmailSetting, userInfo, macroMachine );
+            pwmApplication.getEmailQueue().submitEmail( configuredEmailSetting, userInfo, macroRequest );
         }
         catch ( final PwmUnrecoverableException e )
         {
-            LOGGER.error( () -> "error reading user info while sending intruder notice for user " + userIdentity + ", error: " + e.getMessage() );
+            LOGGER.error( sessionLabel, () -> "error reading user info while sending intruder notice for user " + userIdentity + ", error: " + e.getMessage() );
         }
 
     }
 
+    @Override
     public ServiceInfoBean serviceInfo( )
     {
         return serviceInfo;

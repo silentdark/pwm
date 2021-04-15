@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,22 +25,22 @@ var PWM_GLOBAL = PWM_GLOBAL || {};
 
 PWM_CONFIG.lockConfiguration=function() {
     PWM_MAIN.showConfirmDialog({text:PWM_CONFIG.showString('Confirm_LockConfig'),okAction:function(){
-        PWM_MAIN.showWaitDialog({loadFunction:function() {
-            var url = 'ConfigManager?processAction=lockConfiguration';
-            var loadFunction = function(data) {
-                if (data['error'] === true) {
-                    PWM_MAIN.closeWaitDialog();
-                    PWM_MAIN.showDialog({
-                        title: PWM_MAIN.showString('Title_Error'),
-                        text: data['errorDetail']
-                    });
-                } else {
-                    PWM_CONFIG.waitForRestart();
-                }
-            };
-            PWM_MAIN.ajaxRequest(url,loadFunction);
+            PWM_MAIN.showWaitDialog({loadFunction:function() {
+                    var url = 'ConfigManager?processAction=lockConfiguration';
+                    var loadFunction = function(data) {
+                        if (data['error'] === true) {
+                            PWM_MAIN.closeWaitDialog();
+                            PWM_MAIN.showDialog({
+                                title: PWM_MAIN.showString('Title_Error'),
+                                text: data['errorDetail']
+                            });
+                        } else {
+                            PWM_CONFIG.waitForRestart();
+                        }
+                    };
+                    PWM_MAIN.ajaxRequest(url,loadFunction);
+                }});
         }});
-    }});
 };
 
 PWM_CONFIG.waitForRestart=function(options) {
@@ -103,19 +103,19 @@ PWM_CONFIG.waitForRestart=function(options) {
 
 PWM_CONFIG.startNewConfigurationEditor=function(template) {
     PWM_MAIN.showWaitDialog({title:'Loading...',loadFunction:function(){
-        require(["dojo"],function(dojo){
-            dojo.xhrGet({
-                url:"ConfigManager?processAction=setOption&pwmFormID=" + PWM_GLOBAL['pwmFormID'] + "&getTemplate=" + template,
-                preventCache: true,
-                error: function(errorObj) {
-                    PWM_MAIN.showError("error starting configuration editor: " + errorObj);
-                },
-                load: function() {
-                    window.location = "ConfigManager?processAction=editMode&pwmFormID=" + PWM_GLOBAL['pwmFormID'] + '&mode=SETTINGS';
-                }
+            require(["dojo"],function(dojo){
+                dojo.xhrGet({
+                    url:"ConfigManager?processAction=setOption&pwmFormID=" + PWM_GLOBAL['pwmFormID'] + "&getTemplate=" + template,
+                    preventCache: true,
+                    error: function(errorObj) {
+                        PWM_MAIN.showError("error starting configuration editor: " + errorObj);
+                    },
+                    load: function() {
+                        window.location = "ConfigManager?processAction=editMode&pwmFormID=" + PWM_GLOBAL['pwmFormID'] + '&mode=SETTINGS';
+                    }
+                });
             });
-        });
-    }});
+        }});
 };
 
 PWM_CONFIG.uploadConfigDialog=function() {
@@ -158,7 +158,6 @@ PWM_CONFIG.uploadLocalDB=function() {
 
 PWM_CONFIG.closeHeaderWarningPanel = function() {
     console.log('action closeHeader');
-    PWM_CONFIG.headerResizeListener.pause();
 
     PWM_MAIN.addCssClass('header-warning','nodisplay');
     PWM_MAIN.addCssClass('header-warning-backdrop','nodisplay');
@@ -167,17 +166,14 @@ PWM_CONFIG.closeHeaderWarningPanel = function() {
 
 PWM_CONFIG.openHeaderWarningPanel = function() {
     console.log('action openHeader');
-    if (PWM_CONFIG.headerResizeListener) {
-        PWM_CONFIG.headerResizeListener.resume();
-    }
 
-    require(['dojo/dom','dijit/place','dojo/on'], function(dom, place, on) {
+    require(['dojo/dom','dijit/place'], function(dom, place) {
         PWM_MAIN.removeCssClass('header-warning-backdrop','nodisplay');
         PWM_MAIN.removeCssClass('header-warning','nodisplay');
         //PWM_MAIN.addCssClass('button-openHeader','nodisplay');
         place.around(PWM_MAIN.getObject("header-warning"), PWM_MAIN.getObject("header-username-caret"), ["below-alt"], false);
 
-        on.once(PWM_MAIN.getObject("header-warning-backdrop"), "click", function(event) {
+        PWM_MAIN.addEventHandler("header-warning-backdrop", "click", function(event) {
             PWM_CONFIG.closeHeaderWarningPanel();
         });
     });
@@ -336,15 +332,18 @@ PWM_CONFIG.initConfigHeader = function() {
         PWM_CONFIG.openHeaderWarningPanel();
     });
 
-    require(["dojo/dom-construct", "dojo/_base/window", "dojo/dom", "dijit/place", "dojo/on"], function(domConstruct, win, dom, place, on){
-        domConstruct.create("div", { id: "header-warning-backdrop", "class":"nodisplay" }, win.body());
+    var newElement = document.createElement('div');
+    newElement.id =  "header-warning-backdrop";
+    newElement.setAttribute('class','nodisplay');
+    document.body.appendChild(newElement);
 
-        PWM_CONFIG.headerResizeListener = on.pausable(window, "resize", function () {
+    /*
+    require(["dojo/dom-construct", "dojo/_base/window", "dojo/dom", "dijit/place"], function(domConstruct, win, dom, place){
+        PWM_MAIN.addEventHandler(window, "resize", function () {
             place.around(dom.byId("header-warning"), dom.byId("header-username-caret"), ["below-alt"], false);
         });
-
-        PWM_CONFIG.headerResizeListener.pause();
     });
+     */
 
     PWM_CONFIG.showHeaderHealth();
 
@@ -452,7 +451,7 @@ PWM_CONFIG.initConfigManagerWordlistPage = function() {
 
 
 PWM_CONFIG.convertListOfIdentitiesToHtml = function(data) {
-    var html = '<div style="max-height: 500px; overflow-y: auto">';
+    var html = '<div class="panel-large overflow-y">';
     var users = data['users'];
     if (users && !PWM_MAIN.JSLibrary.isEmpty(users)) {
         html += '<table style="">';
@@ -470,9 +469,9 @@ PWM_CONFIG.convertListOfIdentitiesToHtml = function(data) {
     }
     html += '</div>';
 
-    html += '<br/><div class="noticebar" style="margin-right: 5px; margin-left: 5px">' + data['searchOperationSummary'];
+    html += '<br/><div class="footnote"><p>' + data['searchOperationSummary'] + '</p>';
     if (data['sizeExceeded']) {
-        html += ' ' + PWM_CONFIG.showString('Display_EditorLDAPSizeExceeded');
+        html += '<p>' + PWM_CONFIG.showString('Display_EditorLDAPSizeExceeded') + '</p>';
     }
     html += '</div>';
     return html;

@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,6 +55,7 @@ public abstract class AbstractPwmServlet extends HttpServlet implements PwmServl
 
     private static final PwmLogger LOGGER = PwmLogger.forClass( AbstractPwmServlet.class );
 
+    @Override
     public void doGet(
             final HttpServletRequest req,
             final HttpServletResponse resp
@@ -64,6 +65,7 @@ public abstract class AbstractPwmServlet extends HttpServlet implements PwmServl
         this.handleRequest( req, resp, HttpMethod.GET );
     }
 
+    @Override
     public void doPost(
             final HttpServletRequest req,
             final HttpServletResponse resp
@@ -311,13 +313,13 @@ public abstract class AbstractPwmServlet extends HttpServlet implements PwmServl
         String uri = pwmRequest.getURLwithoutQueryString();
         if ( uri.startsWith( pwmRequest.getContextPath() ) )
         {
-            uri = uri.substring( pwmRequest.getContextPath().length(), uri.length() );
+            uri = uri.substring( pwmRequest.getContextPath().length() );
         }
         for ( final String servletUri : getServletDefinition().urlPatterns() )
         {
             if ( uri.startsWith( servletUri ) )
             {
-                uri = uri.substring( servletUri.length(), uri.length() );
+                uri = uri.substring( servletUri.length() );
             }
         }
         return uri;

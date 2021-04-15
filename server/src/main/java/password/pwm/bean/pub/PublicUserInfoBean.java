@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ import password.pwm.config.profile.PwmPasswordRule;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.tag.PasswordRequirementsTag;
 import password.pwm.ldap.UserInfo;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -72,7 +72,7 @@ public class PublicUserInfoBean implements Serializable
             final UserInfo userInfoBean,
             final Configuration config,
             final Locale locale,
-            final MacroMachine macroMachine
+            final MacroRequest macroRequest
     )
             throws PwmUnrecoverableException
     {
@@ -110,7 +110,7 @@ public class PublicUserInfoBean implements Serializable
                 userInfoBean.getPasswordPolicy(),
                 config,
                 locale,
-                macroMachine
+                macroRequest
         );
 
         if ( userInfoBean.getCachedAttributeValues() != null && !userInfoBean.getCachedAttributeValues().isEmpty() )

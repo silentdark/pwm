@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.localdb.LocalDB;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.secure.PwmRandom;
 
 import java.io.IOException;
@@ -80,7 +80,7 @@ public class TelemetryService implements PwmService
     private ErrorInformation lastError;
     private TelemetrySender sender;
 
-    private STATUS status = STATUS.NEW;
+    private STATUS status = STATUS.CLOSED;
 
 
     @Override
@@ -92,7 +92,6 @@ public class TelemetryService implements PwmService
     @Override
     public void init( final PwmApplication pwmApplication ) throws PwmException
     {
-        status = STATUS.OPENING;
         this.pwmApplication = pwmApplication;
 
         if ( pwmApplication.getApplicationMode() != PwmApplicationMode.RUNNING )
@@ -135,13 +134,9 @@ public class TelemetryService implements PwmService
             return;
         }
 
-        {
-            final Instant storedLastPublishTimestamp = pwmApplication.readAppAttribute( AppAttribute.TELEMETRY_LAST_PUBLISH_TIMESTAMP, Instant.class );
-            lastPublishTime = storedLastPublishTimestamp != null
-                    ? storedLastPublishTimestamp
-                    : pwmApplication.getInstallTime();
-            LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "last publish time was " + JavaHelper.toIsoDate( lastPublishTime ) );
-        }
+        lastPublishTime = pwmApplication.readAppAttribute( AppAttribute.TELEMETRY_LAST_PUBLISH_TIMESTAMP, Instant.class )
+                .orElse( pwmApplication.getInstallTime() );
+        LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "last publish time was " + JavaHelper.toIsoDate( lastPublishTime ) );
 
         executorService = PwmScheduler.makeBackgroundExecutor( pwmApplication, TelemetryService.class );
 
@@ -163,7 +158,7 @@ public class TelemetryService implements PwmService
         {
             final String senderClass = settings.getSenderImplementation();
             final Class theClass = Class.forName( senderClass );
-            telemetrySender = ( TelemetrySender ) theClass.newInstance();
+            telemetrySender = ( TelemetrySender ) theClass.getDeclaredConstructor().newInstance();
         }
         catch ( final Exception e )
         {
@@ -173,7 +168,7 @@ public class TelemetryService implements PwmService
 
         try
         {
-            final String macrodSettings = MacroMachine.forNonUserSpecific( pwmApplication, null ).expandMacros( settings.getSenderSettings() );
+            final String macrodSettings = MacroRequest.forNonUserSpecific( pwmApplication, null ).expandMacros( settings.getSenderSettings() );
             telemetrySender.init( pwmApplication, macrodSettings );
         }
         catch ( final Exception e )
@@ -259,7 +254,7 @@ public class TelemetryService implements PwmService
         {
             debugMap.put( "lastError", lastError.toDebugStr() );
         }
-        return new ServiceInfoBean( null, Collections.unmodifiableMap( debugMap ) );
+        return ServiceInfoBean.builder().debugProperties( debugMap ).build();
     }
 
 

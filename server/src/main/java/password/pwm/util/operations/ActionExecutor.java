@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ import password.pwm.util.BasicAuthInfo;
 import password.pwm.util.PasswordData;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -51,11 +51,10 @@ import java.util.Map;
 
 public class ActionExecutor
 {
-
     private static final PwmLogger LOGGER = PwmLogger.forClass( ActionExecutor.class );
 
-    private PwmApplication pwmApplication;
-    private ActionExecutorSettings settings;
+    private final PwmApplication pwmApplication;
+    private final ActionExecutorSettings settings;
 
     private ActionExecutor( final PwmApplication pwmApplication, final ActionExecutorSettings settings )
     {
@@ -128,10 +127,10 @@ public class ActionExecutor
             {
                 throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_INTERNAL, "executor specified macro expansion but did not supply macro machine" ) );
             }
-            final MacroMachine macroMachine = settings.getMacroMachine();
+            final MacroRequest macroRequest = settings.getMacroMachine();
 
-            attributeName = macroMachine.expandMacros( attributeName );
-            attributeValue = macroMachine.expandMacros( attributeValue );
+            attributeName = macroRequest.expandMacros( attributeName );
+            attributeValue = macroRequest.expandMacros( attributeValue );
         }
 
         try
@@ -160,11 +159,8 @@ public class ActionExecutor
     {
         String url = webAction.getUrl();
         String body = webAction.getBody();
+
         final Map<String, String> headers = new LinkedHashMap<>();
-        if ( webAction.getHeaders() != null )
-        {
-            headers.putAll( webAction.getHeaders() );
-        }
 
         try
         {
@@ -175,18 +171,21 @@ public class ActionExecutor
                 {
                     throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_INTERNAL, "executor specified macro expansion but did not supply macro machine" ) );
                 }
-                final MacroMachine macroMachine = settings.getMacroMachine();
+                final MacroRequest macroRequest = settings.getMacroMachine();
 
-                url = macroMachine.expandMacros( url );
-                body = body == null ? "" : macroMachine.expandMacros( body );
+                url = macroRequest.expandMacros( url );
+                body = body == null ? "" : macroRequest.expandMacros( body );
 
-                for ( final Map.Entry<String, String> entry : headers.entrySet() )
+                if ( webAction.getHeaders() != null )
                 {
-                    final String headerName = entry.getKey();
-                    final String headerValue = entry.getValue();
-                    if ( headerValue != null )
+                    for ( final Map.Entry<String, String> entry : webAction.getHeaders().entrySet() )
                     {
-                        headers.put( headerName, macroMachine.expandMacros( headerValue ) );
+                        final String headerName = entry.getKey();
+                        final String headerValue = entry.getValue();
+                        if ( headerValue != null )
+                        {
+                            headers.put( headerName, macroRequest.expandMacros( headerValue ) );
+                        }
                     }
                 }
             }
@@ -198,7 +197,8 @@ public class ActionExecutor
                 headers.put( HttpHeader.Authorization.getHttpName(), authHeaderValue );
             }
 
-            final HttpMethod method = HttpMethod.fromString( webAction.getMethod().toString() );
+            final HttpMethod method = HttpMethod.fromString( webAction.getMethod().toString() )
+                    .orElseThrow( () -> new IllegalStateException( "unaccepted http method" ) );
 
             final PwmHttpClientRequest clientRequest = PwmHttpClientRequest.builder()
                     .method( method )
@@ -261,7 +261,7 @@ public class ActionExecutor
             final String attrName,
             final String attrValue,
             final ActionConfiguration.LdapMethod ldapMethod,
-            final MacroMachine macroMachine
+            final MacroRequest macroRequest
     )
             throws PwmOperationalException, ChaiUnavailableException
     {
@@ -269,8 +269,8 @@ public class ActionExecutor
                 ? ActionConfiguration.LdapMethod.replace
                 : ldapMethod;
 
-        final String effectiveAttrValue = ( macroMachine != null )
-                ? macroMachine.expandMacros( attrValue )
+        final String effectiveAttrValue = ( macroRequest != null )
+                ? macroRequest.expandMacros( attrValue )
                 : attrValue;
 
 
@@ -344,7 +344,7 @@ public class ActionExecutor
         private final ChaiUser chaiUser;
 
         private boolean expandPwmMacros = true;
-        private MacroMachine macroMachine;
+        private MacroRequest macroRequest;
 
         public ActionExecutorSettings( final PwmApplication pwmApplication, final ChaiUser chaiUser )
         {
@@ -370,9 +370,9 @@ public class ActionExecutor
             return chaiUser;
         }
 
-        private MacroMachine getMacroMachine( )
+        private MacroRequest getMacroMachine( )
         {
-            return macroMachine;
+            return macroRequest;
         }
 
         private UserIdentity getUserIdentity( )
@@ -387,9 +387,9 @@ public class ActionExecutor
         }
 
 
-        public ActionExecutorSettings setMacroMachine( final MacroMachine macroMachine )
+        public ActionExecutorSettings setMacroMachine( final MacroRequest macroRequest )
         {
-            this.macroMachine = macroMachine;
+            this.macroRequest = macroRequest;
             return this;
         }
 

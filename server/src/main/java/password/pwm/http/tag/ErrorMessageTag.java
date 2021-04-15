@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmRequestAttribute;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -44,6 +44,7 @@ public class ErrorMessageTag extends PwmAbstractTag
 
     private static final PwmLogger LOGGER = PwmLogger.forClass( ErrorMessageTag.class );
 
+    @Override
     public int doEndTag( )
             throws javax.servlet.jsp.JspTagException
     {
@@ -87,8 +88,8 @@ public class ErrorMessageTag extends PwmAbstractTag
 
                 outputMsg = outputMsg.replace( "\n", "<br/>" );
 
-                final MacroMachine macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( );
-                outputMsg = macroMachine.expandMacros( outputMsg );
+                final MacroRequest macroRequest = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( );
+                outputMsg = macroRequest.expandMacros( outputMsg );
 
                 pageContext.getOut().write( outputMsg );
             }

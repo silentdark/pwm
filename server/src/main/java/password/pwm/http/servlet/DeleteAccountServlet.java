@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ import password.pwm.svc.event.AuditEvent;
 import password.pwm.svc.event.AuditRecord;
 import password.pwm.svc.event.AuditRecordFactory;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.operations.ActionExecutor;
 
 import javax.servlet.ServletException;
@@ -82,6 +82,7 @@ public class DeleteAccountServlet extends ControlledPwmServlet
             this.method = method;
         }
 
+        @Override
         public Collection<HttpMethod> permittedMethods( )
         {
             return Collections.singletonList( method );
@@ -143,8 +144,8 @@ public class DeleteAccountServlet extends ControlledPwmServlet
         {
             if ( !bean.isAgreementPassed() )
             {
-                final MacroMachine macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( );
-                final String expandedText = macroMachine.expandMacros( selfDeleteAgreementText );
+                final MacroRequest macroRequest = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( );
+                final String expandedText = macroRequest.expandMacros( selfDeleteAgreementText );
                 pwmRequest.setAttribute( PwmRequestAttribute.AgreementText, expandedText );
                 pwmRequest.forwardToJsp( JspUrl.SELF_DELETE_AGREE );
                 return;
@@ -183,7 +184,7 @@ public class DeleteAccountServlet extends ControlledPwmServlet
                     pwmRequest.getLabel(),
                     ProfileDefinition.DeleteAccount.toString()
             );
-            pwmRequest.getPwmApplication().getAuditManager().submit( auditRecord );
+            pwmRequest.getPwmApplication().getAuditManager().submit( pwmRequest.getLabel(), auditRecord );
         }
 
         return ProcessStatus.Continue;
@@ -234,8 +235,8 @@ public class DeleteAccountServlet extends ControlledPwmServlet
         final String nextUrl = deleteAccountProfile.readSettingAsString( PwmSetting.DELETE_ACCOUNT_NEXT_URL );
         if ( nextUrl != null && !nextUrl.isEmpty() )
         {
-            final MacroMachine macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( );
-            final String macroedUrl = macroMachine.expandMacros( nextUrl );
+            final MacroRequest macroRequest = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( );
+            final String macroedUrl = macroRequest.expandMacros( nextUrl );
             LOGGER.debug( pwmRequest, () -> "setting forward url to post-delete next url: " + macroedUrl );
             pwmRequest.getPwmSession().getSessionStateBean().setForwardURL( macroedUrl );
         }

@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -98,12 +98,14 @@ public class SetupOtpServlet extends ControlledPwmServlet
             this.method = method;
         }
 
+        @Override
         public Collection<HttpMethod> permittedMethods( )
         {
             return Collections.singletonList( method );
         }
     }
 
+    @Override
     public Class<? extends ProcessAction> getProcessActionsClass( )
     {
         return SetupOtpAction.class;
@@ -194,7 +196,7 @@ public class SetupOtpServlet extends ControlledPwmServlet
                         pwmSession.getUserInfo(),
                         pwmSession
                 );
-                pwmApplication.getAuditManager().submit( auditRecord );
+                pwmApplication.getAuditManager().submit( pwmRequest.getLabel(), auditRecord );
 
 
                 if ( pwmApplication.getStatisticsManager() != null && pwmApplication.getStatisticsManager().status() == PwmService.STATUS.OPEN )

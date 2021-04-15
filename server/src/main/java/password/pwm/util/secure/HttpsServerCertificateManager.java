@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import password.pwm.PwmApplication;
 import password.pwm.bean.PrivateKeyCertificate;
 import password.pwm.config.Configuration;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.StoredValue;
+import password.pwm.config.value.StoredValue;
 import password.pwm.config.stored.StoredConfigurationModifier;
 import password.pwm.config.value.PrivateKeyValue;
 import password.pwm.error.ErrorInformation;
@@ -91,7 +91,7 @@ public class HttpsServerCertificateManager
                     alias,
                     new KeyStore.PrivateKeyEntry(
                             privateKeyCertificate.getKey(),
-                            privateKeyCertificate.getCertificates().toArray( new X509Certificate[ privateKeyCertificate.getCertificates().size() ] )
+                            privateKeyCertificate.getCertificates().toArray( new X509Certificate[0] )
                     ),
                     passwordProtection
             );

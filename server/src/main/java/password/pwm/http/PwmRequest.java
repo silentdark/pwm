@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,6 +47,7 @@ import password.pwm.ldap.UserInfo;
 import password.pwm.util.Validator;
 import password.pwm.util.java.LazySupplier;
 import password.pwm.util.java.StringUtil;
+import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogLevel;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmSecurityKey;
@@ -59,14 +60,17 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Serializable;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 public class PwmRequest extends PwmHttpRequestWrapper
@@ -81,7 +85,9 @@ public class PwmRequest extends PwmHttpRequestWrapper
     private final transient PwmSession pwmSession;
     private final transient Supplier<SessionLabel> sessionLabelLazySupplier = new LazySupplier<>( this::makeSessionLabel );
 
-    private final Set<PwmRequestFlag> flags = new HashSet<>();
+    private final Set<PwmRequestFlag> flags = EnumSet.noneOf( PwmRequestFlag.class );
+    private final Instant requestStartTime = Instant.now();
+    private final Lock cspCreationLock = new ReentrantLock();
 
     public static PwmRequest forRequest(
             final HttpServletRequest request,
@@ -385,13 +391,13 @@ public class PwmRequest extends PwmHttpRequestWrapper
         return pwmURL;
     }
 
-    public void debugHttpRequestToLog( final String extraText )
+    public void debugHttpRequestToLog( final String extraText, final Supplier<TimeDuration> timeDuration )
             throws PwmUnrecoverableException
     {
         if ( LOGGER.isEnabled( PwmLogLevel.TRACE ) )
         {
             final String debugTxt = debugHttpRequestToString( extraText, false );
-            LOGGER.trace( this.getLabel(), () -> debugTxt );
+            LOGGER.trace( this.getLabel(), () -> debugTxt, timeDuration );
         }
     }
 
@@ -492,16 +498,24 @@ public class PwmRequest extends PwmHttpRequestWrapper
         return ssBean.getLogoutURL() == null ? pwmApplication.getConfig().readSettingAsString( PwmSetting.URL_LOGOUT ) : ssBean.getLogoutURL();
     }
 
-    public synchronized String getCspNonce( )
+    public String getCspNonce( )
     {
-        if ( getAttribute( PwmRequestAttribute.CspNonce ) == null )
+        cspCreationLock.lock();
+        try
         {
-            final int nonceLength = Integer.parseInt( getConfig().readAppProperty( AppProperty.HTTP_HEADER_CSP_NONCE_BYTES ) );
-            final byte[] cspNonce = pwmApplication.getSecureService().pwmRandom().newBytes( nonceLength );
-            final String cspString = StringUtil.base64Encode( cspNonce );
-            setAttribute( PwmRequestAttribute.CspNonce, cspString );
+            if ( getAttribute( PwmRequestAttribute.CspNonce ) == null )
+            {
+                final int nonceLength = Integer.parseInt( getConfig().readAppProperty( AppProperty.HTTP_HEADER_CSP_NONCE_BYTES ) );
+                final byte[] cspNonce = pwmApplication.getSecureService().pwmRandom().newBytes( nonceLength );
+                final String cspString = StringUtil.base64Encode( cspNonce );
+                setAttribute( PwmRequestAttribute.CspNonce, cspString );
+            }
+            return ( String ) getAttribute( PwmRequestAttribute.CspNonce );
         }
-        return ( String ) getAttribute( PwmRequestAttribute.CspNonce );
+        finally
+        {
+            cspCreationLock.unlock();
+        }
     }
 
     public <T extends Serializable> T readEncryptedCookie( final String cookieName, final Class<T> returnClass )
@@ -518,6 +532,7 @@ public class PwmRequest extends PwmHttpRequestWrapper
         return null;
     }
 
+    @Override
     public String toString( )
     {
         return this.getClass().getSimpleName() + " "
@@ -583,13 +598,23 @@ public class PwmRequest extends PwmHttpRequestWrapper
         return false;
     }
 
-    public CommonValues commonValues()
+    public PwmRequestContext getPwmRequestContext()
     {
-        return new CommonValues( pwmApplication, this.getLabel(), this.getLocale(), pwmRequestID );
+        return new PwmRequestContext( pwmApplication, this.getLabel(), this.getLocale(), pwmRequestID );
     }
 
     public String getPwmRequestID()
     {
         return pwmRequestID.toString();
+    }
+
+    public Instant getRequestStartTime()
+    {
+        return requestStartTime;
+    }
+
+    public String getDomainID()
+    {
+        return PwmConstants.DOMAIN_ID_DEFAULT;
     }
 }

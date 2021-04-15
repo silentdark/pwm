@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import password.pwm.PwmApplication;
 import password.pwm.bean.SessionLabel;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.http.CommonValues;
+import password.pwm.http.PwmRequestContext;
 import password.pwm.http.HttpContentType;
 import password.pwm.http.HttpHeader;
 import password.pwm.http.PwmHttpRequestWrapper;
@@ -36,6 +36,7 @@ import password.pwm.util.logging.PwmLogger;
 import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 public class RestRequest extends PwmHttpRequestWrapper
 {
@@ -81,18 +82,17 @@ public class RestRequest extends PwmHttpRequestWrapper
         return pwmApplication;
     }
 
-    public HttpContentType readContentType( )
+    public Optional<HttpContentType> readContentType( )
     {
         return HttpContentType.fromContentTypeHeader( readHeaderValueAsString( HttpHeader.ContentType ), null );
     }
 
-    public HttpContentType readAcceptType( )
+    public Optional<HttpContentType> readAcceptType( )
     {
-
         return readAcceptType( getHttpServletRequest() );
     }
 
-    static HttpContentType readAcceptType( final HttpServletRequest request )
+    static Optional<HttpContentType> readAcceptType( final HttpServletRequest request )
     {
         final String acceptHeaderValue = request.getHeader( HttpHeader.Accept.getHttpName() );
         return HttpContentType.fromContentTypeHeader( acceptHeaderValue, HttpContentType.json );
@@ -124,9 +124,9 @@ public class RestRequest extends PwmHttpRequestWrapper
         return getPwmApplication().getProxyChaiProvider( ldapProfileID );
     }
 
-    public CommonValues commonValues()
+    public PwmRequestContext commonValues()
     {
-        return new CommonValues( pwmApplication, this.getSessionLabel(), this.getLocale(), requestID );
+        return new PwmRequestContext( pwmApplication, this.getSessionLabel(), this.getLocale(), requestID );
     }
 }
 

@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,6 +44,7 @@ public class AuthorizationFilter extends AbstractPwmFilter
 
     private static final PwmLogger LOGGER = PwmLogger.forClass( AuthenticationFilter.class );
 
+    @Override
     public void init( final FilterConfig filterConfig )
             throws ServletException
     {
@@ -55,6 +56,7 @@ public class AuthorizationFilter extends AbstractPwmFilter
         return !pwmURL.isRestService();
     }
 
+    @Override
     public void processFilter(
             final PwmApplicationMode mode,
             final PwmRequest pwmRequest,
@@ -94,6 +96,7 @@ public class AuthorizationFilter extends AbstractPwmFilter
         pwmRequest.respondWithError( PwmError.ERROR_UNAUTHORIZED.toInfo() );
     }
 
+    @Override
     public void destroy( )
     {
     }

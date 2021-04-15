@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ import password.pwm.bean.UserIdentity;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.http.CommonValues;
+import password.pwm.http.PwmRequestContext;
 import password.pwm.util.PasswordData;
 
 import java.util.Locale;
@@ -74,13 +74,13 @@ public class UserInfoFactory
     }
 
     public static UserInfo newUserInfoUsingProxy(
-            final CommonValues commonValues,
+            final PwmRequestContext pwmRequestContext,
             final UserIdentity userIdentity
     )
             throws PwmUnrecoverableException
     {
-        final ChaiProvider provider = commonValues.getPwmApplication().getProxyChaiProvider( userIdentity.getLdapProfileID() );
-        return newUserInfo( commonValues.getPwmApplication(), commonValues.getSessionLabel(), commonValues.getLocale(), userIdentity, provider, null );
+        final ChaiProvider provider = pwmRequestContext.getPwmApplication().getProxyChaiProvider( userIdentity.getLdapProfileID() );
+        return newUserInfo( pwmRequestContext.getPwmApplication(), pwmRequestContext.getSessionLabel(), pwmRequestContext.getLocale(), userIdentity, provider, null );
     }
 
     public static UserInfo newUserInfoUsingProxy(

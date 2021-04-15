@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -83,7 +83,7 @@ public class StatisticsManager implements PwmService
 
     private PwmApplication pwmApplication;
 
-    private STATUS status = STATUS.NEW;
+    private STATUS status = STATUS.CLOSED;
 
 
     private final Map<String, StatisticsBundle> cachedStoredStats = new LinkedHashMap<String, StatisticsBundle>()
@@ -229,15 +229,15 @@ public class StatisticsManager implements PwmService
         return sb.toString();
     }
 
+    @Override
     public void init( final PwmApplication pwmApplication ) throws PwmException
     {
-        status = STATUS.OPENING;
         this.localDB = pwmApplication.getLocalDB();
         this.pwmApplication = pwmApplication;
 
         if ( localDB == null )
         {
-            LOGGER.error( () -> "LocalDB is not available, will remain closed" );
+            LOGGER.debug( () -> "LocalDB is not available, will remain closed" );
             status = STATUS.CLOSED;
             return;
         }
@@ -336,12 +336,14 @@ public class StatisticsManager implements PwmService
         LOGGER.debug( () -> "reset daily statistics" );
     }
 
+    @Override
     public STATUS status( )
     {
         return status;
     }
 
 
+    @Override
     public void close( )
     {
         try
@@ -358,6 +360,7 @@ public class StatisticsManager implements PwmService
         status = STATUS.CLOSED;
     }
 
+    @Override
     public List<HealthRecord> healthCheck( )
     {
         return Collections.emptyList();
@@ -366,6 +369,7 @@ public class StatisticsManager implements PwmService
 
     private class NightlyTask extends TimerTask
     {
+        @Override
         public void run( )
         {
             writeDbValues();
@@ -375,6 +379,7 @@ public class StatisticsManager implements PwmService
 
     private class FlushTask extends TimerTask
     {
+        @Override
         public void run( )
         {
             writeDbValues();
@@ -445,11 +450,12 @@ public class StatisticsManager implements PwmService
         return counter;
     }
 
+    @Override
     public ServiceInfoBean serviceInfo( )
     {
         return status() == STATUS.OPEN
-                ? new ServiceInfoBean( Collections.singletonList( DataStorageMethod.LOCALDB ) )
-                : new ServiceInfoBean( Collections.emptyList() );
+                ? ServiceInfoBean.builder().storageMethod( DataStorageMethod.LOCALDB ).build()
+                : ServiceInfoBean.builder().build();
     }
 
     public static void incrementStat(

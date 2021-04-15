@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ import password.pwm.svc.httpclient.PwmHttpClientResponse;
 import password.pwm.ldap.UserInfo;
 import password.pwm.util.java.JsonUtil;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -142,11 +142,11 @@ public class RemoteVerificationMethod implements VerificationMethodSystem
         headers.put( HttpHeader.ContentType.getHttpName(), HttpContentType.json.getHeaderValueWithEncoding() );
         headers.put( HttpHeader.AcceptLanguage.getHttpName(), locale.toLanguageTag() );
 
-        final MacroMachine macroMachine = MacroMachine.forUser( pwmApplication, sessionLabel, userInfo, null );
+        final MacroRequest macroRequest = MacroRequest.forUser( pwmApplication, sessionLabel, userInfo, null );
 
         final RemoteVerificationRequestBean remoteVerificationRequestBean = RemoteVerificationRequestBean.builder()
             .responseSessionID( this.remoteSessionID )
-            .userInfo( PublicUserInfoBean.fromUserInfoBean( userInfo, pwmApplication.getConfig(), locale, macroMachine ) )
+            .userInfo( PublicUserInfoBean.fromUserInfoBean( userInfo, pwmApplication.getConfig(), locale, macroRequest ) )
             .userResponses( userResponses )
             .build();
 
@@ -188,7 +188,7 @@ public class RemoteVerificationMethod implements VerificationMethodSystem
                 final String name = entry.getKey();
                 if ( name != null && name.startsWith( prefix ) )
                 {
-                    final String strippedName = name.substring( prefix.length(), name.length() );
+                    final String strippedName = name.substring( prefix.length() );
                     final String value = entry.getValue();
                     remoteResponses.put( strippedName, value );
                 }

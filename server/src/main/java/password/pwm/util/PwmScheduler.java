@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ package password.pwm.util;
 import org.jetbrains.annotations.NotNull;
 import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
+import password.pwm.util.java.AtomicLoopIntIncrementer;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
@@ -45,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 public class PwmScheduler
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmScheduler.class );
+    private static final AtomicLoopIntIncrementer THREAD_ID_COUNTER = new AtomicLoopIntIncrementer();
     private final ScheduledExecutorService applicationExecutorService;
     private final String instanceID;
 
@@ -60,10 +62,16 @@ public class PwmScheduler
     }
 
     public Future immediateExecuteInNewThread(
-            final Runnable runnable
+            final Runnable runnable,
+            final String threadName
     )
     {
         Objects.requireNonNull( runnable );
+
+        final Instant itemStartTime = Instant.now();
+        final String name = "runtime thread #" + THREAD_ID_COUNTER.next() + " " + threadName;
+
+        LOGGER.trace( () -> "started " + name );
 
         final ScheduledExecutorService executor = makeSingleThreadExecutorService( instanceID, runnable.getClass() );
 
@@ -72,7 +80,13 @@ public class PwmScheduler
             return null;
         }
 
-        final WrappedRunner wrappedRunner = new WrappedRunner( runnable, executor, WrappedRunner.Flag.ShutdownExecutorAfterExecution );
+        final Runnable logOutputWrapper = () ->
+        {
+            runnable.run();
+            LOGGER.trace( () -> "completed " + name, () -> TimeDuration.fromCurrent( itemStartTime ) );
+        };
+
+        final WrappedRunner wrappedRunner =  new WrappedRunner( logOutputWrapper, executor, WrappedRunner.Flag.ShutdownExecutorAfterExecution );
         applicationExecutorService.submit( wrappedRunner );
         return wrappedRunner.getFuture();
     }
@@ -84,8 +98,8 @@ public class PwmScheduler
     )
     {
         final TimeDuration delayTillNextZulu = TimeDuration.fromCurrent( nextZuluZeroTime() );
-        final TimeDuration delayTillNextOFfiset = delayTillNextZulu.add( offset );
-        scheduleFixedRateJob( runnable, executorService, delayTillNextOFfiset, TimeDuration.DAY );
+        final TimeDuration delayTillNextOffset = delayTillNextZulu.add( offset );
+        scheduleFixedRateJob( runnable, executorService, delayTillNextOffset, TimeDuration.DAY );
     }
 
     public Future scheduleJob(
@@ -255,7 +269,7 @@ public class PwmScheduler
                 @Override
                 public boolean isDone()
                 {
-                    return hasFailed || innerFuture != null && innerFuture.isDone();
+                    return hasFailed || ( innerFuture != null && innerFuture.isDone() );
                 }
 
                 @Override

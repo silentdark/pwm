@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,28 +32,32 @@ import password.pwm.config.option.SmtpServerType;
 import password.pwm.config.profile.EmailServerProfile;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
+import password.pwm.health.HealthMessage;
+import password.pwm.health.HealthRecord;
 import password.pwm.http.HttpContentType;
 import password.pwm.util.PasswordData;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.StringUtil;
+import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
-import password.pwm.util.secure.PwmTrustManager;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.secure.CertificateReadingTrustManager;
+import password.pwm.util.secure.PwmTrustManager;
 import password.pwm.util.secure.X509Utils;
 
-import javax.mail.Message;
-import javax.mail.MessagingException;
-import javax.mail.Transport;
-import javax.mail.internet.AddressException;
-import javax.mail.internet.InternetAddress;
-import javax.mail.internet.MimeBodyPart;
-import javax.mail.internet.MimeMessage;
-import javax.mail.internet.MimeMultipart;
+import jakarta.mail.Message;
+import jakarta.mail.MessagingException;
+import jakarta.mail.Transport;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeBodyPart;
+import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMultipart;
 import javax.net.ssl.TrustManager;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.security.cert.X509Certificate;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -109,7 +113,7 @@ public class EmailServerUtil
                     ? trustManagerForProfile( configuration, profile )
                     : trustManagers;
             final Properties properties = makeJavaMailProps( configuration, profile, effectiveTrustManagers );
-            final javax.mail.Session session = javax.mail.Session.getInstance( properties, null );
+            final jakarta.mail.Session session = jakarta.mail.Session.getInstance( properties, null );
             return Optional.of( EmailServer.builder()
                     .id( id )
                     .host( address )
@@ -240,15 +244,15 @@ public class EmailServerUtil
         return new InternetAddress( input );
     }
 
-    static EmailItemBean applyMacrosToEmail( final EmailItemBean emailItem, final MacroMachine macroMachine )
+    static EmailItemBean applyMacrosToEmail( final EmailItemBean emailItem, final MacroRequest macroRequest )
     {
         final EmailItemBean expandedEmailItem;
         expandedEmailItem = new EmailItemBean(
-                macroMachine.expandMacros( emailItem.getTo() ),
-                macroMachine.expandMacros( emailItem.getFrom() ),
-                macroMachine.expandMacros( emailItem.getSubject() ),
-                macroMachine.expandMacros( emailItem.getBodyPlain() ),
-                macroMachine.expandMacros( emailItem.getBodyHtml() )
+                macroRequest.expandMacros( emailItem.getTo() ),
+                macroRequest.expandMacros( emailItem.getFrom() ),
+                macroRequest.expandMacros( emailItem.getSubject() ),
+                macroRequest.expandMacros( emailItem.getBodyPlain() ),
+                macroRequest.expandMacros( emailItem.getBodyHtml() )
         );
         return expandedEmailItem;
     }
@@ -365,6 +369,7 @@ public class EmailServerUtil
     static Transport makeSmtpTransport( final EmailServer server )
             throws MessagingException, PwmUnrecoverableException
     {
+        final Instant startTime = Instant.now();
         // Login to SMTP server first if both username and password is given
         final boolean authenticated = !StringUtil.isEmpty( server.getUsername() ) && server.getPassword() != null;
 
@@ -385,7 +390,8 @@ public class EmailServerUtil
             transport.connect();
         }
 
-        LOGGER.debug( () -> "connected to " + server.toDebugString() + " " + ( authenticated ? "(authenticated)" : "(unauthenticated)" ) );
+        LOGGER.debug( () -> "connected to " + server.toDebugString() + " " + ( authenticated ? "(authenticated)" : "(unauthenticated)" ),
+                () -> TimeDuration.fromCurrent( startTime ) );
 
         return transport;
     }
@@ -405,7 +411,7 @@ public class EmailServerUtil
         final Optional<EmailServer> emailServer = makeEmailServer( configuration, emailServerProfile, trustManagers );
         if ( emailServer.isPresent() )
         {
-            try ( Transport transport = makeSmtpTransport( emailServer.get() ); )
+            try ( Transport transport = makeSmtpTransport( emailServer.get() ) )
             {
                 return certReaderTm.getCertificates();
             }
@@ -419,5 +425,28 @@ public class EmailServerUtil
         }
 
         return Collections.emptyList();
+    }
+
+    static List<HealthRecord> checkAllConfiguredServers( final List<EmailServer> emailServers )
+    {
+        final List<HealthRecord> records = new ArrayList<>();
+        for ( final EmailServer emailServer : emailServers )
+        {
+            try
+            {
+                final Transport transport = EmailServerUtil.makeSmtpTransport( emailServer );
+                if ( !transport.isConnected() )
+                {
+                    records.add( HealthRecord.forMessage( HealthMessage.Email_ConnectFailure, emailServer.getId(), "unable to connect" ) );
+                }
+                transport.close();
+            }
+            catch ( final Exception e )
+            {
+                records.add( HealthRecord.forMessage( HealthMessage.Email_ConnectFailure, emailServer.getId(), e.getMessage() ) );
+            }
+        }
+
+        return Collections.unmodifiableList( records );
     }
 }

@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmURL;
 import password.pwm.http.bean.ImmutableByteArray;
 import password.pwm.ldap.LdapOperationsHelper;
-import password.pwm.ldap.LdapPermissionTester;
+import password.pwm.ldap.permission.UserPermissionUtility;
 import password.pwm.ldap.PhotoDataBean;
 import password.pwm.svc.httpclient.PwmHttpClient;
 import password.pwm.svc.httpclient.PwmHttpClientConfiguration;
@@ -49,7 +49,7 @@ import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.OutputStream;
@@ -123,7 +123,7 @@ public class PhotoDataReader
             return true;
         }
 
-        final boolean hasPermission = LdapPermissionTester.testUserPermissions( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userIdentity, permissions );
+        final boolean hasPermission = UserPermissionUtility.testUserPermission( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userIdentity, permissions );
         if ( !hasPermission )
         {
             LOGGER.debug( pwmRequest, () -> "user " + userIdentity + " failed photo query filter, denying photo view ("
@@ -267,8 +267,8 @@ public class PhotoDataReader
 
         if ( !StringUtil.isEmpty( configuredUrl ) )
         {
-            final MacroMachine macroMachine = MacroMachine.forUser( pwmRequest.commonValues(), userIdentity );
-            return Optional.of( macroMachine.expandMacros( configuredUrl ) );
+            final MacroRequest macroRequest = MacroRequest.forUser( pwmRequest.getPwmRequestContext(), userIdentity );
+            return Optional.of( macroRequest.expandMacros( configuredUrl ) );
 
         }
 
@@ -296,7 +296,7 @@ public class PhotoDataReader
 
                 if ( photoDataBean.getContents() != null && !photoDataBean.getContents().isEmpty() )
                 {
-                    outputStream.write( photoDataBean.getContents().copyOf() );
+                    JavaHelper.copy( photoDataBean.getContents().newByteArrayInputStream(), outputStream );
                 }
             }
         }

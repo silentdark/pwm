@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,19 +27,24 @@ import password.pwm.PwmConstants;
 import password.pwm.config.Configuration;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingSyntax;
-import password.pwm.config.StoredValue;
 import password.pwm.config.option.DataStorageMethod;
 import password.pwm.config.option.MessageSendMethod;
 import password.pwm.config.profile.ActivateUserProfile;
+import password.pwm.config.profile.ChangePasswordProfile;
 import password.pwm.config.profile.ForgottenPasswordProfile;
 import password.pwm.config.profile.HelpdeskProfile;
 import password.pwm.config.profile.LdapProfile;
 import password.pwm.config.profile.NewUserProfile;
 import password.pwm.config.profile.PwmPasswordPolicy;
 import password.pwm.config.stored.StoredConfigItemKey;
+import password.pwm.config.stored.StoredConfiguration;
+import password.pwm.config.value.StoredValue;
+import password.pwm.config.value.ValueTypeConverter;
 import password.pwm.config.value.data.FormConfiguration;
+import password.pwm.config.value.data.UserPermission;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.i18n.Config;
+import password.pwm.ldap.permission.UserPermissionUtility;
 import password.pwm.util.PasswordData;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.StringUtil;
@@ -48,13 +53,13 @@ import password.pwm.util.password.PasswordUtility;
 
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -62,6 +67,7 @@ public class ConfigurationChecker implements HealthChecker
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( ConfigurationChecker.class );
 
+    @Override
     public List<HealthRecord> doHealthCheck( final PwmApplication pwmApplication )
     {
         if ( pwmApplication.getConfig() == null )
@@ -88,14 +94,17 @@ public class ConfigurationChecker implements HealthChecker
                 }
                 catch ( final PwmUnrecoverableException e )
                 {
-                    records.add( new HealthRecord( HealthStatus.WARN, HealthTopic.Configuration, e.getMessage() ) );
+                    records.add( HealthRecord.forMessage(
+                            HealthMessage.NewUser_PwTemplateBad,
+                             PwmSetting.NEWUSER_PASSWORD_POLICY_USER.toMenuLocationDebug( newUserProfile.getIdentifier(), PwmConstants.DEFAULT_LOCALE ),
+                             e.getMessage() ) );
                 }
             }
         }
 
         records.addAll( doHealthCheck( config, PwmConstants.DEFAULT_LOCALE ) );
 
-        return records;
+        return Collections.unmodifiableList( records );
     }
 
     public List<HealthRecord> doHealthCheck( final Configuration config, final Locale locale )
@@ -139,7 +148,9 @@ public class ConfigurationChecker implements HealthChecker
             VerifyDbConfiguredIfNeeded.class,
             VerifyIfDeprecatedSendMethodValuesUsed.class,
             VerifyIfDeprecatedJsFormOptionUsed.class,
-            VerifyNewUserLdapProfile.class
+            VerifyNewUserLdapProfile.class,
+            VerifyPasswordWaitTimes.class,
+            VerifyUserPermissionSettings.class
     ) );
 
     static class VerifyBasicConfigs implements ConfigHealthCheck
@@ -238,7 +249,6 @@ public class ConfigurationChecker implements HealthChecker
             {
                 for ( final StoredConfigItemKey key : config.getStoredConfiguration().modifiedItems() )
                 {
-                    final Instant startTime = Instant.now();
                     if ( key.getRecordType() == StoredConfigItemKey.RecordType.SETTING )
                     {
                         final PwmSetting pwmSetting = key.toPwmSetting();
@@ -286,7 +296,7 @@ public class ConfigurationChecker implements HealthChecker
                     {
                             PwmSetting.FORGOTTEN_PASSWORD_READ_PREFERENCE,
                             PwmSetting.FORGOTTEN_PASSWORD_WRITE_PREFERENCE,
-                    };
+                            };
             for ( final PwmSetting loopSetting : interestedSettings )
             {
                 if ( config.getResponseStorageLocations( loopSetting ).contains( DataStorageMethod.LDAP ) )
@@ -324,7 +334,7 @@ public class ConfigurationChecker implements HealthChecker
                             PwmSetting.FORGOTTEN_PASSWORD_WRITE_PREFERENCE,
                             PwmSetting.INTRUDER_STORAGE_METHOD,
                             PwmSetting.EVENTS_USER_STORAGE_METHOD,
-                    };
+                            };
 
                     for ( final PwmSetting loopSetting : settingsToCheck )
                     {
@@ -484,7 +494,7 @@ public class ConfigurationChecker implements HealthChecker
                 {
                     records.add( HealthRecord.forMessage( HealthMessage.Config_InvalidSendMethod,
                             method.toString(),
-                            PwmSetting.ACTIVATE_TOKEN_SEND_METHOD.toMenuLocationDebug( null, locale )
+                            PwmSetting.ACTIVATE_TOKEN_SEND_METHOD.toMenuLocationDebug( activationProfile.getIdentifier(), locale )
                     ) );
                 }
             }
@@ -543,6 +553,108 @@ public class ConfigurationChecker implements HealthChecker
         }
     }
 
+    static class VerifyPasswordWaitTimes implements ConfigHealthCheck
+    {
+        @Override
+        public List<HealthRecord> healthCheck( final Configuration config, final Locale locale )
+        {
+            final List<HealthRecord> records = new ArrayList<>();
+
+            for ( final ChangePasswordProfile changePasswordProfile : config.getChangePasswordProfile().values() )
+            {
+                final long minValue = changePasswordProfile.readSettingAsLong( PwmSetting.PASSWORD_SYNC_MIN_WAIT_TIME );
+                final long maxValue = changePasswordProfile.readSettingAsLong( PwmSetting.PASSWORD_SYNC_MAX_WAIT_TIME );
+                if ( maxValue > 0 && minValue > maxValue )
+                {
+                    final String profileID = changePasswordProfile.getIdentifier();
+                    final String detailMsg = " (" + minValue + ")"
+                            + " > "
+                            + " (" + maxValue + ")";
+                    records.add( HealthRecord.forMessage(
+                            HealthMessage.Config_ValueConflict,
+                            PwmSetting.PASSWORD_SYNC_MAX_WAIT_TIME.toMenuLocationDebug( profileID, locale ),
+                            PwmSetting.PASSWORD_SYNC_MIN_WAIT_TIME.toMenuLocationDebug( profileID, locale ),
+                            detailMsg
+                    ) );
+                }
+            }
+            return records;
+        }
+    }
+
+
+
+    static class VerifyUserPermissionSettings implements ConfigHealthCheck
+    {
+        @Override
+        public List<HealthRecord> healthCheck( final Configuration config, final Locale locale )
+        {
+            final List<HealthRecord> records = new ArrayList<>();
+
+            final StoredConfiguration storedConfiguration = config.getStoredConfiguration();
+            for ( final StoredConfigItemKey configItemKey : StoredConfigItemKey.filterBySettingSyntax(
+                    PwmSettingSyntax.USER_PERMISSION,
+                    storedConfiguration.modifiedItems() ) )
+            {
+                final StoredValue storedValue = storedConfiguration.readStoredValue( configItemKey ).orElseThrow( NoSuchElementException::new );
+                final List<UserPermission> permissions = ValueTypeConverter.valueToUserPermissions( storedValue );
+                for ( final UserPermission permission : permissions )
+                {
+                    try
+                    {
+                        UserPermissionUtility.validatePermissionSyntax( permission );
+                    }
+                    catch ( final PwmUnrecoverableException e )
+                    {
+                        final PwmSetting pwmSetting = configItemKey.toPwmSetting();
+                        records.add( HealthRecord.forMessage(
+                                HealthMessage.Config_SettingIssue,
+                                pwmSetting.toMenuLocationDebug( configItemKey.getProfileID(), locale ),
+                                e.getMessage() ) );
+                    }
+
+                    records.addAll( checkLdapProfile( config, configItemKey, locale, permission ) );
+                }
+            }
+
+            return Collections.unmodifiableList( records );
+        }
+
+        private static List<HealthRecord> checkLdapProfile(
+                final Configuration configuration,
+                final StoredConfigItemKey storedConfigItemKey,
+                final Locale locale,
+                final UserPermission permission
+        )
+        {
+            final List<LdapProfile> ldapProfiles = ldapProfilesForLdapProfileSetting( configuration, permission.getLdapProfileID() );
+            if ( ldapProfiles.isEmpty()  )
+            {
+                final PwmSetting pwmSetting = storedConfigItemKey.toPwmSetting();
+                return Collections.singletonList( HealthRecord.forMessage(
+                        HealthMessage.Config_ProfileValueValidity,
+                        pwmSetting.toMenuLocationDebug( storedConfigItemKey.getProfileID(), locale ),
+                        permission.getLdapProfileID() ) );
+            }
+
+            return Collections.emptyList();
+        }
+
+        public static List<LdapProfile> ldapProfilesForLdapProfileSetting( final Configuration configuration, final String profileID )
+        {
+            if ( UserPermissionUtility.isAllProfiles( profileID ) )
+            {
+                return Collections.unmodifiableList( new ArrayList<>( configuration.getLdapProfiles().values() ) );
+            }
+
+            if ( configuration.getLdapProfiles().containsKey( profileID ) )
+            {
+                return Collections.singletonList( configuration.getLdapProfiles().get( profileID ) );
+            }
+
+            return Collections.emptyList();
+        }
+    }
 
     interface ConfigHealthCheck
     {

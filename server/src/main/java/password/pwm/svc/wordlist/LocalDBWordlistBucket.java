@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -119,12 +119,8 @@ class LocalDBWordlistBucket extends AbstractWordlistBucket implements WordlistBu
     public WordlistStatus readWordlistStatus()
     {
         final AppAttribute appAttribute = wordlistConfiguration.getMetaDataAppAttribute();
-        final WordlistStatus storedValue = pwmApplication.readAppAttribute( appAttribute, WordlistStatus.class );
-        if ( storedValue != null )
-        {
-            return storedValue;
-        }
-        return WordlistStatus.builder().build();
+        return pwmApplication.readAppAttribute( appAttribute, WordlistStatus.class )
+                .orElseGet( () -> WordlistStatus.builder().build() );
     }
 
     @Override

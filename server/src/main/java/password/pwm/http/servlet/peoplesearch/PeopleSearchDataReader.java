@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ import password.pwm.bean.UserIdentity;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.profile.PeopleSearchProfile;
 import password.pwm.config.value.data.FormConfiguration;
+import password.pwm.config.value.data.UserPermission;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmOperationalException;
@@ -48,10 +49,11 @@ import password.pwm.http.servlet.peoplesearch.bean.SearchResultBean;
 import password.pwm.http.servlet.peoplesearch.bean.UserDetailBean;
 import password.pwm.http.servlet.peoplesearch.bean.UserReferenceBean;
 import password.pwm.i18n.Display;
-import password.pwm.ldap.LdapPermissionTester;
+import password.pwm.ldap.permission.UserPermissionUtility;
 import password.pwm.ldap.PhotoDataBean;
 import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.UserInfoFactory;
+import password.pwm.ldap.permission.UserPermissionType;
 import password.pwm.ldap.search.SearchConfiguration;
 import password.pwm.ldap.search.UserSearchEngine;
 import password.pwm.ldap.search.UserSearchResults;
@@ -66,7 +68,7 @@ import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -306,12 +308,12 @@ class PeopleSearchDataReader
             return Collections.emptyList();
         }
         final List<LinkReferenceBean> returnList = new ArrayList<>();
-        final MacroMachine macroMachine = getMacroMachine( actorIdentity );
+        final MacroRequest macroRequest = getMacroMachine( actorIdentity );
         for ( final Map.Entry<String, String> entry : linkMap.entrySet() )
         {
             final String key = entry.getKey();
             final String value = entry.getValue();
-            final String parsedValue = macroMachine.expandMacros( value );
+            final String parsedValue = macroRequest.expandMacros( value );
             final LinkReferenceBean linkReference = new LinkReferenceBean();
             linkReference.setName( key );
             linkReference.setLink( parsedValue );
@@ -429,7 +431,7 @@ class PeopleSearchDataReader
         final boolean checkUserDNValues = Boolean.parseBoolean( pwmRequest.getConfig().readAppProperty( AppProperty.PEOPLESEARCH_MAX_VALUE_VERIFYUSERDN ) );
         for ( final String userDN : ldapValues )
         {
-            final UserIdentity loopIdentity = new UserIdentity( userDN, userIdentity.getLdapProfileID() );
+            final UserIdentity loopIdentity = UserIdentity.createUserIdentity( userDN, userIdentity.getLdapProfileID() );
             if ( returnObj.size() < maxValues )
             {
                 if ( checkUserDNValues )
@@ -485,9 +487,9 @@ class PeopleSearchDataReader
     )
             throws PwmUnrecoverableException
     {
-        final MacroMachine macroMachine = getMacroMachine( userIdentity );
+        final MacroRequest macroRequest = getMacroMachine( userIdentity );
         final String settingValue = this.peopleSearchConfiguration.getDisplayName();
-        return macroMachine.expandMacros( settingValue );
+        return macroRequest.expandMacros( settingValue );
     }
 
     private List<String> figureDisplaynames(
@@ -499,10 +501,10 @@ class PeopleSearchDataReader
         final List<String> displayStringSettings = this.peopleSearchConfiguration.getDisplayNameCardLables();
         if ( displayStringSettings != null )
         {
-            final MacroMachine macroMachine = getMacroMachine( userIdentity );
+            final MacroRequest macroRequest = getMacroMachine( userIdentity );
             for ( final String displayStringSetting : displayStringSettings )
             {
-                final String displayLabel = macroMachine.expandMacros( displayStringSetting );
+                final String displayLabel = macroRequest.expandMacros( displayStringSetting );
                 displayLabels.add( displayLabel );
             }
         }
@@ -583,7 +585,7 @@ class PeopleSearchDataReader
 
 
 
-    MacroMachine getMacroMachine(
+    MacroRequest getMacroMachine(
             final UserIdentity userIdentity
     )
             throws PwmUnrecoverableException
@@ -597,7 +599,7 @@ class PeopleSearchDataReader
                 userIdentity,
                 chaiProvider
         );
-        return MacroMachine.forUser( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userInfo, null );
+        return MacroRequest.forUser( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userInfo, null );
     }
 
     void checkIfUserIdentityViewable(
@@ -615,7 +617,13 @@ class PeopleSearchDataReader
                 filterString = filterString.replace( "**", "*" );
             }
 
-            return LdapPermissionTester.testQueryMatch( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userIdentity, filterString );
+            final UserPermission userPermission = UserPermission.builder()
+                    .type( UserPermissionType.ldapQuery )
+                    .ldapQuery( filterString )
+                    .ldapProfileID( userIdentity.getLdapProfileID() )
+                    .build();
+
+            return UserPermissionUtility.testUserPermission( pwmRequest.getPwmRequestContext(), userIdentity, userPermission );
         };
 
         final boolean result = storeDataInCache( CacheIdentifier.checkIfViewable, userIdentity.toDelimitedKey(), Boolean.class, cacheLoader );
@@ -630,7 +638,7 @@ class PeopleSearchDataReader
         }
         finally
         {
-            LOGGER.trace( pwmRequest, () -> "completed checkIfUserViewable for " + userIdentity.toDisplayString() + " in " + TimeDuration.compactFromCurrent( startTime ) );
+            LOGGER.trace( pwmRequest, () -> "completed checkIfUserViewable for " + userIdentity.toDisplayString() + " in ", () -> TimeDuration.fromCurrent( startTime ) );
         }
     }
 

@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -156,7 +156,7 @@ public class AppDashboardData implements Serializable
                 ? "This node is the current master"
                 : "This node is not the current master";
         {
-            final Collection<DataStorageMethod> dataStorageMethods = pwmApplication.getClusterService().serviceInfo().getUsedStorageMethods();
+            final Collection<DataStorageMethod> dataStorageMethods = pwmApplication.getClusterService().serviceInfo().getStorageMethods();
             if ( !JavaHelper.isEmpty( dataStorageMethods ) )
             {
                 builder.nodeStorageMethod = dataStorageMethods.iterator().next();
@@ -165,9 +165,9 @@ public class AppDashboardData implements Serializable
 
         builder.ldapConnectionCount( ldapConnectionCount( pwmApplication ) );
         builder.sessionCount( pwmApplication.getSessionTrackService().sessionCount() );
-        builder.requestsInProgress( pwmApplication.getInprogressRequests().get() );
+        builder.requestsInProgress( pwmApplication.getActiveServletRequests().get() );
 
-        LOGGER.trace( () -> "AppDashboardData bean created in " + TimeDuration.compactFromCurrent( startTime ) );
+        LOGGER.trace( () -> "AppDashboardData bean created in ", () -> TimeDuration.fromCurrent( startTime ) );
         return builder.build();
     }
 
@@ -259,9 +259,9 @@ public class AppDashboardData implements Serializable
             final PwmService.ServiceInfo serviceInfo = pwmService.serviceInfo();
             final Collection<DataStorageMethod> storageMethods = serviceInfo == null
                     ? Collections.emptyList()
-                    : serviceInfo.getUsedStorageMethods() == null
+                    : serviceInfo.getStorageMethods() == null
                     ? Collections.emptyList()
-                    : serviceInfo.getUsedStorageMethods();
+                    : serviceInfo.getStorageMethods();
 
             final Map<String, String> debugData = serviceInfo == null
                     ? Collections.emptyMap()

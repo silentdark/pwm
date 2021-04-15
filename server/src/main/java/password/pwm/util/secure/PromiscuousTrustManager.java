@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,16 +38,19 @@ public class PromiscuousTrustManager implements X509TrustManager
         return new PromiscuousTrustManager();
     }
 
+    @Override
     public X509Certificate[] getAcceptedIssuers( )
     {
         return new X509Certificate[ 0 ];
     }
 
+    @Override
     public void checkClientTrusted( final X509Certificate[] certs, final String authType )
     {
         logMsg( certs, authType );
     }
 
+    @Override
     public void checkServerTrusted( final X509Certificate[] certs, final String authType )
     {
         logMsg( certs, authType );

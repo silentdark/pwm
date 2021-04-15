@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,6 +48,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,9 +82,10 @@ public class HealthMonitor implements PwmService
     private ExecutorService supportZipWriterService;
     private HealthMonitorSettings settings;
 
-    private Map<HealthMonitorFlag, Serializable> healthProperties = new ConcurrentHashMap<>();
+    private final Map<HealthMonitorFlag, Serializable> healthProperties = new ConcurrentHashMap<>();
+    private final AtomicInteger healthCheckCount = new AtomicInteger( 0 );
 
-    private STATUS status = STATUS.NEW;
+    private STATUS status = STATUS.CLOSED;
     private PwmApplication pwmApplication;
     private volatile HealthData healthData = emptyHealthData();
 
@@ -97,10 +99,11 @@ public class HealthMonitor implements PwmService
     {
     }
 
+    @Override
     public void init( final PwmApplication pwmApplication ) throws PwmException
     {
-        status = STATUS.OPENING;
         this.pwmApplication = pwmApplication;
+        this.healthData = emptyHealthData();
         settings = HealthMonitorSettings.fromConfiguration( pwmApplication.getConfig() );
 
         if ( !Boolean.parseBoolean( pwmApplication.getConfig().readAppProperty( AppProperty.HEALTHCHECK_ENABLED ) ) )
@@ -148,20 +151,18 @@ public class HealthMonitor implements PwmService
 
     public static HealthStatus getMostSevereHealthStatus( final Collection<HealthRecord> healthRecords )
     {
-        HealthStatus returnStatus = HealthStatus.GOOD;
+        final EnumSet<HealthStatus> tempSet = EnumSet.noneOf( HealthStatus.class );
         if ( healthRecords != null )
         {
             for ( final HealthRecord record : healthRecords )
             {
-                if ( record.getStatus().getSeverityLevel() > returnStatus.getSeverityLevel() )
-                {
-                    returnStatus = record.getStatus();
-                }
+                tempSet.add( record.getStatus() );
             }
         }
-        return returnStatus;
+        return HealthStatus.mostSevere( tempSet ).orElse( HealthStatus.GOOD );
     }
 
+    @Override
     public STATUS status( )
     {
         return status;
@@ -180,7 +181,7 @@ public class HealthMonitor implements PwmService
             LOGGER.trace( () ->  "begin force immediate check" );
             final Future future = pwmApplication.getPwmScheduler().scheduleJob( new ImmediateJob(), executorService, TimeDuration.ZERO );
             settings.getMaximumForceCheckWait().pause( future::isDone );
-            LOGGER.trace( () ->  "exit force immediate check, done=" + future.isDone() + ", " + TimeDuration.compactFromCurrent( startTime ) );
+            LOGGER.trace( () ->  "exit force immediate check, done=" + future.isDone(), () -> TimeDuration.fromCurrent( startTime ) );
         }
 
         pwmApplication.getPwmScheduler().scheduleJob( new UpdateJob(), executorService, settings.getNominalCheckInterval() );
@@ -196,6 +197,7 @@ public class HealthMonitor implements PwmService
         }
     }
 
+    @Override
     public void close( )
     {
         if ( executorService != null )
@@ -215,12 +217,12 @@ public class HealthMonitor implements PwmService
         return new HealthData( Collections.emptySet(), Instant.ofEpochMilli( 0 ) );
     }
 
+    @Override
     public List<HealthRecord> healthCheck( )
     {
         return Collections.emptyList();
     }
 
-    private AtomicInteger healthCheckCount = new AtomicInteger( 0 );
 
     private void doHealthChecks( )
     {
@@ -231,7 +233,7 @@ public class HealthMonitor implements PwmService
         }
 
         final Instant startTime = Instant.now();
-        LOGGER.trace( () -> "beginning health check execution (" + counter + ")" );
+        LOGGER.trace( () -> "beginning health check execution #" + counter  );
         final List<HealthRecord> tempResults = new ArrayList<>();
         for ( final HealthChecker loopChecker : HEALTH_CHECKERS )
         {
@@ -271,12 +273,13 @@ public class HealthMonitor implements PwmService
         }
 
         healthData = new HealthData( Collections.unmodifiableSet( new TreeSet<>( tempResults ) ), Instant.now() );
-        LOGGER.trace( () -> "completed health check execution (" + counter + ") in " + TimeDuration.compactFromCurrent( startTime ) );
+        LOGGER.trace( () -> "completed health check execution #" + counter, () -> TimeDuration.fromCurrent( startTime ) );
     }
 
+    @Override
     public ServiceInfoBean serviceInfo( )
     {
-        return new ServiceInfoBean( Collections.emptyList() );
+        return ServiceInfoBean.builder().build();
     }
 
     Map<HealthMonitorFlag, Serializable> getHealthProperties( )
@@ -305,7 +308,7 @@ public class HealthMonitor implements PwmService
             {
                 final Instant startTime = Instant.now();
                 doHealthChecks();
-                LOGGER.trace( () -> "completed health check dredge " + TimeDuration.compactFromCurrent( startTime ) );
+                LOGGER.trace( () -> "completed health check dredge", () -> TimeDuration.fromCurrent( startTime ) );
             }
             catch ( final Throwable e )
             {

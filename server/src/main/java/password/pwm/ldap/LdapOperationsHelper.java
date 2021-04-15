@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,6 @@ import password.pwm.config.PwmSetting;
 import password.pwm.config.option.AutoSetLdapUserLanguage;
 import password.pwm.config.profile.LdapProfile;
 import password.pwm.config.value.data.FormConfiguration;
-import password.pwm.config.value.data.UserPermission;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmOperationalException;
@@ -59,11 +58,10 @@ import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsManager;
 import password.pwm.util.PasswordData;
 import password.pwm.util.i18n.LocaleHelper;
-import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.secure.PwmTrustManager;
 
 import javax.net.ssl.X509TrustManager;
@@ -75,13 +73,10 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Queue;
 import java.util.Set;
 
 public class LdapOperationsHelper
@@ -275,7 +270,7 @@ public class LdapOperationsHelper
      *
      * @param theUser User to write to.
      * @param valueMap A map with String keys and String values.
-     * @param macroMachine used to resolve macros before values are written.
+     * @param macroRequest used to resolve macros before values are written.
      * @param expandMacros a boolean to indicate if value macros should be expanded.
      * @throws ChaiUnavailableException if the directory is unavailable
      * @throws PwmUnrecoverableException if their is an unexpected ldap problem
@@ -283,7 +278,7 @@ public class LdapOperationsHelper
     public static void writeFormValuesToLdap(
             final ChaiUser theUser,
             final Map<FormConfiguration, String> valueMap,
-            final MacroMachine macroMachine,
+            final MacroRequest macroRequest,
             final boolean expandMacros
     )
             throws PwmUnrecoverableException, ChaiUnavailableException
@@ -375,7 +370,7 @@ public class LdapOperationsHelper
 
                     if ( expandMacros )
                     {
-                        attrValue = macroMachine.expandMacros( attrValue );
+                        attrValue = macroRequest.expandMacros( attrValue );
                     }
 
                     final String currentValue;
@@ -598,9 +593,9 @@ public class LdapOperationsHelper
         )
                 throws PwmUnrecoverableException
         {
-            final MacroMachine macroMachine = MacroMachine.forNonUserSpecific( pwmApplication, sessionLabel );
+            final MacroRequest macroRequest = MacroRequest.forNonUserSpecific( pwmApplication, sessionLabel );
             final String guidPattern = pwmApplication.getConfig().readAppProperty( AppProperty.LDAP_GUID_PATTERN );
-            return macroMachine.expandMacros( guidPattern );
+            return macroRequest.expandMacros( guidPattern );
         }
     }
 
@@ -852,55 +847,6 @@ public class LdapOperationsHelper
             return results.values().iterator().next();
         }
         return Collections.emptyMap();
-    }
-
-    public static Iterator<UserIdentity> readUsersFromLdapForPermissions(
-            final PwmApplication pwmApplication,
-            final SessionLabel sessionLabel,
-            final List<UserPermission> permissionList,
-            final int maxResults
-    )
-            throws PwmUnrecoverableException, PwmOperationalException
-    {
-        final UserSearchEngine userSearchEngine = pwmApplication.getUserSearchEngine();
-        final Queue<UserIdentity> resultSet = new LinkedList<>();
-        final long searchTimeoutMs = JavaHelper.silentParseLong(
-                pwmApplication.getConfig().readAppProperty( AppProperty.REPORTING_LDAP_SEARCH_TIMEOUT ),
-                30_000 );
-
-        for ( final UserPermission userPermission : permissionList )
-        {
-            if ( resultSet.size() < maxResults )
-            {
-                final SearchConfiguration searchConfiguration = SearchConfiguration.fromPermission( userPermission )
-                        .toBuilder()
-                        .searchTimeout( searchTimeoutMs )
-                        .build();
-                final Map<UserIdentity, Map<String, String>> searchResults = userSearchEngine.performMultiUserSearch(
-                        searchConfiguration,
-                        maxResults - resultSet.size(),
-                        Collections.emptyList(),
-                        sessionLabel
-
-                );
-                resultSet.addAll( searchResults.keySet() );
-            }
-        }
-
-        return new Iterator<UserIdentity>()
-        {
-            @Override
-            public boolean hasNext( )
-            {
-                return resultSet.peek() != null;
-            }
-
-            @Override
-            public UserIdentity next( )
-            {
-                return resultSet.poll();
-            }
-        };
     }
 
     public static Instant readPasswordExpirationTime( final ChaiUser theUser )

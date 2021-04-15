@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,6 @@ import java.util.Optional;
 
 class LdapTokenMachine implements TokenMachine
 {
-
     private static final String KEY_VALUE_DELIMITER = " ";
 
     private PwmApplication pwmApplication;
@@ -57,6 +56,7 @@ class LdapTokenMachine implements TokenMachine
         this.tokenAttribute = pwmApplication.getConfig().readSettingAsString( PwmSetting.TOKEN_LDAP_ATTRIBUTE );
     }
 
+    @Override
     public String generateToken(
             final SessionLabel sessionLabel,
             final TokenPayload tokenPayload
@@ -66,6 +66,7 @@ class LdapTokenMachine implements TokenMachine
         return tokenService.makeUniqueTokenForMachine( sessionLabel, this );
     }
 
+    @Override
     public Optional<TokenPayload> retrieveToken( final SessionLabel sessionLabel, final TokenKey tokenKey )
             throws PwmOperationalException, PwmUnrecoverableException
     {
@@ -125,6 +126,7 @@ class LdapTokenMachine implements TokenMachine
         return Optional.empty();
     }
 
+    @Override
     public void storeToken( final TokenKey tokenKey, final TokenPayload tokenPayload )
             throws PwmOperationalException, PwmUnrecoverableException
     {
@@ -145,6 +147,7 @@ class LdapTokenMachine implements TokenMachine
         }
     }
 
+    @Override
     public void removeToken( final TokenKey tokenKey )
             throws PwmOperationalException, PwmUnrecoverableException
     {
@@ -166,11 +169,13 @@ class LdapTokenMachine implements TokenMachine
         }
     }
 
+    @Override
     public long size( ) throws PwmOperationalException
     {
         return -1;
     }
 
+    @Override
     public void cleanup( ) throws PwmUnrecoverableException, PwmOperationalException
     {
     }

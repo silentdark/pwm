@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -371,11 +371,13 @@ class DatabaseAccessorImpl implements DatabaseAccessor
             traceResult( debugInfo, null );
         }
 
+        @Override
         public boolean hasNext( )
         {
             return !finished;
         }
 
+        @Override
         public Map.Entry<String, String> next( )
         {
             if ( finished )
@@ -387,6 +389,7 @@ class DatabaseAccessorImpl implements DatabaseAccessor
             return returnValue;
         }
 
+        @Override
         public void remove( )
         {
             throw new UnsupportedOperationException( "remove not supported" );
@@ -415,15 +418,16 @@ class DatabaseAccessorImpl implements DatabaseAccessor
             databaseService.updateStats( DatabaseService.OperationType.READ );
         }
 
+        @Override
         public void close( )
         {
             final DatabaseUtil.DebugInfo debugInfo = DatabaseUtil.DebugInfo.create(
                     "iterator #" + counter + " close", table, null, null );
             traceBegin( debugInfo );
 
+            lock.lock();
             try
             {
-                lock.lock();
                 outstandingIterators.remove( this );
 
                 if ( resultSet != null )
@@ -577,7 +581,7 @@ class DatabaseAccessorImpl implements DatabaseAccessor
         final String sqlStatement = "SELECT COUNT(" + DatabaseService.KEY_COLUMN + ") FROM " + table.name()
                 + " WHERE " + DatabaseService.KEY_COLUMN + " = ?";
 
-        try ( PreparedStatement selectStatement = connection.prepareStatement( sqlStatement ); )
+        try ( PreparedStatement selectStatement = connection.prepareStatement( sqlStatement ) )
         {
             selectStatement.setString( 1, key );
             selectStatement.setMaxRows( 1 );
@@ -619,6 +623,7 @@ class DatabaseAccessorImpl implements DatabaseAccessor
         }
     }
 
+    @Override
     public boolean isConnected()
     {
         try

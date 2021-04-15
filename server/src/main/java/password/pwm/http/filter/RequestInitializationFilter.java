@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.secure.PwmRandom;
 
 import javax.servlet.Filter;
@@ -90,6 +90,7 @@ public class RequestInitializationFilter implements Filter
     {
     }
 
+    @Override
     public void doFilter(
             final ServletRequest servletRequest,
             final ServletResponse servletResponse,
@@ -162,12 +163,12 @@ public class RequestInitializationFilter implements Filter
 
         try
         {
-            localPwmApplication.getInprogressRequests().incrementAndGet();
+            localPwmApplication.getActiveServletRequests().incrementAndGet();
             initializeServletRequest( req, resp, filterChain );
         }
         finally
         {
-            localPwmApplication.getInprogressRequests().decrementAndGet();
+            localPwmApplication.getActiveServletRequests().decrementAndGet();
         }
     }
 
@@ -358,7 +359,7 @@ public class RequestInitializationFilter implements Filter
             {
                 final String nonce = pwmRequest.getCspNonce();
                 final String replacedPolicy = contentPolicy.replace( "%NONCE%", nonce );
-                final String expandedPolicy = MacroMachine.forNonUserSpecific( pwmRequest.getPwmApplication(), null ).expandMacros( replacedPolicy );
+                final String expandedPolicy = MacroRequest.forNonUserSpecific( pwmRequest.getPwmApplication(), null ).expandMacros( replacedPolicy );
                 resp.setHeader( HttpHeader.ContentSecurityPolicy, expandedPolicy );
             }
         }
@@ -410,7 +411,7 @@ public class RequestInitializationFilter implements Filter
 
         if ( serverHeader != null && !serverHeader.isEmpty() )
         {
-            final String value = MacroMachine.forNonUserSpecific( pwmApplication, null ).expandMacros( serverHeader );
+            final String value = MacroRequest.forNonUserSpecific( pwmApplication, null ).expandMacros( serverHeader );
             resp.setHeader( HttpHeader.Server.getHttpName(), value );
         }
 

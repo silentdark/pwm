@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,17 +22,26 @@ package password.pwm.util.localdb;
 
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
+import password.pwm.util.java.StatisticCounterBundle;
 
 import java.io.File;
 import java.io.Serializable;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
 public class LocalDBAdaptor implements LocalDB
 {
     private final LocalDBProvider innerDB;
-    private final LocalDBStatistics localDBStatistics = new LocalDBStatistics();
+    private final StatisticCounterBundle<DebugKey> stats = new StatisticCounterBundle<>( DebugKey.class );
+
+    enum DebugKey
+    {
+        readOperations,
+        writeOperations,
+    }
 
     LocalDBAdaptor( final LocalDBProvider innerDB )
     {
@@ -40,17 +49,20 @@ public class LocalDBAdaptor implements LocalDB
         this.innerDB = innerDB;
     }
 
+    @Override
     public File getFileLocation( )
     {
         return innerDB.getFileLocation();
     }
 
+    @Override
     @WriteOperation
     public void close( ) throws LocalDBException
     {
         innerDB.close();
     }
 
+    @Override
     public boolean contains( final DB db, final String key ) throws LocalDBException
     {
         ParameterValidator.validateDBValue( db );
@@ -62,6 +74,7 @@ public class LocalDBAdaptor implements LocalDB
     }
 
 
+    @Override
     public String get( final DB db, final String key ) throws LocalDBException
     {
         ParameterValidator.validateDBValue( db );
@@ -78,17 +91,22 @@ public class LocalDBAdaptor implements LocalDB
         innerDB.init( dbDirectory, initParameters, parameters );
     }
 
+    @Override
     public LocalDBIterator<Map.Entry<String, String>> iterator( final DB db ) throws LocalDBException
     {
         ParameterValidator.validateDBValue( db );
         return innerDB.iterator( db );
     }
 
+    @Override
     public Map<String, Serializable> debugInfo( )
     {
-        return innerDB.debugInfo();
+        final Map<String, Serializable> debugValues = new LinkedHashMap<>( innerDB.debugInfo() );
+        debugValues.putAll( stats.debugStats() );
+        return Collections.unmodifiableMap( debugValues );
     }
 
+    @Override
     @WriteOperation
     public void putAll( final DB db, final Map<String, String> keyValueMap ) throws LocalDBException
     {
@@ -117,6 +135,7 @@ public class LocalDBAdaptor implements LocalDB
         markWrite( keyValueMap.size() );
     }
 
+    @Override
     @WriteOperation
     public boolean put( final DB db, final String key, final String value ) throws LocalDBException
     {
@@ -130,6 +149,7 @@ public class LocalDBAdaptor implements LocalDB
         return preExisting;
     }
 
+    @Override
     @WriteOperation
     public boolean putIfAbsent( final DB db, final String key, final String value ) throws LocalDBException
     {
@@ -142,6 +162,7 @@ public class LocalDBAdaptor implements LocalDB
         return success;
     }
 
+    @Override
     @WriteOperation
     public boolean remove( final DB db, final String key ) throws LocalDBException
     {
@@ -153,6 +174,7 @@ public class LocalDBAdaptor implements LocalDB
         return result;
     }
 
+    @Override
     @WriteOperation
     public void removeAll( final DB db, final Collection<String> keys ) throws LocalDBException
     {
@@ -188,19 +210,22 @@ public class LocalDBAdaptor implements LocalDB
         markWrite( keys.size() );
     }
 
+    @Override
     public long size( final DB db ) throws LocalDBException
     {
         ParameterValidator.validateDBValue( db );
         return innerDB.size( db );
     }
 
+    @Override
     @WriteOperation
     public void truncate( final DB db ) throws LocalDBException
     {
         ParameterValidator.validateDBValue( db );
-            innerDB.truncate( db );
+        innerDB.truncate( db );
     }
 
+    @Override
     public Status status( )
     {
         return innerDB.getStatus();
@@ -251,11 +276,11 @@ public class LocalDBAdaptor implements LocalDB
 
     private void markRead()
     {
-       this.localDBStatistics.getReadOperations().incrementAndGet();
+        stats.increment( DebugKey.readOperations );
     }
 
     private void markWrite( final int events )
     {
-        this.localDBStatistics.getWriteOperations().addAndGet( events );
+        stats.increment( DebugKey.writeOperations, events );
     }
 }

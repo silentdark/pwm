@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ import password.pwm.util.CaptchaUtility;
 import password.pwm.util.form.FormUtility;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
@@ -76,12 +76,14 @@ public class ForgottenUsernameServlet extends AbstractPwmServlet
     {
         search,;
 
+        @Override
         public Collection<HttpMethod> permittedMethods( )
         {
             return Collections.singletonList( HttpMethod.POST );
         }
     }
 
+    @Override
     protected ForgottenUsernameAction readProcessAction( final PwmRequest request )
             throws PwmUnrecoverableException
     {
@@ -95,6 +97,7 @@ public class ForgottenUsernameServlet extends AbstractPwmServlet
         }
     }
 
+    @Override
     protected void processAction( final PwmRequest pwmRequest )
             throws ServletException, IOException, PwmUnrecoverableException
     {
@@ -324,9 +327,9 @@ public class ForgottenUsernameServlet extends AbstractPwmServlet
             return new ErrorInformation( PwmError.ERROR_INTERNAL, errorMsg );
         }
 
-        final MacroMachine macroMachine = MacroMachine.forUser( pwmApplication, sessionLabel, userInfo, null );
+        final MacroRequest macroRequest = MacroRequest.forUser( pwmApplication, sessionLabel, userInfo, null );
 
-        pwmApplication.sendSmsUsingQueue( toNumber, smsMessage, sessionLabel, macroMachine );
+        pwmApplication.sendSmsUsingQueue( toNumber, smsMessage, sessionLabel, macroRequest );
         return null;
     }
 
@@ -344,9 +347,9 @@ public class ForgottenUsernameServlet extends AbstractPwmServlet
             return new ErrorInformation( PwmError.ERROR_INTERNAL, errorMsg );
         }
 
-        final MacroMachine macroMachine = MacroMachine.forUser( pwmApplication, sessionLabel, userInfo, null );
+        final MacroRequest macroRequest = MacroRequest.forUser( pwmApplication, sessionLabel, userInfo, null );
 
-        pwmApplication.getEmailQueue().submitEmail( emailItemBean, userInfo, macroMachine );
+        pwmApplication.getEmailQueue().submitEmail( emailItemBean, userInfo, macroRequest );
 
         return null;
     }
@@ -363,8 +366,8 @@ public class ForgottenUsernameServlet extends AbstractPwmServlet
     {
         final Locale locale = pwmRequest.getLocale();
         final String completeMessage = pwmRequest.getConfig().readSettingAsLocalizedString( PwmSetting.FORGOTTEN_USERNAME_MESSAGE, locale );
-        final MacroMachine macroMachine = MacroMachine.forUser( pwmRequest.getPwmApplication(), pwmRequest.getLocale(), pwmRequest.getLabel(), userIdentity );
-        final String expandedText = macroMachine.expandMacros( completeMessage );
+        final MacroRequest macroRequest = MacroRequest.forUser( pwmRequest.getPwmApplication(), pwmRequest.getLocale(), pwmRequest.getLabel(), userIdentity );
+        final String expandedText = macroRequest.expandMacros( completeMessage );
         pwmRequest.setAttribute( PwmRequestAttribute.CompleteText, expandedText );
         pwmRequest.forwardToJsp( JspUrl.FORGOTTEN_USERNAME_COMPLETE );
     }

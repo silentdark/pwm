@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -128,7 +128,10 @@ class UserSearchJob implements Callable<Map<UserIdentity, Map<String, String>>>
         {
             final String userDN = entry.getKey();
             final Map<String, String> attributeMap = entry.getValue();
-            final UserIdentity userIdentity = new UserIdentity( userDN, userSearchJobParameters.getLdapProfile().getIdentifier() );
+            final UserIdentity userIdentity = UserIdentity.createUserIdentity(
+                    userDN,
+                    userSearchJobParameters.getLdapProfile().getIdentifier(),
+                    UserIdentity.Flag.PreCanonicalized );
             returnMap.put( userIdentity, attributeMap );
         }
         return returnMap;

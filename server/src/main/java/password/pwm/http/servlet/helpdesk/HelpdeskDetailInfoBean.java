@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ import password.pwm.config.Configuration;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.option.HelpdeskUIMode;
 import password.pwm.config.option.ViewStatusFields;
+import password.pwm.config.profile.AccountInformationProfile;
 import password.pwm.config.profile.HelpdeskProfile;
 import password.pwm.config.profile.PwmPasswordRule;
 import password.pwm.config.value.data.FormConfiguration;
@@ -51,7 +52,7 @@ import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -113,7 +114,7 @@ public class HelpdeskDetailInfoBean implements Serializable
         final Instant startTime = Instant.now();
         LOGGER.trace( pwmRequest, () -> "beginning to assemble detail data report for user " + userIdentity );
         final Locale actorLocale = pwmRequest.getLocale();
-        final ChaiUser theUser = HelpdeskServlet.getChaiUser( pwmRequest, helpdeskProfile, userIdentity );
+        final ChaiUser theUser = HelpdeskServletUtil.getChaiUser( pwmRequest, helpdeskProfile, userIdentity );
 
         if ( !theUser.exists() )
         {
@@ -127,12 +128,16 @@ public class HelpdeskDetailInfoBean implements Serializable
                 userIdentity,
                 theUser.getChaiProvider()
         );
-        final MacroMachine macroMachine = MacroMachine.forUser( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userInfo, null );
+        final MacroRequest macroRequest = MacroRequest.forUser( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userInfo, null );
 
         try
         {
+
+            final AccountInformationProfile accountInformationProfile = pwmRequest.getPwmSession().getSessionManager().getAccountInfoProfile();
+
             final List<AccountInformationBean.ActivityRecord> userHistory = AccountInformationBean.makeAuditInfo(
                     pwmRequest.getPwmApplication(),
+                    accountInformationProfile,
                     pwmRequest.getLabel(),
                     userInfo,
                     pwmRequest.getLocale() );
@@ -154,7 +159,7 @@ public class HelpdeskDetailInfoBean implements Serializable
                     userInfo.getPasswordPolicy(),
                     pwmRequest.getConfig(),
                     pwmRequest.getLocale(),
-                    macroMachine
+                    macroRequest
             );
             builder.passwordRequirements( Collections.unmodifiableList( requirementLines ) );
         }
@@ -202,7 +207,7 @@ public class HelpdeskDetailInfoBean implements Serializable
 
         }
 
-        builder.userDisplayName( HelpdeskCardInfoBean.figureDisplayName( helpdeskProfile, macroMachine ) );
+        builder.userDisplayName( HelpdeskCardInfoBean.figureDisplayName( helpdeskProfile, macroRequest ) );
 
         final TimeDuration timeDuration = TimeDuration.fromCurrent( startTime );
 

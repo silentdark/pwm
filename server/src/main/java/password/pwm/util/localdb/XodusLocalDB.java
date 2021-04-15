@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -401,6 +401,7 @@ public class XodusLocalDB implements LocalDBProvider
         } );
     }
 
+    @Override
     @LocalDB.WriteOperation
     public boolean putIfAbsent( final LocalDB.DB db, final String key, final String value ) throws LocalDBException
     {
@@ -525,7 +526,7 @@ public class XodusLocalDB implements LocalDBProvider
                 final StatisticsItem item = statistics.getStatisticsItem( name );
                 if ( item != null )
                 {
-                    outputStats.put( name, String.valueOf( item.getTotal() ) );
+                    outputStats.put( "xodus." + name, String.valueOf( item.getTotal() ) );
                 }
             }
         }

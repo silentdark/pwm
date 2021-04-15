@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import password.pwm.PwmConstants;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.Configuration;
-import password.pwm.config.StoredValue;
+import password.pwm.config.value.StoredValue;
 import password.pwm.config.stored.StoredConfigItemKey;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.stored.StoredConfigurationFactory;
@@ -190,9 +190,9 @@ public class DebugItemGenerator
         }
 
         {
-            final String msg = "completed in " + TimeDuration.compactFromCurrent( startTime );
+            final String msg = "completed";
             debugGeneratorLogFile.appendLine( msg );
-            LOGGER.trace( sessionLabel, () -> msg );
+            LOGGER.trace( sessionLabel, () -> msg, () ->  TimeDuration.fromCurrent( startTime ) );
         }
 
         try
@@ -299,7 +299,7 @@ public class DebugItemGenerator
             final StoredConfigurationFactory.OutputSettings outputSettings = StoredConfigurationFactory.OutputSettings.builder()
                     .mode( StoredConfigurationFactory.OutputSettings.SecureOutputMode.STRIPPED )
                     .build();
-            StoredConfigurationFactory.toXml( storedConfiguration, byteArrayOutputStream, outputSettings );
+            StoredConfigurationFactory.output( storedConfiguration, byteArrayOutputStream, outputSettings );
             outputStream.write( byteArrayOutputStream.toByteArray() );        }
     }
 
@@ -523,7 +523,7 @@ public class DebugItemGenerator
             }
 
 
-            try ( ClosableIterator<FileSystemUtility.FileSummaryInformation> iter = FileSystemUtility.readFileInformation( interestedFiles ); )
+            try ( ClosableIterator<FileSystemUtility.FileSummaryInformation> iter = FileSystemUtility.readFileInformation( interestedFiles ) )
             {
                 final CSVPrinter csvPrinter = JavaHelper.makeCsvPrinter( outputStream );
                 {
@@ -574,7 +574,7 @@ public class DebugItemGenerator
             final Function<PwmLogEvent, String> logEventFormatter = PwmLogEvent::toLogString;
 
             outputLogs( debugItemInput.getPwmApplication(), outputStream, logEventFormatter );
-            LOGGER.trace( () ->  "debug log output completed in " + TimeDuration.compactFromCurrent( startTime ) );
+            LOGGER.trace( () ->  "debug log output completed in ", () -> TimeDuration.fromCurrent( startTime ) );
         }
     }
 
@@ -593,7 +593,7 @@ public class DebugItemGenerator
             final Function<PwmLogEvent, String> logEventFormatter = pwmLogEvent -> JsonUtil.serialize( pwmLogEvent );
 
             outputLogs( debugItemInput.getPwmApplication(), outputStream, logEventFormatter );
-            LOGGER.trace( () ->  "debug json output completed in " + TimeDuration.compactFromCurrent( startTime ) );
+            LOGGER.trace( () ->  "debug json output completed in ", () -> TimeDuration.fromCurrent( startTime ) );
         }
     }
 
@@ -712,6 +712,7 @@ public class DebugItemGenerator
             return "recentUserDebugData.json";
         }
 
+        @Override
         public void outputItem( final DebugItemInput debugItemInput, final OutputStream outputStream ) throws Exception
         {
             final PwmApplication pwmApplication = debugItemInput.getPwmApplication();

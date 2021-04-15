@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,12 +35,14 @@ import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthMonitor;
+import password.pwm.http.servlet.configeditor.data.SettingDataMaker;
 import password.pwm.http.servlet.peoplesearch.PeopleSearchService;
 import password.pwm.http.servlet.resource.ResourceServletService;
 import password.pwm.http.state.SessionStateService;
 import password.pwm.ldap.LdapConnectionService;
 import password.pwm.ldap.search.UserSearchEngine;
 import password.pwm.svc.PwmService;
+import password.pwm.svc.PwmServiceEnum;
 import password.pwm.svc.PwmServiceManager;
 import password.pwm.svc.cache.CacheService;
 import password.pwm.svc.email.EmailService;
@@ -73,6 +75,7 @@ import password.pwm.util.db.DatabaseService;
 import password.pwm.util.java.FileSystemUtility;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.JsonUtil;
+import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.localdb.LocalDB;
 import password.pwm.util.localdb.LocalDBFactory;
@@ -80,7 +83,7 @@ import password.pwm.util.logging.LocalDBLogger;
 import password.pwm.util.logging.PwmLogLevel;
 import password.pwm.util.logging.PwmLogManager;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.operations.CrService;
 import password.pwm.util.operations.OtpService;
 import password.pwm.util.queue.SmsQueueManager;
@@ -98,12 +101,13 @@ import java.security.KeyStore;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -114,31 +118,26 @@ import java.util.function.Supplier;
  */
 public class PwmApplication
 {
-
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmApplication.class );
     private static final String DEFAULT_INSTANCE_ID = "-1";
 
+    private final Instant startupTime = Instant.now();
+    private final AtomicInteger activeServletRequests = new AtomicInteger( 0 );
+    private final PwmServiceManager pwmServiceManager = new PwmServiceManager();
+
+    private Instant installTime = Instant.now();
+    private ErrorInformation lastLocalDBFailure;
+    private PwmEnvironment pwmEnvironment;
+    private FileLocker fileLocker;
+    private PwmScheduler pwmScheduler;
     private String instanceID = DEFAULT_INSTANCE_ID;
     private String runtimeNonce = PwmRandom.getInstance().randomUUID().toString();
-
     private LocalDB localDB;
     private LocalDBLogger localDBLogger;
 
-    private final Instant startupTime = Instant.now();
-    private Instant installTime = Instant.now();
-    private ErrorInformation lastLocalDBFailure;
-    private final AtomicInteger inprogressRequests = new AtomicInteger( 0 );
-
-    private final PwmEnvironment pwmEnvironment;
-
-    private final PwmServiceManager pwmServiceManager = new PwmServiceManager( this );
-
-    private PwmScheduler pwmScheduler;
-
-    private PwmApplication( final PwmEnvironment pwmEnvironment, final LocalDB localDB )
+    public PwmApplication( final PwmEnvironment pwmEnvironment )
             throws PwmUnrecoverableException
     {
-        this.localDB = localDB;
         this.pwmEnvironment = pwmEnvironment;
         pwmEnvironment.verifyIfApplicationPathIsSetProperly();
 
@@ -148,19 +147,14 @@ public class PwmApplication
         }
         catch ( final PwmUnrecoverableException e )
         {
-            LOGGER.fatal( () -> e.getMessage() );
+            LOGGER.fatal( e::getMessage );
             throw e;
         }
     }
 
     public static PwmApplication createPwmApplication( final PwmEnvironment pwmEnvironment ) throws PwmUnrecoverableException
     {
-        return new PwmApplication( pwmEnvironment, null );
-    }
-
-    public static PwmApplication createPwmApplication( final PwmEnvironment pwmEnvironment, final LocalDB localDB ) throws PwmUnrecoverableException
-    {
-        return new PwmApplication( pwmEnvironment, localDB );
+        return new PwmApplication( pwmEnvironment );
     }
 
     private void initialize( )
@@ -210,7 +204,8 @@ public class PwmApplication
         // get file lock
         if ( !pwmEnvironment.isInternalRuntimeInstance() )
         {
-            pwmEnvironment.waitForFileLock();
+            fileLocker = new FileLocker( pwmEnvironment );
+            fileLocker.waitForFileLock();
         }
 
         // clear temp dir
@@ -229,14 +224,17 @@ public class PwmApplication
             }
         }
 
-        LOGGER.info( () -> "initializing, application mode=" + getApplicationMode()
-                + ", applicationPath=" + ( pwmEnvironment.getApplicationPath() == null ? "null" : pwmEnvironment.getApplicationPath().getAbsolutePath() )
-                + ", configFile=" + ( pwmEnvironment.getConfigurationFile() == null ? "null" : pwmEnvironment.getConfigurationFile().getAbsolutePath() )
-        );
+        if ( getApplicationMode() != PwmApplicationMode.READ_ONLY )
+        {
+            LOGGER.info( () -> "initializing, application mode=" + getApplicationMode()
+                    + ", applicationPath=" + ( pwmEnvironment.getApplicationPath() == null ? "null" : pwmEnvironment.getApplicationPath().getAbsolutePath() )
+                    + ", configFile=" + ( pwmEnvironment.getConfigurationFile() == null ? "null" : pwmEnvironment.getConfigurationFile().getAbsolutePath() )
+            );
+        }
 
         if ( !pwmEnvironment.isInternalRuntimeInstance() )
         {
-            if ( getApplicationMode() == PwmApplicationMode.ERROR || getApplicationMode() == PwmApplicationMode.NEW )
+            if ( getApplicationMode() == PwmApplicationMode.ERROR )
             {
                 LOGGER.warn( () -> "skipping LocalDB open due to application mode " + getApplicationMode() );
             }
@@ -267,7 +265,7 @@ public class PwmApplication
 
         pwmScheduler = new PwmScheduler( getInstanceID() );
 
-        pwmServiceManager.initAllServices();
+        pwmServiceManager.initAllServices( this );
 
         final boolean skipPostInit = pwmEnvironment.isInternalRuntimeInstance()
                 || pwmEnvironment.getFlags().contains( PwmEnvironment.ApplicationFlag.CommandLineInstance );
@@ -279,41 +277,32 @@ public class PwmApplication
             StatisticsManager.incrementStat( this, Statistic.PWM_STARTUPS );
             LOGGER.debug( () -> "buildTime=" + PwmConstants.BUILD_TIME + ", javaLocale=" + Locale.getDefault() + ", DefaultLocale=" + PwmConstants.DEFAULT_LOCALE );
 
-            pwmScheduler.immediateExecuteInNewThread( this::postInitTasks );
+            pwmScheduler.immediateExecuteInNewThread( this::postInitTasks, this.getClass().getSimpleName() + " postInit tasks" );
         }
+    }
+
+    public void reInit( final PwmEnvironment pwmEnvironment )
+            throws PwmException
+    {
+        final Instant startTime = Instant.now();
+        LOGGER.debug( () -> "beginning application restart" );
+        shutdown( true );
+        this.pwmEnvironment = pwmEnvironment;
+        initialize();
+        runtimeNonce = PwmRandom.getInstance().randomUUID().toString();
+        LOGGER.debug( () -> "completed application restart", () -> TimeDuration.fromCurrent( startTime ) );
     }
 
     private void postInitTasks( )
     {
         final Instant startTime = Instant.now();
 
-        try
-        {
-            outputConfigurationToLog( this );
-        }
-        catch ( final PwmException e )
-        {
-            LOGGER.error( () -> "error outputting log to debug: " + e.getMessage() );
-        }
+        getPwmScheduler().immediateExecuteInNewThread( UserAgentUtils::initializeCache, "initialize useragent cache" );
+        getPwmScheduler().immediateExecuteInNewThread( SettingDataMaker::initializeCache, "initialize PwmSetting metadata" );
 
+        outputConfigurationToLog( this );
 
-        if ( this.getConfig() != null )
-        {
-            final Map<AppProperty, String> nonDefaultProperties = getConfig().readAllNonDefaultAppProperties();
-            if ( nonDefaultProperties != null && !nonDefaultProperties.isEmpty() )
-            {
-                final Map<String, String> tempMap = new LinkedHashMap<>();
-                for ( final Map.Entry<AppProperty, String> entry : nonDefaultProperties.entrySet() )
-                {
-                    tempMap.put( entry.getKey().getKey(), entry.getValue() );
-                }
-                LOGGER.trace( () -> "non-default app properties read from configuration: " + JsonUtil.serializeMap( tempMap ) );
-            }
-            else
-            {
-                LOGGER.trace( () -> "no non-default app properties in configuration" );
-            }
-        }
+        outputNonDefaultPropertiesToLog( this );
 
         // send system audit event
         try
@@ -322,7 +311,7 @@ public class PwmApplication
                     AuditEvent.STARTUP,
                     null
             );
-            getAuditManager().submit( auditRecord );
+            getAuditManager().submit( null, auditRecord );
         }
         catch ( final PwmException e )
         {
@@ -371,21 +360,12 @@ public class PwmApplication
 
         MBeanUtility.registerMBean( this );
 
-        try
-        {
-            UserAgentUtils.initializeCache();
-        }
-        catch ( final Exception e )
-        {
-            LOGGER.debug( () -> "error initializing UserAgentUtils: " + e.getMessage() );
-        }
-
         {
             final ExecutorService executorService = PwmScheduler.makeSingleThreadExecutorService( this, PwmApplication.class );
             pwmScheduler.scheduleDailyZuluZeroStartJob( new DailySummaryJob( this ), executorService, TimeDuration.ZERO );
         }
 
-        LOGGER.trace( () -> "completed post init tasks in " + TimeDuration.fromCurrent( startTime ).asCompactString() );
+        LOGGER.trace( () -> "completed post init tasks", () -> TimeDuration.fromCurrent( startTime ) );
     }
 
     private static void outputKeystore( final PwmApplication pwmApplication ) throws Exception
@@ -476,29 +456,46 @@ public class PwmApplication
     }
 
     private static void outputConfigurationToLog( final PwmApplication pwmApplication )
-            throws PwmUnrecoverableException
     {
-        if ( !LOGGER.isEnabled( PwmLogLevel.TRACE ) )
+        final Instant startTime = Instant.now();
+
+        final Function<Map.Entry<String, String>, String> valueFormatter = entry ->
         {
-            return;
-        }
+            final String spacedValue = entry.getValue().replace( "\n", "\n   " );
+            return " " + entry.getKey() + "\n   " + spacedValue + "\n";
+        };
 
         final StoredConfiguration storedConfiguration = pwmApplication.getConfig().getStoredConfiguration();
         final Map<String, String> debugStrings = StoredConfigurationUtil.makeDebugMap( storedConfiguration, storedConfiguration.modifiedItems(), PwmConstants.DEFAULT_LOCALE );
-        final List<Supplier<CharSequence>> outputStrings = new ArrayList<>();
-
-        for ( final Map.Entry<String, String> entry : debugStrings.entrySet() )
-        {
-            final String spacedValue = entry.getValue().replace( "\n", "\n   " );
-            final String output = " " + entry.getKey() + "\n   " + spacedValue + "\n";
-            outputStrings.add( () -> output );
-        }
 
         LOGGER.trace( () -> "--begin current configuration output--" );
-        outputStrings.forEach( LOGGER::trace );
-        LOGGER.trace( () -> "--end current configuration output--" );
+        debugStrings.entrySet().stream()
+                .map( valueFormatter )
+                .map( s -> ( Supplier<CharSequence> ) () -> s )
+                .forEach( LOGGER::trace );
+        LOGGER.trace( () -> "--end current configuration output--", () -> TimeDuration.fromCurrent( startTime ) );
     }
 
+    private static void outputNonDefaultPropertiesToLog( final PwmApplication pwmApplication )
+    {
+        final Instant startTime = Instant.now();
+
+        final Map<AppProperty, String> nonDefaultProperties = pwmApplication.getConfig().readAllNonDefaultAppProperties();
+        if ( !JavaHelper.isEmpty( nonDefaultProperties ) )
+        {
+            LOGGER.trace( () -> "--begin non-default app properties output--" );
+            nonDefaultProperties.entrySet().stream()
+                    .map( entry -> "AppProperty: " + entry.getKey().getKey() + " -> " + entry.getValue() )
+                    .map( s -> ( Supplier<CharSequence> ) () -> s )
+                    .forEach( LOGGER::trace );
+            LOGGER.trace( () -> "--end non-default app properties output--", () -> TimeDuration.fromCurrent( startTime ) );
+        }
+        else
+        {
+            LOGGER.trace( () -> "no non-default app properties in configuration" );
+
+        }
+    }
 
     public String getInstanceID( )
     {
@@ -507,12 +504,12 @@ public class PwmApplication
 
     public SharedHistoryManager getSharedHistoryManager( )
     {
-        return ( SharedHistoryManager ) pwmServiceManager.getService( SharedHistoryManager.class );
+        return ( SharedHistoryManager ) pwmServiceManager.getService( PwmServiceEnum.SharedHistoryManager );
     }
 
     public IntruderManager getIntruderManager( )
     {
-        return ( IntruderManager ) pwmServiceManager.getService( IntruderManager.class );
+        return ( IntruderManager ) pwmServiceManager.getService( PwmServiceEnum.IntruderManager );
     }
 
     public ChaiUser getProxiedChaiUser( final UserIdentity userIdentity )
@@ -542,12 +539,12 @@ public class PwmApplication
 
     public HealthMonitor getHealthMonitor( )
     {
-        return ( HealthMonitor ) pwmServiceManager.getService( HealthMonitor.class );
+        return ( HealthMonitor ) pwmServiceManager.getService( PwmServiceEnum.HealthMonitor );
     }
 
     public HttpClientService getHttpClientService()
     {
-        return ( HttpClientService ) pwmServiceManager.getService( HttpClientService.class );
+        return ( HttpClientService ) pwmServiceManager.getService( PwmServiceEnum.HttpClientService );
     }
 
     public List<PwmService> getPwmServices( )
@@ -561,52 +558,52 @@ public class PwmApplication
 
     public WordlistService getWordlistService( )
     {
-        return ( WordlistService ) pwmServiceManager.getService( WordlistService.class );
+        return ( WordlistService ) pwmServiceManager.getService( PwmServiceEnum.WordlistManager );
     }
 
     public SeedlistService getSeedlistManager( )
     {
-        return ( SeedlistService ) pwmServiceManager.getService( SeedlistService.class );
+        return ( SeedlistService ) pwmServiceManager.getService( PwmServiceEnum.SeedlistManager );
     }
 
     public ReportService getReportService( )
     {
-        return ( ReportService ) pwmServiceManager.getService( ReportService.class );
+        return ( ReportService ) pwmServiceManager.getService( PwmServiceEnum.ReportService );
     }
 
     public EmailService getEmailQueue( )
     {
-        return ( EmailService ) pwmServiceManager.getService( EmailService.class );
+        return ( EmailService ) pwmServiceManager.getService( PwmServiceEnum.EmailQueueManager );
     }
 
     public AuditService getAuditManager( )
     {
-        return ( AuditService ) pwmServiceManager.getService( AuditService.class );
+        return ( AuditService ) pwmServiceManager.getService( PwmServiceEnum.AuditService );
     }
 
     public SmsQueueManager getSmsQueue( )
     {
-        return ( SmsQueueManager ) pwmServiceManager.getService( SmsQueueManager.class );
+        return ( SmsQueueManager ) pwmServiceManager.getService( PwmServiceEnum.SmsQueueManager );
     }
 
     public PwNotifyService getPwNotifyService( )
     {
-        return ( PwNotifyService ) pwmServiceManager.getService( PwNotifyService.class );
+        return ( PwNotifyService ) pwmServiceManager.getService( PwmServiceEnum.PwExpiryNotifyService );
     }
 
     public UrlShortenerService getUrlShortener( )
     {
-        return ( UrlShortenerService ) pwmServiceManager.getService( UrlShortenerService.class );
+        return ( UrlShortenerService ) pwmServiceManager.getService( PwmServiceEnum.UrlShortenerService );
     }
 
     public UserSearchEngine getUserSearchEngine( )
     {
-        return ( UserSearchEngine ) pwmServiceManager.getService( UserSearchEngine.class );
+        return ( UserSearchEngine ) pwmServiceManager.getService( PwmServiceEnum.UserSearchEngine );
     }
 
     public NodeService getClusterService( )
     {
-        return ( NodeService ) pwmServiceManager.getService( NodeService.class );
+        return ( NodeService ) pwmServiceManager.getService( PwmServiceEnum.ClusterService );
     }
 
     public ErrorInformation getLastLocalDBFailure( )
@@ -616,27 +613,27 @@ public class PwmApplication
 
     public TokenService getTokenService( )
     {
-        return ( TokenService ) pwmServiceManager.getService( TokenService.class );
+        return ( TokenService ) pwmServiceManager.getService( PwmServiceEnum.TokenService );
     }
 
     public LdapConnectionService getLdapConnectionService( )
     {
-        return ( LdapConnectionService ) pwmServiceManager.getService( LdapConnectionService.class );
+        return ( LdapConnectionService ) pwmServiceManager.getService( PwmServiceEnum.LdapConnectionService );
     }
 
     public SessionTrackService getSessionTrackService( )
     {
-        return ( SessionTrackService ) pwmServiceManager.getService( SessionTrackService.class );
+        return ( SessionTrackService ) pwmServiceManager.getService( PwmServiceEnum.SessionTrackService );
     }
 
     public ResourceServletService getResourceServletService( )
     {
-        return ( ResourceServletService ) pwmServiceManager.getService( ResourceServletService.class );
+        return ( ResourceServletService ) pwmServiceManager.getService( PwmServiceEnum.ResourceServletService );
     }
 
     public PeopleSearchService getPeopleSearchService( )
     {
-        return ( PeopleSearchService ) pwmServiceManager.getService( PeopleSearchService.class );
+        return ( PeopleSearchService ) pwmServiceManager.getService( PwmServiceEnum.PeopleSearchService );
     }
 
     public Configuration getConfig( )
@@ -658,7 +655,7 @@ public class PwmApplication
 
     public DatabaseService getDatabaseService( )
     {
-        return ( DatabaseService ) pwmServiceManager.getService( DatabaseService.class );
+        return ( DatabaseService ) pwmServiceManager.getService( PwmServiceEnum.DatabaseService );
     }
 
 
@@ -668,14 +665,14 @@ public class PwmApplication
         {
             try
             {
-                final String storedDateStr = readAppAttribute( AppAttribute.INSTALL_DATE, String.class );
-                if ( storedDateStr == null || storedDateStr.length() < 1 )
+                final Optional<String> storedDateStr = readAppAttribute( AppAttribute.INSTALL_DATE, String.class );
+                if ( !storedDateStr.isPresent() )
                 {
                     writeAppAttribute( AppAttribute.INSTALL_DATE, String.valueOf( startupTime.toEpochMilli() ) );
                 }
                 else
                 {
-                    return Instant.ofEpochMilli( Long.parseLong( storedDateStr ) );
+                    return Instant.ofEpochMilli( Long.parseLong( storedDateStr.get() ) );
                 }
             }
             catch ( final Exception e )
@@ -688,37 +685,35 @@ public class PwmApplication
 
     private String fetchInstanceID( final LocalDB localDB, final PwmApplication pwmApplication )
     {
-        String newInstanceID = pwmApplication.getPwmEnvironment().getParameters().get( PwmEnvironment.ApplicationParameter.InstanceID );
-
-        if ( newInstanceID != null && newInstanceID.trim().length() > 0 )
         {
-            return newInstanceID;
-        }
+            final String newInstanceID = pwmApplication.getPwmEnvironment().getParameters().get( PwmEnvironment.ApplicationParameter.InstanceID );
 
-        newInstanceID = readAppAttribute( AppAttribute.INSTANCE_ID, String.class );
-
-        if ( newInstanceID == null || newInstanceID.length() < 1 )
-        {
-            final PwmRandom pwmRandom = PwmRandom.getInstance();
-            newInstanceID = Long.toHexString( pwmRandom.nextLong() ).toUpperCase();
-
-            final String finalInstanceID = newInstanceID;
-            LOGGER.info( () -> "generated new random instanceID " + finalInstanceID );
-
-            if ( localDB != null )
+            if ( !StringUtil.isTrimEmpty( newInstanceID ) )
             {
-                writeAppAttribute( AppAttribute.INSTANCE_ID, newInstanceID );
+                return newInstanceID;
             }
         }
-        else
+
         {
-            final String id = newInstanceID;
-            LOGGER.trace( () -> "retrieved instanceID " + id + "" + " from localDB" );
+            final Optional<String> optionalStoredInstanceID = readAppAttribute( AppAttribute.INSTANCE_ID, String.class );
+            if ( optionalStoredInstanceID.isPresent() )
+            {
+                final String instanceID = optionalStoredInstanceID.get();
+                if ( !StringUtil.isTrimEmpty( instanceID ) )
+                {
+                    LOGGER.trace( () -> "retrieved instanceID " + instanceID + "" + " from localDB" );
+                    return instanceID;
+                }
+            }
         }
 
-        if ( newInstanceID.length() < 1 )
+        final PwmRandom pwmRandom = PwmRandom.getInstance();
+        final String newInstanceID = Long.toHexString( pwmRandom.nextLong() ).toUpperCase();
+        LOGGER.debug( () -> "generated new random instanceID " + newInstanceID );
+
+        if ( localDB != null )
         {
-            newInstanceID = DEFAULT_INSTANCE_ID;
+            writeAppAttribute( AppAttribute.INSTANCE_ID, newInstanceID );
         }
 
         return newInstanceID;
@@ -726,40 +721,40 @@ public class PwmApplication
 
     public StatisticsManager getStatisticsManager( )
     {
-        return ( StatisticsManager ) pwmServiceManager.getService( StatisticsManager.class );
+        return ( StatisticsManager ) pwmServiceManager.getService( PwmServiceEnum.StatisticsManager );
     }
 
     public OtpService getOtpService( )
     {
-        return ( OtpService ) pwmServiceManager.getService( OtpService.class );
+        return ( OtpService ) pwmServiceManager.getService( PwmServiceEnum.OtpService );
     }
 
     public CrService getCrService( )
     {
-        return ( CrService ) pwmServiceManager.getService( CrService.class );
+        return ( CrService ) pwmServiceManager.getService( PwmServiceEnum.CrService );
     }
 
     public SessionStateService getSessionStateService( )
     {
-        return ( SessionStateService ) pwmServiceManager.getService( SessionStateService.class );
+        return ( SessionStateService ) pwmServiceManager.getService( PwmServiceEnum.SessionStateSvc );
     }
 
 
     public CacheService getCacheService( )
     {
-        return ( CacheService ) pwmServiceManager.getService( CacheService.class );
+        return ( CacheService ) pwmServiceManager.getService( PwmServiceEnum.CacheService );
     }
 
     public SecureService getSecureService( )
     {
-        return ( SecureService ) pwmServiceManager.getService( SecureService.class );
+        return ( SecureService ) pwmServiceManager.getService( PwmServiceEnum.SecureService );
     }
 
     public void sendSmsUsingQueue(
             final String to,
             final String message,
             final SessionLabel sessionLabel,
-            final MacroMachine macroMachine
+            final MacroRequest macroRequest
     )
     {
         final SmsQueueManager smsQueue = getSmsQueue();
@@ -770,8 +765,8 @@ public class PwmApplication
         }
 
         final SmsItemBean smsItemBean = new SmsItemBean(
-                macroMachine.expandMacros( to ),
-                macroMachine.expandMacros( message ),
+                macroRequest.expandMacros( to ),
+                macroRequest.expandMacros( message ),
                 sessionLabel
         );
 
@@ -787,10 +782,10 @@ public class PwmApplication
 
     public void shutdown( )
     {
-        shutdown( true );
+        shutdown( false );
     }
 
-    public void shutdown( final boolean leaveLocalDbOpen )
+    public void shutdown( final boolean keepServicesRunning )
     {
         pwmScheduler.shutdown();
 
@@ -805,7 +800,7 @@ public class PwmApplication
                 );
                 if ( getAuditManager() != null )
                 {
-                    getAuditManager().submit( auditRecord );
+                    getAuditManager().submit( null, auditRecord );
                 }
             }
             catch ( final PwmException e )
@@ -816,7 +811,10 @@ public class PwmApplication
 
         MBeanUtility.unregisterMBean( this );
 
-        pwmServiceManager.shutdownAllServices();
+        if ( !keepServicesRunning )
+        {
+            pwmServiceManager.shutdownAllServices();
+        }
 
         if ( localDBLogger != null )
         {
@@ -831,7 +829,7 @@ public class PwmApplication
             localDBLogger = null;
         }
 
-        if ( leaveLocalDbOpen )
+        if ( keepServicesRunning )
         {
             LOGGER.trace( () -> "skipping close of LocalDB (restart request)" );
         }
@@ -849,7 +847,10 @@ public class PwmApplication
             localDB = null;
         }
 
-        pwmEnvironment.releaseFileLock();
+        if ( fileLocker != null )
+        {
+            fileLocker.releaseFileLock();
+        }
 
         LOGGER.info( () -> PwmConstants.PWM_APP_NAME + " " + PwmConstants.SERVLET_VERSION + " closed for bidness, cya!" );
     }
@@ -871,7 +872,8 @@ public class PwmApplication
 
     private static class Initializer
     {
-        public static LocalDB initializeLocalDB( final PwmApplication pwmApplication, final PwmEnvironment pwmEnvironment ) throws PwmUnrecoverableException
+        public static LocalDB initializeLocalDB( final PwmApplication pwmApplication, final PwmEnvironment pwmEnvironment )
+                throws PwmUnrecoverableException
         {
             final File databaseDirectory;
 
@@ -914,29 +916,29 @@ public class PwmApplication
         return runtimeNonce;
     }
 
-    public <T extends Serializable> T readAppAttribute( final AppAttribute appAttribute, final Class<T> returnClass )
+    public <T extends Serializable> Optional<T> readAppAttribute( final AppAttribute appAttribute, final Class<T> returnClass )
     {
         if ( localDB == null || localDB.status() != LocalDB.Status.OPEN )
         {
-            LOGGER.error( () -> "error retrieving key '" + appAttribute.getKey() + "', localDB unavailable: " );
-            return null;
+            LOGGER.debug( () -> "error retrieving key '" + appAttribute.getKey() + "', localDB unavailable: " );
+            return Optional.empty();
         }
 
         if ( appAttribute == null )
         {
-            return null;
+            return Optional.empty();
         }
 
         try
         {
             final String strValue = localDB.get( LocalDB.DB.PWM_META, appAttribute.getKey() );
-            return JsonUtil.deserialize( strValue, returnClass );
+            return Optional.of( JsonUtil.deserialize( strValue, returnClass ) );
         }
         catch ( final Exception e )
         {
             LOGGER.error( () -> "error retrieving key '" + appAttribute.getKey() + "' value from localDB: " + e.getMessage() );
         }
-        return null;
+        return Optional.empty();
     }
 
     public void writeAppAttribute( final AppAttribute appAttribute, final Serializable value )
@@ -1029,9 +1031,9 @@ public class PwmApplication
         return false;
     }
 
-    public AtomicInteger getInprogressRequests( )
+    public AtomicInteger getActiveServletRequests( )
     {
-        return inprogressRequests;
+        return activeServletRequests;
     }
 
     public PwmScheduler getPwmScheduler()

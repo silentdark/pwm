@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,11 +26,8 @@ import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.PwmApplicationMode;
 import password.pwm.PwmConstants;
-import password.pwm.bean.UserIdentity;
 import password.pwm.config.Configuration;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.StoredValue;
-import password.pwm.config.function.UserMatchViewerFunction;
 import password.pwm.config.profile.LdapProfile;
 import password.pwm.config.stored.ConfigurationProperty;
 import password.pwm.config.stored.StoredConfiguration;
@@ -38,6 +35,7 @@ import password.pwm.config.stored.StoredConfigurationFactory;
 import password.pwm.config.stored.StoredConfigurationModifier;
 import password.pwm.config.stored.StoredConfigurationUtil;
 import password.pwm.config.value.FileValue;
+import password.pwm.config.value.StoredValue;
 import password.pwm.config.value.ValueFactory;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
@@ -48,8 +46,6 @@ import password.pwm.health.DatabaseStatusChecker;
 import password.pwm.health.HealthMessage;
 import password.pwm.health.HealthMonitor;
 import password.pwm.health.HealthRecord;
-import password.pwm.health.HealthStatus;
-import password.pwm.health.HealthTopic;
 import password.pwm.health.LDAPHealthChecker;
 import password.pwm.http.ContextManager;
 import password.pwm.http.HttpMethod;
@@ -60,8 +56,9 @@ import password.pwm.http.PwmURL;
 import password.pwm.http.bean.ConfigGuideBean;
 import password.pwm.http.servlet.AbstractPwmServlet;
 import password.pwm.http.servlet.ControlledPwmServlet;
-import password.pwm.http.servlet.configeditor.ConfigEditorServlet;
 import password.pwm.http.servlet.configeditor.ConfigEditorServletUtils;
+import password.pwm.http.servlet.configeditor.data.SettingData;
+import password.pwm.http.servlet.configeditor.data.SettingDataMaker;
 import password.pwm.i18n.Message;
 import password.pwm.ldap.LdapBrowser;
 import password.pwm.ldap.schema.SchemaOperationResult;
@@ -110,7 +107,6 @@ public class ConfigGuideServlet extends ControlledPwmServlet
         useConfiguredCerts( HttpMethod.POST ),
         uploadConfig( HttpMethod.POST ),
         extendSchema( HttpMethod.POST ),
-        viewAdminMatches( HttpMethod.POST ),
         browseLdap( HttpMethod.POST ),
         uploadJDBCDriver( HttpMethod.POST ),
         skipGuide( HttpMethod.POST ),
@@ -126,6 +122,7 @@ public class ConfigGuideServlet extends ControlledPwmServlet
             this.method = method;
         }
 
+        @Override
         public Collection<HttpMethod> permittedMethods( )
         {
             return Collections.singletonList( method );
@@ -138,7 +135,7 @@ public class ConfigGuideServlet extends ControlledPwmServlet
         return ConfigGuideAction.class;
     }
 
-    private ConfigGuideBean getBean( final PwmRequest pwmRequest ) throws PwmUnrecoverableException
+    static ConfigGuideBean getBean( final PwmRequest pwmRequest ) throws PwmUnrecoverableException
     {
         return pwmRequest.getPwmApplication().getSessionStateService().getBean( pwmRequest, ConfigGuideBean.class );
     }
@@ -250,11 +247,16 @@ public class ConfigGuideServlet extends ControlledPwmServlet
                 try
                 {
                     ConfigGuideUtils.checkLdapServer( configGuideBean );
-                    records.add( password.pwm.health.HealthRecord.forMessage( HealthMessage.LDAP_OK ) );
+                    records.add( HealthRecord.forMessage( HealthMessage.LDAP_OK ) );
                 }
                 catch ( final Exception e )
                 {
-                    records.add( new HealthRecord( HealthStatus.WARN, HealthTopic.LDAP, "Can not connect to remote server: " + e.getMessage() ) );
+                    final String ldapUrl = ldapProfile.readSettingAsStringArray( PwmSetting.LDAP_SERVER_URLS )
+                            .stream().findFirst().orElse( "" );
+                    records.add( HealthRecord.forMessage(
+                            HealthMessage.LDAP_No_Connection,
+                            ldapUrl,
+                            e.getMessage() ) );
                 }
             }
             break;
@@ -275,41 +277,15 @@ public class ConfigGuideServlet extends ControlledPwmServlet
                 records.addAll( ldapHealthChecker.checkBasicLdapConnectivity( tempApplication, tempConfiguration, ldapProfile, true ) );
                 if ( records.isEmpty() )
                 {
-                    records.add( new HealthRecord( HealthStatus.GOOD, HealthTopic.LDAP, "LDAP Contextless Login Root validated" ) );
+                    records.add( HealthRecord.forMessage( HealthMessage.Config_SettingOk,
+                            PwmSetting.LDAP_CONTEXTLESS_ROOT.getLabel( pwmRequest.getLocale() ) ) );
                 }
             }
             break;
 
             case LDAP_ADMINS:
             {
-                try
-                {
-                    final UserMatchViewerFunction userMatchViewerFunction = new UserMatchViewerFunction();
-                    final Collection<UserIdentity> results = userMatchViewerFunction.discoverMatchingUsers(
-                            pwmRequest.getPwmApplication(),
-                            2,
-                            storedConfiguration,
-                            PwmSetting.QUERY_MATCH_PWM_ADMIN,
-                            null
-                    );
-
-                    if ( results.isEmpty() )
-                    {
-                        records.add( new HealthRecord( HealthStatus.WARN, HealthTopic.LDAP, "No matching admin users" ) );
-                    }
-                    else
-                    {
-                        records.add( new HealthRecord( HealthStatus.GOOD, HealthTopic.LDAP, "Admin group validated" ) );
-                    }
-                }
-                catch ( final PwmException e )
-                {
-                    records.add( new HealthRecord( HealthStatus.WARN, HealthTopic.LDAP, "Error during admin group validation: " + e.getErrorInformation().toDebugStr() ) );
-                }
-                catch ( final Exception e )
-                {
-                    records.add( new HealthRecord( HealthStatus.WARN, HealthTopic.LDAP, "Error during admin group validation: " + e.getMessage() ) );
-                }
+                records.addAll( ConfigGuideUtils.checkAdminHealth( pwmRequest, storedConfiguration ) );
             }
             break;
 
@@ -323,7 +299,10 @@ public class ConfigGuideServlet extends ControlledPwmServlet
                 }
                 else
                 {
-                    records.add( new HealthRecord( HealthStatus.CAUTION, HealthTopic.LDAP, "No test user specified" ) );
+                    records.add(
+                            HealthRecord.forMessage(
+                                    HealthMessage.Config_AddTestUser,
+                                    PwmSetting.LDAP_TEST_USER_DN.toMenuLocationDebug( ConfigGuideForm.LDAP_PROFILE_NAME, pwmRequest.getLocale() ) ) );
                 }
             }
             break;
@@ -345,36 +324,6 @@ public class ConfigGuideServlet extends ControlledPwmServlet
                 .build();
         final RestResultBean restResultBean = RestResultBean.withData( jsonOutput );
         pwmRequest.outputJsonResult( restResultBean );
-        return ProcessStatus.Halt;
-    }
-
-    @ActionHandler( action = "viewAdminMatches" )
-    private ProcessStatus restViewAdminMatches(
-            final PwmRequest pwmRequest
-    )
-            throws IOException, ServletException, PwmUnrecoverableException
-    {
-        final ConfigGuideBean configGuideBean = getBean( pwmRequest );
-
-        try
-        {
-            final UserMatchViewerFunction userMatchViewerFunction = new UserMatchViewerFunction();
-            final StoredConfiguration storedConfiguration = ConfigGuideForm.generateStoredConfig( configGuideBean );
-            final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( storedConfiguration );
-            final Serializable output = userMatchViewerFunction.provideFunction( pwmRequest, modifier, PwmSetting.QUERY_MATCH_PWM_ADMIN, null, null );
-            pwmRequest.outputJsonResult( RestResultBean.withData( output ) );
-        }
-        catch ( final PwmException e )
-        {
-            LOGGER.error( pwmRequest, e.getErrorInformation() );
-            pwmRequest.respondWithError( e.getErrorInformation(), false );
-        }
-        catch ( final Exception e )
-        {
-            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_INTERNAL, "error while testing matches = " + e.getMessage() );
-            LOGGER.error( pwmRequest, errorInformation );
-            pwmRequest.respondWithError( errorInformation );
-        }
         return ProcessStatus.Halt;
     }
 
@@ -601,7 +550,8 @@ public class ConfigGuideServlet extends ControlledPwmServlet
 
         final String key = pwmRequest.readParameterAsString( "key" );
         final LinkedHashMap<String, Object> returnMap = new LinkedHashMap<>();
-        final PwmSetting theSetting = PwmSetting.forKey( key );
+        final PwmSetting theSetting = PwmSetting.forKey( key )
+                .orElseThrow( () -> new IllegalStateException( "invalid setting parameter value" ) );
 
         final Object returnValue;
         returnValue = storedConfiguration.readSetting( theSetting, profileID ).toNativeObject();
@@ -623,7 +573,9 @@ public class ConfigGuideServlet extends ControlledPwmServlet
         final String profileID = "default";
         final String key = pwmRequest.readParameterAsString( "key" );
         final String bodyString = pwmRequest.readRequestBodyAsString();
-        final PwmSetting setting = PwmSetting.forKey( key );
+        final PwmSetting setting = PwmSetting.forKey( key )
+                .orElseThrow( () -> new IllegalStateException( "invalid setting parameter value" ) );
+
         final ConfigGuideBean configGuideBean = getBean( pwmRequest );
         final StoredConfiguration storedConfigurationImpl = ConfigGuideForm.generateStoredConfig( configGuideBean );
 
@@ -667,15 +619,13 @@ public class ConfigGuideServlet extends ControlledPwmServlet
         final ConfigGuideBean configGuideBean = getBean( pwmRequest );
         final StoredConfiguration storedConfiguration = ConfigGuideForm.generateStoredConfig( configGuideBean );
 
-        final LinkedHashMap<String, Object> returnMap = new LinkedHashMap<>( ConfigEditorServlet.generateSettingData(
-                pwmRequest.getPwmApplication(),
+        final SettingData settingData = SettingDataMaker.generateSettingData(
                 storedConfiguration,
                 pwmRequest.getLabel(),
                 pwmRequest.getLocale()
-        )
         );
 
-        final RestResultBean restResultBean = RestResultBean.withData( new LinkedHashMap<>( returnMap ) );
+        final RestResultBean restResultBean = RestResultBean.withData( settingData );
         pwmRequest.outputJsonResult( restResultBean );
         return ProcessStatus.Halt;
     }

@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ package password.pwm.config.stored;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingCategory;
-import password.pwm.config.StoredValue;
+import password.pwm.config.value.StoredValue;
 import password.pwm.config.value.LocalizedStringValue;
 import password.pwm.config.value.StringArrayValue;
 import password.pwm.config.value.StringValue;
@@ -72,6 +72,17 @@ public class StoredConfigurationModifier
     )
             throws PwmUnrecoverableException
     {
+        writeSettingAndMetaData( setting, profileID, value, new ValueMetaData( Instant.now(), userIdentity ) );
+    }
+
+    void writeSettingAndMetaData(
+            final PwmSetting setting,
+            final String profileID,
+            final StoredValue value,
+            final ValueMetaData valueMetaData
+    )
+            throws PwmUnrecoverableException
+    {
         Objects.requireNonNull( setting );
         Objects.requireNonNull( value );
 
@@ -91,7 +102,7 @@ public class StoredConfigurationModifier
 
             return storedConfigData.toBuilder()
                     .storedValue( key, value )
-                    .metaData( key, new ValueMetaData( Instant.now(), userIdentity ) )
+                    .metaData( key, valueMetaData )
                     .build();
         } );
     }
@@ -155,6 +166,25 @@ public class StoredConfigurationModifier
                     .clearStoredValues()
                     .storedValues( existingStoredValues )
                     .metaData( key, new ValueMetaData( Instant.now(), userIdentity ) )
+                    .build();
+        } );
+    }
+
+    public void deleteKey( final StoredConfigItemKey key )
+            throws PwmUnrecoverableException
+    {
+        update( ( storedConfigData ) ->
+        {
+            final Map<StoredConfigItemKey, StoredValue> existingStoredValues = new HashMap<>( storedConfigData.getStoredValues() );
+            final Map<StoredConfigItemKey, ValueMetaData> existingMetaValues = new HashMap<>( storedConfigData.getMetaDatas() );
+
+            existingStoredValues.remove( key );
+            existingMetaValues.remove( key );
+
+            return storedConfigData.toBuilder()
+                    .clearStoredValues()
+                    .storedValues( existingStoredValues )
+                    .metaDatas( existingMetaValues )
                     .build();
         } );
     }

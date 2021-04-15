@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ import com.novell.ldapchai.util.ChaiUtility;
 import com.nulabinc.zxcvbn.Strength;
 import com.nulabinc.zxcvbn.Zxcvbn;
 import password.pwm.AppProperty;
-import password.pwm.Permission;
 import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
 import password.pwm.bean.EmailItemBean;
@@ -49,6 +48,7 @@ import password.pwm.config.option.HelpdeskClearResponseMode;
 import password.pwm.config.option.MessageSendMethod;
 import password.pwm.config.option.StrengthMeterType;
 import password.pwm.config.profile.AbstractProfile;
+import password.pwm.config.profile.ChangePasswordProfile;
 import password.pwm.config.profile.ForgottenPasswordProfile;
 import password.pwm.config.profile.HelpdeskProfile;
 import password.pwm.config.profile.LdapProfile;
@@ -67,7 +67,7 @@ import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmSession;
 import password.pwm.ldap.LdapOperationsHelper;
-import password.pwm.ldap.LdapPermissionTester;
+import password.pwm.ldap.permission.UserPermissionUtility;
 import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.auth.AuthenticationType;
 import password.pwm.ldap.auth.PwmAuthenticationSource;
@@ -86,7 +86,7 @@ import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.operations.ActionExecutor;
 
 import java.io.Serializable;
@@ -122,12 +122,12 @@ public class PasswordUtility
         final String smsNumber = userInfo.getUserSmsNumber();
         String returnToAddress = emailAddress;
 
-        final MacroMachine macroMachine;
+        final MacroRequest macroRequest;
         {
             final LoginInfoBean loginInfoBean = new LoginInfoBean();
             loginInfoBean.setUserCurrentPassword( newPassword );
             loginInfoBean.setUserIdentity( userInfo.getUserIdentity() );
-            macroMachine = MacroMachine.forUser( pwmApplication, null, userInfo, loginInfoBean );
+            macroRequest = MacroRequest.forUser( pwmApplication, null, userInfo, loginInfoBean );
         }
 
 
@@ -136,13 +136,13 @@ public class PasswordUtility
         {
             case SMSONLY:
                 // Only try SMS
-                error = sendNewPasswordSms( userInfo, pwmApplication, macroMachine, newPassword, smsNumber, userLocale );
+                error = sendNewPasswordSms( userInfo, pwmApplication, macroRequest, newPassword, smsNumber, userLocale );
                 returnToAddress = smsNumber;
                 break;
             case EMAILONLY:
             default:
                 // Only try email
-                error = sendNewPasswordEmail( userInfo, pwmApplication, macroMachine, newPassword, emailAddress, userLocale );
+                error = sendNewPasswordEmail( userInfo, pwmApplication, macroRequest, newPassword, emailAddress, userLocale );
                 break;
         }
         if ( error != null )
@@ -155,7 +155,7 @@ public class PasswordUtility
     private static ErrorInformation sendNewPasswordSms(
             final UserInfo userInfo,
             final PwmApplication pwmApplication,
-            final MacroMachine macroMachine,
+            final MacroRequest macroRequest,
             final PasswordData newPassword,
             final String toNumber,
             final Locale userLocale
@@ -173,7 +173,7 @@ public class PasswordUtility
 
         message = message.replace( "%TOKEN%", newPassword.getStringValue() );
 
-        pwmApplication.sendSmsUsingQueue( toNumber, message, null, macroMachine );
+        pwmApplication.sendSmsUsingQueue( toNumber, message, null, macroRequest );
         LOGGER.debug( () -> String.format( "password SMS added to send queue for %s", toNumber ) );
         return null;
     }
@@ -181,7 +181,7 @@ public class PasswordUtility
     private static ErrorInformation sendNewPasswordEmail(
             final UserInfo userInfo,
             final PwmApplication pwmApplication,
-            final MacroMachine macroMachine,
+            final MacroRequest macroRequest,
             final PasswordData newPassword,
             final String toAddress,
             final Locale userLocale
@@ -204,7 +204,7 @@ public class PasswordUtility
         pwmApplication.getEmailQueue().submitEmail(
                 emailItemBean,
                 userInfo,
-                macroMachine );
+                macroRequest );
 
 
         LOGGER.debug( () -> "new password email to " + userInfo.getUserIdentity() + " added to send queue for " + toAddress );
@@ -261,9 +261,16 @@ public class PasswordUtility
         final PwmSession pwmSession = pwmRequest.getPwmSession();
         final UserInfo userInfo = pwmSession.getUserInfo();
 
-        if ( !pwmSession.getSessionManager().checkPermission( pwmApplication, Permission.CHANGE_PASSWORD ) )
+        if ( !pwmRequest.getConfig().readSettingAsBoolean( PwmSetting.CHANGE_PASSWORD_ENABLE ) )
         {
             final String errorMsg = "attempt to setActorPassword, but user does not have password change permission";
+            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_UNAUTHORIZED, errorMsg );
+            throw new PwmOperationalException( errorInformation );
+        }
+
+        if ( pwmSession.getSessionManager().getChangePasswordProfile() == null )
+        {
+            final String errorMsg = "attempt to setActorPassword, but user does not have change password profile assigned";
             final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_UNAUTHORIZED, errorMsg );
             throw new PwmOperationalException( errorInformation );
         }
@@ -339,13 +346,14 @@ public class PasswordUtility
         {
             // execute configured actions
             LOGGER.debug( pwmRequest, () -> "executing configured actions to user " + proxiedUser.getEntryDN() );
-            final List<ActionConfiguration> configValues = pwmApplication.getConfig().readSettingAsAction( PwmSetting.CHANGE_PASSWORD_WRITE_ATTRIBUTES );
-            if ( configValues != null && !configValues.isEmpty() )
+            final ChangePasswordProfile changePasswordProfile = pwmSession.getSessionManager().getChangePasswordProfile();
+            final List<ActionConfiguration> actionConfigurations = changePasswordProfile.readSettingAsAction( PwmSetting.CHANGE_PASSWORD_WRITE_ATTRIBUTES );
+            if ( !JavaHelper.isEmpty( actionConfigurations ) )
             {
                 final LoginInfoBean clonedLoginInfoBean = JsonUtil.cloneUsingJson( pwmSession.getLoginInfoBean(), LoginInfoBean.class );
                 clonedLoginInfoBean.setUserCurrentPassword( newPassword );
 
-                final MacroMachine macroMachine = MacroMachine.forUser(
+                final MacroRequest macroRequest = MacroRequest.forUser(
                         pwmApplication,
                         pwmRequest.getLabel(),
                         pwmSession.getUserInfo(),
@@ -353,10 +361,10 @@ public class PasswordUtility
                 );
 
                 final ActionExecutor actionExecutor = new ActionExecutor.ActionExecutorSettings( pwmApplication, userInfo.getUserIdentity() )
-                        .setMacroMachine( macroMachine )
+                        .setMacroMachine( macroRequest )
                         .setExpandPwmMacros( true )
                         .createActionExecutor();
-                actionExecutor.executeActions( configValues, pwmRequest.getLabel() );
+                actionExecutor.executeActions( actionConfigurations, pwmRequest.getLabel() );
             }
         }
 
@@ -418,7 +426,7 @@ public class PasswordUtility
         {
             final ChaiUser theUser = chaiProvider.getEntryFactory().newChaiUser( userIdentity.getUserDN() );
             bindDN = chaiProvider.getChaiConfiguration().getSetting( ChaiSetting.BIND_DN );
-            bindIsSelf = userIdentity.canonicalEquals( new UserIdentity( bindDN, userIdentity.getLdapProfileID() ), pwmApplication );
+            bindIsSelf = userIdentity.canonicalEquals( UserIdentity.createUserIdentity( bindDN, userIdentity.getLdapProfileID() ), pwmApplication );
 
             LOGGER.trace( sessionLabel, () -> "preparing to setActorPassword for '" + theUser.getEntryDN() + "', using bind DN: " + bindDN );
 
@@ -492,6 +500,16 @@ public class PasswordUtility
         final SessionLabel sessionLabel = pwmRequest.getLabel();
         final UserIdentity userIdentity = userInfo.getUserIdentity();
 
+        final String changePasswordProfileID = userInfo.getProfileIDs().get( ProfileDefinition.ChangePassword );
+        final ChangePasswordProfile changePasswordProfile = pwmRequest.getConfig().getChangePasswordProfile().get( changePasswordProfileID );
+
+        if ( changePasswordProfile == null )
+        {
+            final String errorMsg = "attempt to helpdeskSetUserPassword, but user does not have a configured change password profile";
+            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_NO_PROFILE_ASSIGNED, errorMsg );
+            throw new PwmOperationalException( errorInformation );
+        }
+
         if ( !pwmRequest.isAuthenticated() )
         {
             final String errorMsg = "attempt to helpdeskSetUserPassword, but user is not authenticated";
@@ -522,7 +540,7 @@ public class PasswordUtility
                     pwmRequest.getPwmSession().getSessionStateBean().getSrcAddress(),
                     pwmRequest.getPwmSession().getSessionStateBean().getSrcHostname()
             );
-            pwmApplication.getAuditManager().submit( auditRecord );
+            pwmApplication.getAuditManager().submit( pwmRequest.getLabel(), auditRecord );
         }
 
         // update statistics
@@ -532,7 +550,7 @@ public class PasswordUtility
             // execute configured actions
             LOGGER.debug( sessionLabel, () -> "executing changepassword and helpdesk post password change writeAttributes to user " + userIdentity );
             final List<ActionConfiguration> actions = new ArrayList<>();
-            actions.addAll( pwmApplication.getConfig().readSettingAsAction( PwmSetting.CHANGE_PASSWORD_WRITE_ATTRIBUTES ) );
+            actions.addAll( changePasswordProfile.readSettingAsAction( PwmSetting.CHANGE_PASSWORD_WRITE_ATTRIBUTES ) );
             actions.addAll( helpdeskProfile.readSettingAsAction( PwmSetting.HELPDESK_POST_SET_PASSWORD_WRITE_ATTRIBUTES ) );
             if ( !actions.isEmpty() )
             {
@@ -540,7 +558,7 @@ public class PasswordUtility
                 final LoginInfoBean loginInfoBean = new LoginInfoBean();
                 loginInfoBean.setUserCurrentPassword( newPassword );
 
-                final MacroMachine macroMachine = MacroMachine.forUser(
+                final MacroRequest macroRequest = MacroRequest.forUser(
                         pwmApplication,
                         sessionLabel,
                         userInfo,
@@ -548,7 +566,7 @@ public class PasswordUtility
                 );
 
                 final ActionExecutor actionExecutor = new ActionExecutor.ActionExecutorSettings( pwmApplication, userIdentity )
-                        .setMacroMachine( macroMachine )
+                        .setMacroMachine( macroRequest )
                         .setExpandPwmMacros( true )
                         .createActionExecutor();
 
@@ -574,7 +592,7 @@ public class PasswordUtility
                     pwmRequest.getPwmSession().getSessionStateBean().getSrcAddress(),
                     pwmRequest.getPwmSession().getSessionStateBean().getSrcHostname()
             );
-            pwmApplication.getAuditManager().submit( auditRecord );
+            pwmApplication.getAuditManager().submit( sessionLabel, auditRecord );
         }
 
         // send email notification
@@ -693,7 +711,7 @@ public class PasswordUtility
         final PwmApplication pwmApplication = pwmRequest.getPwmApplication();
         final UserIdentity userIdentity = pwmRequest.getUserInfoIfLoggedIn();
         final AbstractProfile activateUserProfile = ProfileUtility.profileForUser(
-                pwmRequest.commonValues(),
+                pwmRequest.getPwmRequestContext(),
                 userIdentity,
                 profileDefinition,
                 AbstractProfile.class );
@@ -716,9 +734,7 @@ public class PasswordUtility
                     PwmError.ERROR_SERVICE_UNREACHABLE,
                     e.getErrorInformation().getDetailedErrorMsg(), e.getErrorInformation().getFieldValues()
             );
-            final PwmUnrecoverableException newException = new PwmUnrecoverableException( info );
-            newException.initCause( e );
-            throw newException;
+            throw new PwmUnrecoverableException( info, e );
         }
     }
 
@@ -938,7 +954,7 @@ public class PasswordUtility
                 throw new IllegalStateException( "unknown policy source defined: " + ppSource.name() );
         }
 
-        LOGGER.trace( pwmSession, () -> "readPasswordPolicyForUser completed in " + TimeDuration.fromCurrent( startTime ).asCompactString() );
+        LOGGER.trace( pwmSession, () -> "readPasswordPolicyForUser completed", () -> TimeDuration.fromCurrent( startTime ) );
         return returnPolicy;
     }
 
@@ -963,7 +979,7 @@ public class PasswordUtility
             LOGGER.debug( pwmSession, () -> "testing password policy profile '" + profile + "'" );
             try
             {
-                final boolean match = LdapPermissionTester.testUserPermissions( pwmApplication, pwmSession, userIdentity, userPermissions );
+                final boolean match = UserPermissionUtility.testUserPermission( pwmApplication, pwmSession, userIdentity, userPermissions );
                 if ( match )
                 {
                     return loopPolicy;
@@ -975,7 +991,7 @@ public class PasswordUtility
             }
         }
 
-        throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_NO_PROFILE_ASSIGNED, "no challenge profile is configured" ) );
+        throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_NO_PROFILE_ASSIGNED, "no password profile is assigned to user" ) );
     }
 
 
@@ -1231,16 +1247,16 @@ public class PasswordUtility
             return;
         }
 
-        final MacroMachine macroMachine = userInfo == null
+        final MacroRequest macroRequest = userInfo == null
                 ? null
-                : MacroMachine.forUser(
+                : MacroRequest.forUser(
                 pwmApplication,
                 pwmRequest.getLabel(),
                 userInfo,
                 null
         );
 
-        pwmApplication.getEmailQueue().submitEmail( configuredEmailSetting, userInfo, macroMachine );
+        pwmApplication.getEmailQueue().submitEmail( configuredEmailSetting, userInfo, macroRequest );
     }
 
     public static Instant determinePwdLastModified(

@@ -3,7 +3,7 @@
  ~ http://www.pwm-project.org
  ~
  ~ Copyright (c) 2006-2009 Novell, Inc.
- ~ Copyright (c) 2009-2019 The PWM Project
+ ~ Copyright (c) 2009-2020 The PWM Project
  ~
  ~ Licensed under the Apache License, Version 2.0 (the "License");
  ~ you may not use this file except in compliance with the License.
@@ -68,7 +68,7 @@
     </select>
 </div>
 <% } %>
-<div <%=showContextSelector?"":"class=\"display-none\" "%>" id="contextSelectorWrapper">
+<div <%=showContextSelector?"":"class=\"display-none\" "%> id="contextSelectorWrapper">
     <h2 class="loginFieldLabel"><label for="<%=PwmConstants.PARAM_CONTEXT%>"><pwm:display key="Field_Location"/></label></h2>
     <div class="formFieldWrapper">
         <select name="<%=PwmConstants.PARAM_CONTEXT%>" id="<%=PwmConstants.PARAM_CONTEXT%>" class="selectfield" title="<pwm:display key="Field_Location"/>">

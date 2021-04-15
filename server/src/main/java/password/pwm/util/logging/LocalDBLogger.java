@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,6 @@ import java.io.IOException;
 import java.text.NumberFormat;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
@@ -71,7 +70,7 @@ public class LocalDBLogger implements PwmService
     private final ScheduledExecutorService writerService;
     private final AtomicBoolean cleanOnWriteFlag = new AtomicBoolean( false );
 
-    private volatile STATUS status = STATUS.NEW;
+    private volatile STATUS status = STATUS.CLOSED;
     private boolean hasShownReadError = false;
 
     private static final String STORAGE_FORMAT_VERSION = "4";
@@ -86,7 +85,6 @@ public class LocalDBLogger implements PwmService
         Objects.requireNonNull( localDB, "localDB can not be null" );
 
         final Instant startTime = Instant.now();
-        status = STATUS.OPENING;
 
         this.settings = settings == null
                 ? LocalDBLoggerSettings.builder().build().applyValueChecks()
@@ -110,15 +108,18 @@ public class LocalDBLogger implements PwmService
 
         if ( pwmApplication != null )
         {
-            final String currentFormat = pwmApplication.readAppAttribute( AppAttribute.LOCALDB_LOGGER_STORAGE_FORMAT, String.class );
-            if ( !STORAGE_FORMAT_VERSION.equals( currentFormat ) )
-            {
-                LOGGER.warn( () -> "localdb logger is using outdated format, clearing existing records (existing='"
-                        + currentFormat + "', current='" + STORAGE_FORMAT_VERSION + "')" );
+            pwmApplication.readAppAttribute( AppAttribute.LOCALDB_LOGGER_STORAGE_FORMAT, String.class )
+                    .ifPresent( ( currentFormat ) ->
+                    {
+                        if ( !STORAGE_FORMAT_VERSION.equals( currentFormat ) )
+                        {
+                            LOGGER.warn( () -> "localdb logger is using outdated format, clearing existing records (existing='"
+                                    + currentFormat + "', current='" + STORAGE_FORMAT_VERSION + "')" );
 
-                localDBListQueue.clear();
-                pwmApplication.writeAppAttribute( AppAttribute.LOCALDB_LOGGER_STORAGE_FORMAT, STORAGE_FORMAT_VERSION );
-            }
+                            localDBListQueue.clear();
+                            pwmApplication.writeAppAttribute( AppAttribute.LOCALDB_LOGGER_STORAGE_FORMAT, STORAGE_FORMAT_VERSION );
+                        }
+                    } );
         }
 
         status = STATUS.OPEN;
@@ -140,8 +141,8 @@ public class LocalDBLogger implements PwmService
 
         cleanOnWriteFlag.set( eventQueue.size() >= this.settings.getMaxEvents() );
 
-        final TimeDuration timeDuration = TimeDuration.fromCurrent( startTime );
-        LOGGER.info( () -> "open in " + timeDuration.asCompactString() + ", " + debugStats() );
+        status = STATUS.OPEN;
+        LOGGER.info( () -> "open, " + debugStats(), () -> TimeDuration.fromCurrent( startTime ) );
     }
 
 
@@ -185,6 +186,7 @@ public class LocalDBLogger implements PwmService
         return sb.toString();
     }
 
+    @Override
     public void close( )
     {
         if ( status != STATUS.CLOSED )
@@ -445,6 +447,7 @@ public class LocalDBLogger implements PwmService
 
     private class CleanupTask implements Runnable
     {
+        @Override
         public void run( )
         {
             try
@@ -472,18 +475,20 @@ public class LocalDBLogger implements PwmService
         }
     }
 
+    @Override
     public STATUS status( )
     {
         return status;
     }
 
+    @Override
     public List<HealthRecord> healthCheck( )
     {
         final List<HealthRecord> healthRecords = new ArrayList<>();
 
         if ( status != STATUS.OPEN )
         {
-            healthRecords.add( HealthRecord.forMessage( HealthMessage.LocalDBLogger_NOTOPEN, status.toString() ) );
+            healthRecords.add( HealthRecord.forMessage( HealthMessage.LocalDBLogger_Closed, status.toString() ) );
             return healthRecords;
         }
 
@@ -513,10 +518,10 @@ public class LocalDBLogger implements PwmService
         return healthRecords;
     }
 
+    @Override
     public void init( final PwmApplication pwmApplication ) throws PwmException
     {
     }
-
 
     public String sizeToDebugString( )
     {
@@ -527,12 +532,15 @@ public class LocalDBLogger implements PwmService
         numberFormat.setMaximumFractionDigits( 3 );
         numberFormat.setMinimumFractionDigits( 3 );
 
-        return String.valueOf( this.getStoredEventCount() ) + " / " + maxEvents + " (" + numberFormat.format( percentFull ) + "%)";
+        return this.getStoredEventCount() + " / " + maxEvents + " (" + numberFormat.format( percentFull ) + "%)";
     }
 
+    @Override
     public ServiceInfoBean serviceInfo( )
     {
-        return new ServiceInfoBean( Collections.singletonList( DataStorageMethod.LOCALDB ) );
+        return ServiceInfoBean.builder()
+                .storageMethod( DataStorageMethod.LOCALDB )
+                .build();
     }
 
 }

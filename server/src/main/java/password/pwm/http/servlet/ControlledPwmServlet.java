@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,23 +50,25 @@ public abstract class ControlledPwmServlet extends AbstractPwmServlet implements
 
     private final Map<String, Method> actionMethodCache = createMethodCache();
 
+    @Override
     public String servletUriRemainder( final PwmRequest pwmRequest, final String command ) throws PwmUnrecoverableException
     {
         String uri = pwmRequest.getURLwithoutQueryString();
         if ( uri.startsWith( pwmRequest.getContextPath() ) )
         {
-            uri = uri.substring( pwmRequest.getContextPath().length(), uri.length() );
+            uri = uri.substring( pwmRequest.getContextPath().length() );
         }
         for ( final String servletUri : getServletDefinition().urlPatterns() )
         {
             if ( uri.startsWith( servletUri ) )
             {
-                uri = uri.substring( servletUri.length(), uri.length() );
+                uri = uri.substring( servletUri.length() );
             }
         }
         return uri;
     }
 
+    @Override
     protected PwmServletDefinition getServletDefinition( )
     {
         for ( final PwmServletDefinition pwmServletDefinition : PwmServletDefinition.values() )
@@ -82,6 +84,7 @@ public abstract class ControlledPwmServlet extends AbstractPwmServlet implements
 
     public abstract Class<? extends ProcessAction> getProcessActionsClass( );
 
+    @Override
     protected ProcessAction readProcessAction( final PwmRequest request )
             throws PwmUnrecoverableException
     {
@@ -148,6 +151,7 @@ public abstract class ControlledPwmServlet extends AbstractPwmServlet implements
         throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_INTERNAL, msg ) );
     }
 
+    @Override
     protected void processAction( final PwmRequest pwmRequest )
             throws ServletException, IOException, ChaiUnavailableException, PwmUnrecoverableException
     {

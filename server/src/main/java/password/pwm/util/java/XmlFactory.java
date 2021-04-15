@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,9 +46,12 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public interface XmlFactory
 {
@@ -58,10 +61,15 @@ public interface XmlFactory
         W3C,
     }
 
+    enum OutputFlag
+    {
+        Compact,
+    }
+
     XmlDocument parseXml( InputStream inputStream )
             throws PwmUnrecoverableException;
 
-    void outputDocument( XmlDocument document, OutputStream outputStream )
+    void outputDocument( XmlDocument document, OutputStream outputStream, OutputFlag... outputFlags )
             throws IOException;
 
     XmlDocument newDocument( String rootElementName );
@@ -70,7 +78,7 @@ public interface XmlFactory
 
     static XmlFactory getFactory()
     {
-        return new XmlFactoryJDOM();
+        return new XmlFactoryW3c();
     }
 
     static XmlFactory getFactory( final FactoryType factoryType )
@@ -94,7 +102,7 @@ public interface XmlFactory
 
     class XmlFactoryJDOM implements XmlFactory
     {
-        private static final Charset STORAGE_CHARSET = Charset.forName( "UTF8" );
+        private static final Charset STORAGE_CHARSET = StandardCharsets.UTF_8;
 
         XmlFactoryJDOM()
         {
@@ -130,7 +138,7 @@ public interface XmlFactory
         }
 
         @Override
-        public void outputDocument( final XmlDocument document, final OutputStream outputStream )
+        public void outputDocument( final XmlDocument document, final OutputStream outputStream, final OutputFlag... outputFlags )
                 throws IOException
         {
             final Document jdomDoc =  ( ( XmlDocument.XmlDocumentJDOM )  document ).document;
@@ -177,7 +185,7 @@ public interface XmlFactory
 
     class XmlFactoryW3c implements XmlFactory
     {
-        private static final Charset STORAGE_CHARSET = Charset.forName( "UTF8" );
+        private static final Charset STORAGE_CHARSET = StandardCharsets.UTF_8;
 
         XmlFactoryW3c()
         {
@@ -223,24 +231,33 @@ public interface XmlFactory
         }
 
         @Override
-        public void outputDocument( final XmlDocument document, final OutputStream outputStream )
+        public void outputDocument( final XmlDocument document, final OutputStream outputStream, final OutputFlag... outputFlags )
                 throws IOException
         {
+            final Lock lock = ( ( XmlDocument.XmlDocumentW3c ) document ).lock;
+            final boolean compact = JavaHelper.enumArrayContainsValue( outputFlags, OutputFlag.Compact );
+
+            lock.lock();
             try
             {
                 final Transformer tr = TransformerFactory.newInstance().newTransformer();
-                tr.setOutputProperty( OutputKeys.INDENT, "yes" );
+                tr.setOutputProperty( OutputKeys.INDENT, compact ? "no" : "yes" );
                 tr.setOutputProperty( OutputKeys.METHOD, "xml" );
                 tr.setOutputProperty( OutputKeys.ENCODING, STORAGE_CHARSET.toString() );
+
                 tr.transform( new DOMSource( ( ( XmlDocument.XmlDocumentW3c ) document ).document ), new StreamResult( outputStream ) );
             }
             catch ( final TransformerException e )
             {
                 throw new IOException( "error loading xml transformer: " + e.getMessage() );
             }
+            finally
+            {
+                lock.unlock();
+            }
         }
 
-        static List<XmlElement> nodeListToElementList( final NodeList nodeList )
+        static List<XmlElement> nodeListToElementList( final NodeList nodeList, final Lock lock )
         {
             final List<XmlElement> returnList = new ArrayList<>();
             if ( nodeList != null )
@@ -250,7 +267,7 @@ public interface XmlFactory
                     final Node node = nodeList.item( i );
                     if ( node.getNodeType() == Node.ELEMENT_NODE )
                     {
-                        returnList.add( new XmlElement.XmlElementW3c( ( org.w3c.dom.Element ) node ) );
+                        returnList.add( new XmlElement.XmlElementW3c( ( org.w3c.dom.Element ) node, lock ) );
                     }
                 }
                 return returnList;
@@ -263,6 +280,7 @@ public interface XmlFactory
         {
             final DocumentBuilder documentBuilder = getBuilder();
             final org.w3c.dom.Document document = documentBuilder.newDocument();
+            document.setXmlStandalone( true );
             final org.w3c.dom.Element rootElement = document.createElement( rootElementName );
             document.appendChild( rootElement );
             return new XmlDocument.XmlDocumentW3c( document );
@@ -274,8 +292,7 @@ public interface XmlFactory
             final DocumentBuilder documentBuilder = getBuilder();
             final org.w3c.dom.Document document = documentBuilder.newDocument();
             final org.w3c.dom.Element element = document.createElement( name );
-            return new XmlElement.XmlElementW3c( element );
+            return new XmlElement.XmlElementW3c( element, new ReentrantLock() );
         }
-
     }
 }

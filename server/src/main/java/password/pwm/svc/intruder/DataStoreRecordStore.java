@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,6 +54,7 @@ class DataStoreRecordStore implements RecordStore
         this.intruderManager = intruderManager;
     }
 
+    @Override
     public IntruderRecord read( final String key )
             throws PwmUnrecoverableException
     {
@@ -166,6 +167,7 @@ class DataStoreRecordStore implements RecordStore
             throw new UnsupportedOperationException();
         }
 
+        @Override
         public void close( )
         {
             dbIterator.close();

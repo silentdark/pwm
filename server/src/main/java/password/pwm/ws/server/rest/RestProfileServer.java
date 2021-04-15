@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,14 +39,14 @@ import password.pwm.http.HttpMethod;
 import password.pwm.http.PwmHttpRequestWrapper;
 import password.pwm.http.servlet.updateprofile.UpdateProfileUtil;
 import password.pwm.i18n.Message;
-import password.pwm.ldap.LdapPermissionTester;
+import password.pwm.ldap.permission.UserPermissionUtility;
 import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.UserInfoFactory;
 import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsManager;
 import password.pwm.util.FormMap;
 import password.pwm.util.form.FormUtility;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.ws.server.RestMethodHandler;
 import password.pwm.ws.server.RestRequest;
 import password.pwm.ws.server.RestResultBean;
@@ -211,7 +211,7 @@ public class RestProfileServer extends RestServlet
 
         {
             final List<UserPermission> userPermission = updateProfileProfile.readSettingAsUserPermission( PwmSetting.UPDATE_PROFILE_QUERY_MATCH );
-            final boolean result = LdapPermissionTester.testUserPermissions(
+            final boolean result = UserPermissionUtility.testUserPermission(
                     restRequest.getPwmApplication(),
                     restRequest.getSessionLabel(),
                     targetUserIdentity.getUserIdentity(),
@@ -251,7 +251,7 @@ public class RestProfileServer extends RestServlet
                 targetUserIdentity.getChaiProvider()
         );
 
-        final MacroMachine macroMachine = MacroMachine.forUser(
+        final MacroRequest macroRequest = MacroRequest.forUser(
                 restRequest.getPwmApplication(),
                 restRequest.getLocale(),
                 restRequest.getSessionLabel(),
@@ -263,7 +263,7 @@ public class RestProfileServer extends RestServlet
                 restRequest.getSessionLabel(),
                 restRequest.getLocale(),
                 userInfo,
-                macroMachine,
+                macroRequest,
                 updateProfileProfile,
                 FormUtility.asStringMap( profileFormData ),
                 targetUserIdentity.getChaiUser()

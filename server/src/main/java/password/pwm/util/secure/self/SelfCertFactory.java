@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,8 +82,7 @@ public class SelfCertFactory
 
     private static Optional<StoredCertData> loadExistingStoredCert( final PwmApplication pwmApplication )
     {
-        final StoredCertData storedCertData = pwmApplication.readAppAttribute( AppAttribute.HTTPS_SELF_CERT, StoredCertData.class );
-        return Optional.ofNullable( storedCertData );
+        return pwmApplication.readAppAttribute( AppAttribute.HTTPS_SELF_CERT, StoredCertData.class );
     }
 
     private static boolean evaluateExistingStoredCert( final StoredCertData storedCertData, final Settings settings )

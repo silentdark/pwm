@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ import password.pwm.svc.stats.StatisticsManager;
 import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.ws.server.RestMethodHandler;
 import password.pwm.ws.server.RestRequest;
 import password.pwm.ws.server.RestResultBean;
@@ -83,7 +83,7 @@ public class RestStatusServer extends RestServlet
                     targetUserIdentity.getUserIdentity(),
                     chaiProvider
             );
-            final MacroMachine macroMachine = MacroMachine.forUser(
+            final MacroRequest macroRequest = MacroRequest.forUser(
                     restRequest.getPwmApplication(),
                     restRequest.getLocale(),
                     restRequest.getSessionLabel(),
@@ -94,14 +94,14 @@ public class RestStatusServer extends RestServlet
                     userInfo,
                     restRequest.getPwmApplication().getConfig(),
                     restRequest.getLocale(),
-                    macroMachine
+                    macroRequest
             );
 
             StatisticsManager.incrementStat( restRequest.getPwmApplication(), Statistic.REST_STATUS );
 
             final RestResultBean restResultBean = RestResultBean.withData( publicUserInfoBean );
-            LOGGER.debug( restRequest.getSessionLabel(), () -> "completed REST status request in "
-                    + TimeDuration.compactFromCurrent( startTime ) + ", result=" + JsonUtil.serialize( restResultBean ) );
+            LOGGER.debug( restRequest.getSessionLabel(), () -> "completed REST status request, result="
+                    + JsonUtil.serialize( restResultBean ), () -> TimeDuration.fromCurrent( startTime ) );
             return restResultBean;
         }
         catch ( final PwmException e )

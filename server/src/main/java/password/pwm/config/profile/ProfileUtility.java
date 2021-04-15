@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,8 +29,8 @@ import password.pwm.config.PwmSettingCategory;
 import password.pwm.config.value.data.UserPermission;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.http.CommonValues;
-import password.pwm.ldap.LdapPermissionTester;
+import password.pwm.http.PwmRequestContext;
+import password.pwm.ldap.permission.UserPermissionUtility;
 import password.pwm.util.logging.PwmLogger;
 
 import java.util.List;
@@ -42,29 +42,29 @@ public class ProfileUtility
     private static final PwmLogger LOGGER = PwmLogger.forClass( ProfileUtility.class );
 
     public static Optional<String> discoverProfileIDForUser(
-            final CommonValues commonValues,
+            final PwmRequestContext pwmRequestContext,
             final UserIdentity userIdentity,
             final ProfileDefinition profileDefinition
     )
             throws PwmUnrecoverableException
     {
-        return discoverProfileIDForUser( commonValues.getPwmApplication(), commonValues.getSessionLabel(), userIdentity, profileDefinition );
+        return discoverProfileIDForUser( pwmRequestContext.getPwmApplication(), pwmRequestContext.getSessionLabel(), userIdentity, profileDefinition );
     }
 
     public static <T extends Profile> T profileForUser(
-            final CommonValues commonValues,
+            final PwmRequestContext pwmRequestContext,
             final UserIdentity userIdentity,
             final ProfileDefinition profileDefinition,
             final Class<T> classOfT
     )
             throws PwmUnrecoverableException
     {
-        final Optional<String> profileID = discoverProfileIDForUser( commonValues, userIdentity, profileDefinition );
+        final Optional<String> profileID = discoverProfileIDForUser( pwmRequestContext, userIdentity, profileDefinition );
         if ( !profileID.isPresent() )
         {
             throw PwmUnrecoverableException.newException( PwmError.ERROR_NO_PROFILE_ASSIGNED, "profile of type " + profileDefinition + " is required but not assigned" );
         }
-        final Profile profileImpl = commonValues.getConfig().profileMap( profileDefinition ).get( profileID.get() );
+        final Profile profileImpl = pwmRequestContext.getConfig().profileMap( profileDefinition ).get( profileID.get() );
         return ( T ) profileImpl;
     }
 
@@ -80,8 +80,8 @@ public class ProfileUtility
         final Map<String, Profile> profileMap = pwmApplication.getConfig().profileMap( profileDefinition );
         for ( final Profile profile : profileMap.values() )
         {
-            final List<UserPermission> queryMatches = profile.getPermissionMatches();
-            final boolean match = LdapPermissionTester.testUserPermissions( pwmApplication, sessionLabel, userIdentity, queryMatches );
+            final List<UserPermission> queryMatches = profile.profilePermissions();
+            final boolean match = UserPermissionUtility.testUserPermission( pwmApplication, sessionLabel, userIdentity, queryMatches );
             if ( match )
             {
                 return Optional.of( profile.getIdentifier() );

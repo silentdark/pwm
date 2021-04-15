@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,23 +20,18 @@
 
 package password.pwm.http.servlet.configeditor;
 
-import com.novell.ldapchai.exception.ChaiUnavailableException;
+import lombok.Builder;
+import lombok.Value;
 import password.pwm.AppProperty;
-import password.pwm.PwmApplication;
-import password.pwm.PwmApplicationMode;
 import password.pwm.PwmConstants;
 import password.pwm.bean.EmailItemBean;
-import password.pwm.bean.SessionLabel;
 import password.pwm.bean.SmsItemBean;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.Configuration;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingCategory;
-import password.pwm.config.PwmSettingSyntax;
 import password.pwm.config.PwmSettingTemplate;
-import password.pwm.config.PwmSettingTemplateSet;
 import password.pwm.config.SettingUIFunction;
-import password.pwm.config.StoredValue;
 import password.pwm.config.profile.EmailServerProfile;
 import password.pwm.config.profile.PwmPasswordPolicy;
 import password.pwm.config.stored.ConfigurationProperty;
@@ -44,13 +39,9 @@ import password.pwm.config.stored.StoredConfigItemKey;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.stored.StoredConfigurationModifier;
 import password.pwm.config.stored.StoredConfigurationUtil;
-import password.pwm.config.stored.ValueMetaData;
-import password.pwm.config.value.ActionValue;
 import password.pwm.config.value.FileValue;
-import password.pwm.config.value.PrivateKeyValue;
-import password.pwm.config.value.RemoteWebServiceValue;
+import password.pwm.config.value.StoredValue;
 import password.pwm.config.value.ValueFactory;
-import password.pwm.config.value.X509CertificateValue;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
@@ -58,8 +49,6 @@ import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.DatabaseStatusChecker;
 import password.pwm.health.HealthRecord;
-import password.pwm.health.HealthStatus;
-import password.pwm.health.HealthTopic;
 import password.pwm.health.LDAPHealthChecker;
 import password.pwm.http.HttpMethod;
 import password.pwm.http.JspUrl;
@@ -69,6 +58,11 @@ import password.pwm.http.PwmRequest;
 import password.pwm.http.bean.ConfigManagerBean;
 import password.pwm.http.servlet.AbstractPwmServlet;
 import password.pwm.http.servlet.ControlledPwmServlet;
+import password.pwm.http.servlet.configeditor.data.NavTreeDataMaker;
+import password.pwm.http.servlet.configeditor.data.NavTreeItem;
+import password.pwm.http.servlet.configeditor.data.NavTreeSettings;
+import password.pwm.http.servlet.configeditor.data.SettingData;
+import password.pwm.http.servlet.configeditor.data.SettingDataMaker;
 import password.pwm.http.servlet.configmanager.ConfigManagerServlet;
 import password.pwm.i18n.Config;
 import password.pwm.i18n.Message;
@@ -78,23 +72,21 @@ import password.pwm.svc.email.EmailServer;
 import password.pwm.svc.email.EmailServerUtil;
 import password.pwm.svc.email.EmailService;
 import password.pwm.util.PasswordData;
+import password.pwm.util.SampleDataGenerator;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.password.RandomPasswordGenerator;
 import password.pwm.util.queue.SmsQueueManager;
-import password.pwm.util.secure.HttpsServerCertificateManager;
 import password.pwm.ws.server.RestResultBean;
 import password.pwm.ws.server.rest.RestRandomPasswordServer;
 import password.pwm.ws.server.rest.bean.HealthData;
 
-import javax.mail.MessagingException;
 import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.Serializable;
 import java.time.Instant;
@@ -107,11 +99,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.ResourceBundle;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -163,6 +153,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             this.method = method;
         }
 
+        @Override
         public Collection<HttpMethod> permittedMethods( )
         {
             return Collections.singletonList( method );
@@ -193,7 +184,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
     }
 
     @Override
-    protected void nextStep( final PwmRequest pwmRequest ) throws PwmUnrecoverableException, IOException, ChaiUnavailableException, ServletException
+    protected void nextStep( final PwmRequest pwmRequest ) throws PwmUnrecoverableException, IOException, ServletException
     {
         pwmRequest.forwardToJsp( JspUrl.CONFIG_MANAGER_EDITOR );
     }
@@ -212,7 +203,8 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
         final String bodyString = pwmRequest.readRequestBodyAsString();
         final Map<String, String> requestMap = JsonUtil.deserializeStringMap( bodyString );
-        final PwmSetting pwmSetting = PwmSetting.forKey( requestMap.get( "setting" ) );
+        final PwmSetting pwmSetting = PwmSetting.forKey( requestMap.get( "setting" ) )
+                .orElseThrow( () -> new IllegalStateException( "invalid setting parameter value" ) );
         final String functionName = requestMap.get( "function" );
         final String profileID = pwmSetting.getCategory().hasProfiles() ? pwmRequest.readParameterAsString( "profile" ) : null;
         final String extraData = requestMap.get( "extraData" );
@@ -253,119 +245,34 @@ public class ConfigEditorServlet extends ControlledPwmServlet
     {
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
         final StoredConfiguration storedConfig = configManagerBean.getStoredConfiguration();
-
         final String key = pwmRequest.readParameterAsString( "key" );
-        final Object returnValue;
-        final LinkedHashMap<String, Object> returnMap = new LinkedHashMap<>();
-        final PwmSetting theSetting = PwmSetting.forKey( key );
 
+        final ReadSettingResponse readSettingResponse;
         if ( key.startsWith( "localeBundle" ) )
         {
-            final StringTokenizer st = new StringTokenizer( key, "-" );
-            st.nextToken();
-            final String localeBundleName = st.nextToken();
-            final PwmLocaleBundle pwmLocaleBundle = PwmLocaleBundle.forKey( localeBundleName )
-                    .orElseThrow( () -> new IllegalArgumentException( "unknown locale bundle name '" + localeBundleName + "'" ) );
-            final String keyName = st.nextToken();
-            final Map<String, String> bundleMap = storedConfig.readLocaleBundleMap( pwmLocaleBundle, keyName );
-            if ( bundleMap == null || bundleMap.isEmpty() )
-            {
-                final Map<String, String> defaultValueMap = new LinkedHashMap<>();
-                final String defaultLocaleValue = ResourceBundle.getBundle( pwmLocaleBundle.getTheClass().getName(), PwmConstants.DEFAULT_LOCALE ).getString( keyName );
-                for ( final Locale locale : pwmRequest.getConfig().getKnownLocales() )
-                {
-                    final ResourceBundle localeBundle = ResourceBundle.getBundle( pwmLocaleBundle.getTheClass().getName(), locale );
-                    if ( locale.toString().equalsIgnoreCase( PwmConstants.DEFAULT_LOCALE.toString() ) )
-                    {
-                        defaultValueMap.put( "", defaultLocaleValue );
-                    }
-                    else
-                    {
-                        final String valueStr = localeBundle.getString( keyName );
-                        if ( !defaultLocaleValue.equals( valueStr ) )
-                        {
-                            final String localeStr = locale.toString();
-                            defaultValueMap.put( localeStr, localeBundle.getString( keyName ) );
-                        }
-                    }
-                }
-                returnValue = defaultValueMap;
-                returnMap.put( "isDefault", true );
-            }
-            else
-            {
-                returnValue = bundleMap;
-                returnMap.put( "isDefault", false );
-            }
-            returnMap.put( "key", key );
-        }
-        else if ( theSetting == null )
-        {
-            final String errorStr = "readSettingAsString request for unknown key: " + key;
-            LOGGER.warn( () -> errorStr );
-            pwmRequest.outputJsonResult( RestResultBean.fromError( new ErrorInformation( PwmError.ERROR_INTERNAL, errorStr ) ) );
-            return ProcessStatus.Halt;
+            readSettingResponse = ConfigEditorServletUtils.handleLocaleBundleReadSetting( pwmRequest, storedConfig, key );
         }
         else
         {
-            final String profile = theSetting.getCategory().hasProfiles() ? pwmRequest.readParameterAsString( "profile" ) : null;
-            switch ( theSetting.getSyntax() )
-            {
-                case PASSWORD:
-                    returnValue = Collections.singletonMap( "isDefault", storedConfig.isDefaultValue( theSetting, profile ) );
-                    break;
-
-                case X509CERT:
-                    returnValue = ( ( X509CertificateValue ) storedConfig.readSetting( theSetting, profile ) ).toInfoMap( true );
-                    break;
-
-                case PRIVATE_KEY:
-                    returnValue = ( ( PrivateKeyValue ) storedConfig.readSetting( theSetting, profile ) ).toInfoMap( true );
-                    break;
-
-                case ACTION:
-                    returnValue = ( ( ActionValue ) storedConfig.readSetting( theSetting, profile ) ).toInfoMap();
-                    break;
-
-                case REMOTE_WEB_SERVICE:
-                    returnValue = ( ( RemoteWebServiceValue ) storedConfig.readSetting( theSetting, profile ) ).toInfoMap();
-                    break;
-
-                case FILE:
-                    returnValue = ( ( FileValue ) storedConfig.readSetting( theSetting, profile ) ).toInfoMap();
-                    break;
-
-                default:
-                    returnValue = storedConfig.readSetting( theSetting, profile ).toNativeObject();
-
-            }
-
-            returnMap.put( "isDefault", storedConfig.isDefaultValue( theSetting, profile ) );
-            if ( theSetting.getSyntax() == PwmSettingSyntax.SELECT )
-            {
-                returnMap.put( "options", theSetting.getOptions() );
-            }
-            {
-                final ValueMetaData settingMetaData = storedConfig.readSettingMetadata( theSetting, profile );
-                if ( settingMetaData != null )
-                {
-                    if ( settingMetaData.getModifyDate() != null )
-                    {
-                        returnMap.put( "modifyTime", settingMetaData.getModifyDate() );
-                    }
-                    if ( settingMetaData.getUserIdentity() != null )
-                    {
-                        returnMap.put( "modifyUser", settingMetaData.getUserIdentity() );
-                    }
-                }
-            }
-            returnMap.put( "key", key );
-            returnMap.put( "category", theSetting.getCategory().toString() );
-            returnMap.put( "syntax", theSetting.getSyntax().toString() );
+            readSettingResponse = ConfigEditorServletUtils.handleReadSetting( pwmRequest, storedConfig, key );
         }
-        returnMap.put( "value", returnValue );
-        pwmRequest.outputJsonResult( RestResultBean.withData( returnMap ) );
+
+        pwmRequest.outputJsonResult( RestResultBean.withData( readSettingResponse ) );
         return ProcessStatus.Halt;
+    }
+
+    @Value
+    @Builder
+    static class ReadSettingResponse implements Serializable
+    {
+        private final boolean isDefault;
+        private final String key;
+        private final String category;
+        private final Instant modifyTime;
+        private final UserIdentity modifyUser;
+        private final String syntax;
+        private final Object value;
+        private final Map<String, String> options;
     }
 
     @ActionHandler( action = "writeSetting" )
@@ -378,12 +285,10 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( configManagerBean.getStoredConfiguration() );
         final String key = pwmRequest.readParameterAsString( "key" );
         final String bodyString = pwmRequest.readRequestBodyAsString();
-        final PwmSetting setting = PwmSetting.forKey( key );
-        final LinkedHashMap<String, Object> returnMap = new LinkedHashMap<>();
-        final UserIdentity loggedInUser = pwmRequest.getPwmSession().isAuthenticated()
-                ? pwmRequest.getPwmSession().getUserInfo().getUserIdentity()
-                : null;
+        final UserIdentity loggedInUser = pwmRequest.getUserInfoIfLoggedIn();
+        final ReadSettingResponse readSettingResponse;
 
+        final StoredConfiguration storedConfiguration;
         if ( key.startsWith( "localeBundle" ) )
         {
             final StringTokenizer st = new StringTokenizer( key, "-" );
@@ -395,35 +300,28 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             final Map<String, String> outputMap = new LinkedHashMap<>( valueMap );
 
             modifier.writeLocaleBundleMap( pwmLocaleBundle, keyName, outputMap );
-            returnMap.put( "isDefault", outputMap.isEmpty() );
-            returnMap.put( "key", key );
+            storedConfiguration = modifier.newStoredConfiguration();
+            readSettingResponse = ConfigEditorServletUtils.handleLocaleBundleReadSetting( pwmRequest, storedConfiguration, key );
         }
         else
         {
+            final PwmSetting setting = PwmSetting.forKey( key )
+                    .orElseThrow( () -> new IllegalStateException( "invalid setting parameter value" ) );
             final String profileID = setting.getCategory().hasProfiles() ? pwmRequest.readParameterAsString( "profile" ) : null;
             try
             {
                 final StoredValue storedValue = ValueFactory.fromJson( setting, bodyString );
-                final List<String> errorMsgs = storedValue.validateValue( setting );
-                if ( errorMsgs != null && !errorMsgs.isEmpty() )
-                {
-                    returnMap.put( "errorMessage", setting.getLabel( pwmRequest.getLocale() ) + ": " + errorMsgs.get( 0 ) );
-                }
                 modifier.writeSetting( setting, profileID, storedValue, loggedInUser );
+                storedConfiguration = modifier.newStoredConfiguration();
             }
-            catch ( final Exception e )
+            catch ( final PwmOperationalException e )
             {
-                final String errorMsg = "error writing default value for setting " + setting.toString() + ", error: " + e.getMessage();
-                LOGGER.error( () -> errorMsg, e );
-                throw new IllegalStateException( errorMsg, e );
+                throw new PwmUnrecoverableException( e.getErrorInformation() );
             }
-            returnMap.put( "key", key );
-            returnMap.put( "category", setting.getCategory().toString() );
-            returnMap.put( "syntax", setting.getSyntax().toString() );
-            returnMap.put( "isDefault", configManagerBean.getStoredConfiguration().isDefaultValue( setting, profileID ) );
+            readSettingResponse = ConfigEditorServletUtils.handleReadSetting( pwmRequest, storedConfiguration, key );
         }
-        configManagerBean.setStoredConfiguration( modifier.newStoredConfiguration() );
-        pwmRequest.outputJsonResult( RestResultBean.withData( returnMap ) );
+        configManagerBean.setStoredConfiguration( storedConfiguration );
+        pwmRequest.outputJsonResult( RestResultBean.withData( readSettingResponse ) );
         return ProcessStatus.Halt;
     }
 
@@ -437,7 +335,6 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( configManagerBean.getStoredConfiguration() );
         final UserIdentity loggedInUser = pwmRequest.getUserInfoIfLoggedIn();
         final String key = pwmRequest.readParameterAsString( "key" );
-        final PwmSetting setting = PwmSetting.forKey( key );
 
         if ( key.startsWith( "localeBundle" ) )
         {
@@ -450,6 +347,8 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         }
         else
         {
+            final PwmSetting setting = PwmSetting.forKey( key )
+                    .orElseThrow( () -> new IllegalStateException( "invalid setting parameter value" ) );
             final String profileID = setting.getCategory().hasProfiles() ? pwmRequest.readParameterAsString( "profile" ) : null;
             modifier.resetSetting( setting, profileID, loggedInUser );
         }
@@ -501,7 +400,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             final ErrorInformation errorInfo = new ErrorInformation( PwmError.CONFIG_FORMAT_ERROR, errorString, new String[]
                     {
                             errorString,
-                    }
+                            }
             );
             pwmRequest.outputJsonResult( RestResultBean.fromError( errorInfo, pwmRequest ) );
             LOGGER.error( pwmRequest, errorInfo );
@@ -548,7 +447,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             throws IOException, PwmUnrecoverableException
     {
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
-        final StoredConfigurationModifier modifer = StoredConfigurationModifier.newModifier( configManagerBean.getStoredConfiguration() );
+        final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( configManagerBean.getStoredConfiguration() );
         {
             final String updateDescriptionTextCmd = pwmRequest.readParameterAsString( "updateNotesText" );
             if ( StringUtil.nullSafeEqualsIgnoreCase( "true", updateDescriptionTextCmd ) )
@@ -557,7 +456,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                 {
                     final String bodyString = pwmRequest.readRequestBodyAsString();
                     final String value = JsonUtil.deserialize( bodyString, String.class );
-                    modifer.writeConfigProperty( ConfigurationProperty.NOTES, value );
+                    modifier.writeConfigProperty( ConfigurationProperty.NOTES, value );
                     LOGGER.trace( () -> "updated notesText" );
                 }
                 catch ( final Exception e )
@@ -572,19 +471,19 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                     try
                     {
                         final PwmSettingTemplate template = PwmSettingTemplate.valueOf( requestedTemplate );
-                        modifer.writeConfigProperty( ConfigurationProperty.LDAP_TEMPLATE, template.toString() );
+                        modifier.writeConfigProperty( ConfigurationProperty.LDAP_TEMPLATE, template.toString() );
                         LOGGER.trace( () -> "setting template to: " + requestedTemplate );
                     }
                     catch ( final IllegalArgumentException e )
                     {
-                        modifer.writeConfigProperty( ConfigurationProperty.LDAP_TEMPLATE, PwmSettingTemplate.DEFAULT.toString() );
+                        modifier.writeConfigProperty( ConfigurationProperty.LDAP_TEMPLATE, PwmSettingTemplate.DEFAULT.toString() );
                         LOGGER.error( () -> "unknown template set request: " + requestedTemplate );
                     }
                 }
             }
         }
 
-        configManagerBean.setStoredConfiguration( modifer.newStoredConfiguration() );
+        configManagerBean.setStoredConfiguration( modifier.newStoredConfiguration() );
         return ProcessStatus.Halt;
     }
 
@@ -595,7 +494,6 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             throws IOException, PwmUnrecoverableException
     {
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
-
 
         final Map<String, Object> returnObj = new ConcurrentHashMap<>();
         final ExecutorService executor = Executors.newFixedThreadPool( 3 );
@@ -626,45 +524,35 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final String searchTerm = valueMap.get( "search" );
         final StoredConfiguration storedConfiguration = configManagerBean.getStoredConfiguration();
 
-        if ( searchTerm != null && !searchTerm.isEmpty() )
+        if ( StringUtil.isEmpty( searchTerm ) )
         {
-            final Set<StoredConfigItemKey> searchResults = StoredConfigurationUtil.search( storedConfiguration, searchTerm, locale );
-            final ConcurrentHashMap<String, Map<String, SearchResultItem>> returnData = new ConcurrentHashMap<>();
-
-            searchResults
-                    .parallelStream()
-                    .filter( key -> key.getRecordType() == StoredConfigItemKey.RecordType.SETTING )
-                    .forEach( recordID ->
-                    {
-                        final PwmSetting setting = recordID.toPwmSetting();
-                        final SearchResultItem item = new SearchResultItem(
-                                setting.getCategory().toString(),
-                                storedConfiguration.readSetting( setting, recordID.getProfileID() ).toDebugString( locale ),
-                                setting.getCategory().toMenuLocationDebug( recordID.getProfileID(), locale ),
-                                storedConfiguration.isDefaultValue( setting, recordID.getProfileID() ),
-                                recordID.getProfileID()
-                        );
-                        final String returnCategory = item.getNavigation();
-
-
-                        returnData.putIfAbsent( returnCategory, new ConcurrentHashMap<>() );
-                        returnData.get( returnCategory ).put( setting.getKey(), item );
-                    } );
-
-            final TreeMap<String, Map<String, SearchResultItem>> outputMap = new TreeMap<>();
-            for ( final String key : returnData.keySet() )
-            {
-                outputMap.put( key, new TreeMap<>( returnData.get( key ) ) );
-            }
-
-            restResultBean = RestResultBean.withData( outputMap );
-            LOGGER.trace( pwmRequest, () -> "finished search operation with " + returnData.size() + " results in " + TimeDuration.fromCurrent( startTime ).asCompactString() );
-        }
-        else
-        {
-            restResultBean = RestResultBean.withData( new ArrayList() );
+            pwmRequest.outputJsonResult( RestResultBean.fromError( new ErrorInformation( PwmError.ERROR_MISSING_PARAMETER, "missing search parameter" ) ) );
+            return ProcessStatus.Halt;
         }
 
+        final Set<StoredConfigItemKey> searchResults = StoredConfigurationUtil.search( storedConfiguration, searchTerm, locale );
+        final Map<String, Map<String, SearchResultItem>> returnData = new HashMap<>();
+
+        searchResults
+                .stream()
+                .filter( key -> key.getRecordType() == StoredConfigItemKey.RecordType.SETTING )
+                .forEach( recordID ->
+                {
+                    final SearchResultItem item = SearchResultItem.fromKey( recordID, storedConfiguration, locale );
+                    final String returnCategory = item.getNavigation();
+
+                    returnData.putIfAbsent( returnCategory, new ConcurrentHashMap<>() );
+                    returnData.get( returnCategory ).put( recordID.getRecordID(), item );
+                } );
+
+        final TreeMap<String, Map<String, SearchResultItem>> outputMap = new TreeMap<>();
+        for ( final Map.Entry<String, Map<String, SearchResultItem>> entry : returnData.entrySet() )
+        {
+            outputMap.put( entry.getKey(), new TreeMap<>( entry.getValue() ) );
+        }
+
+        restResultBean = RestResultBean.withData( outputMap );
+        LOGGER.trace( pwmRequest, () -> "finished search operation with " + returnData.size() + " results", () -> TimeDuration.fromCurrent( startTime ) );
         pwmRequest.outputJsonResult( restResultBean );
         return ProcessStatus.Halt;
     }
@@ -716,12 +604,13 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
         LOGGER.debug( pwmRequest, () -> "beginning restSmsHealthCheck" );
 
-        final List<HealthRecord> returnRecords = new ArrayList<>();
         final Configuration config = new Configuration( configManagerBean.getStoredConfiguration() );
+        final StringBuilder output = new StringBuilder();
+        output.append( "beginning SMS send process:\n" );
 
         if ( !SmsQueueManager.smsIsConfigured( config ) )
         {
-            returnRecords.add( new HealthRecord( HealthStatus.INFO, HealthTopic.SMS, "SMS not configured" ) );
+            output.append( "SMS not configured." );
         }
         else
         {
@@ -735,17 +624,16 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                         pwmRequest.getLabel(),
                         testSmsItem
                 );
-                returnRecords.add( new HealthRecord( HealthStatus.INFO, HealthTopic.SMS, "message sent" ) );
-                returnRecords.add( new HealthRecord( HealthStatus.INFO, HealthTopic.SMS, "response body: \n" + StringUtil.escapeHtml( responseBody ) ) );
+                output.append( "message sent:\n" );
+                output.append( "response body: \n" ).append( StringUtil.escapeHtml( responseBody ) );
             }
             catch ( final PwmException e )
             {
-                returnRecords.add( new HealthRecord( HealthStatus.WARN, HealthTopic.SMS, "unable to send message: " + e.getMessage() ) );
+                output.append( "unable to send message: " ).append( StringUtil.escapeHtml( e.getMessage() ) );
             }
         }
 
-        final HealthData healthData = HealthRecord.asHealthDataBean( config, pwmRequest.getLocale(), returnRecords );
-        final RestResultBean restResultBean = RestResultBean.withData( healthData );
+        final RestResultBean restResultBean = RestResultBean.withData( output.toString() );
         pwmRequest.outputJsonResult( restResultBean );
         LOGGER.debug( pwmRequest, () -> "completed restSmsHealthCheck in " + TimeDuration.fromCurrent( startTime ).asCompactString() );
         return ProcessStatus.Halt;
@@ -766,7 +654,8 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final Map<String, String> params = pwmRequest.readBodyAsJsonStringMap();
         final EmailItemBean testEmailItem = new EmailItemBean( params.get( "to" ), params.get( "from" ), params.get( "subject" ), params.get( "body" ), null );
 
-        final List<HealthRecord> returnRecords = new ArrayList<>();
+        final StringBuilder output = new StringBuilder();
+        output.append( "beginning EMail send process:\n" );
 
         final Configuration testConfiguration = new Configuration( configManagerBean.getStoredConfiguration() );
 
@@ -776,27 +665,25 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             final Optional<EmailServer> emailServer = EmailServerUtil.makeEmailServer( testConfiguration, emailServerProfile, null );
             if ( emailServer.isPresent() )
             {
-                final MacroMachine macroMachine = MacroMachine.forUser( pwmRequest, pwmRequest.getUserInfoIfLoggedIn() );
+                final MacroRequest macroRequest = SampleDataGenerator.sampleMacroRequest( pwmRequest.getPwmApplication() );
 
                 try
                 {
-                    EmailService.sendEmailSynchronous( emailServer.get(), testConfiguration, testEmailItem, macroMachine );
-                    returnRecords.add( new HealthRecord( HealthStatus.INFO, HealthTopic.Email, "message sent" ) );
+                    EmailService.sendEmailSynchronous( emailServer.get(), testConfiguration, testEmailItem, macroRequest );
+                   output.append( "message delivered" );
                 }
-                catch ( final MessagingException | PwmException e )
+                catch ( final PwmException e )
                 {
-                    returnRecords.add( new HealthRecord( HealthStatus.WARN, HealthTopic.Email, JavaHelper.readHostileExceptionMessage( e ) ) );
+                    output.append( "error: " + StringUtil.escapeHtml( JavaHelper.readHostileExceptionMessage( e ) ) );
                 }
             }
         }
-
-        if ( returnRecords.isEmpty() )
+        else
         {
-            returnRecords.add( new HealthRecord( HealthStatus.WARN, HealthTopic.Email, "smtp service is not configured." ) );
+            output.append( "smtp service is not configured." );
         }
 
-        final HealthData healthData = HealthRecord.asHealthDataBean( testConfiguration, pwmRequest.getLocale(), returnRecords );
-        final RestResultBean restResultBean = RestResultBean.withData( healthData );
+        final RestResultBean restResultBean = RestResultBean.withData( output.toString() );
         pwmRequest.outputJsonResult( restResultBean );
         LOGGER.debug( pwmRequest, () -> "completed restEmailHealthCheck in " + TimeDuration.fromCurrent( startTime ).asCompactString() );
         return ProcessStatus.Halt;
@@ -809,53 +696,16 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             throws PwmUnrecoverableException, IOException, ServletException
     {
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
-        final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( configManagerBean.getStoredConfiguration() );
 
         final String key = pwmRequest.readParameterAsString( "key" );
-        final PwmSetting setting = PwmSetting.forKey( key );
+        final PwmSetting setting = PwmSetting.forKey( key )
+                .orElseThrow( () -> new IllegalStateException( "invalid setting parameter value" ) );
         final int maxFileSize = Integer.parseInt( pwmRequest.getConfig().readAppProperty( AppProperty.CONFIG_MAX_JDBC_JAR_SIZE ) );
 
         if ( setting == PwmSetting.HTTPS_CERT )
         {
-            try
-            {
-                final PasswordData passwordData = pwmRequest.readParameterAsPassword( "password" );
-                final String alias = pwmRequest.readParameterAsString( "alias" );
-                final HttpsServerCertificateManager.KeyStoreFormat keyStoreFormat;
-                try
-                {
-                    keyStoreFormat = HttpsServerCertificateManager.KeyStoreFormat.valueOf( pwmRequest.readParameterAsString( "format" ) );
-                }
-                catch ( final IllegalArgumentException e )
-                {
-                    throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_MISSING_PARAMETER, "unknown format type: " + e.getMessage(), new String[]
-                            {
-                                    "format",
-                            }
-                    ) );
-                }
-
-                final Map<String, PwmRequest.FileUploadItem> fileUploads = pwmRequest.readFileUploads( maxFileSize, 1 );
-                final ByteArrayInputStream fileIs = new ByteArrayInputStream( fileUploads.get( PwmConstants.PARAM_FILE_UPLOAD ).getContent().copyOf() );
-
-                HttpsServerCertificateManager.importKey(
-                        modifier,
-                        keyStoreFormat,
-                        fileIs,
-                        passwordData,
-                        alias
-                );
-
-                configManagerBean.setStoredConfiguration( modifier.newStoredConfiguration() );
-                pwmRequest.outputJsonResult( RestResultBean.forSuccessMessage( pwmRequest, Message.Success_Unknown ) );
-                return ProcessStatus.Halt;
-            }
-            catch ( final PwmException e )
-            {
-                LOGGER.error( pwmRequest, () -> "error during https certificate upload: " + e.getMessage() );
-                pwmRequest.respondWithError( e.getErrorInformation(), false );
-                return ProcessStatus.Halt;
-            }
+            ConfigEditorServletUtils.processHttpsCertificateUpload( pwmRequest, configManagerBean );
+            return ProcessStatus.Halt;
         }
 
         final FileValue fileValue = ConfigEditorServletUtils.readFileUploadToSettingValue( pwmRequest, maxFileSize );
@@ -865,11 +715,12 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                     ? pwmRequest.getPwmSession().getUserInfo().getUserIdentity()
                     : null;
 
+            final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( configManagerBean.getStoredConfiguration() );
             modifier.writeSetting( setting, null, fileValue, userIdentity );
+            configManagerBean.setStoredConfiguration( modifier.newStoredConfiguration() );
             pwmRequest.outputJsonResult( RestResultBean.forSuccessMessage( pwmRequest, Message.Success_Unknown ) );
         }
 
-        configManagerBean.setStoredConfiguration( modifier.newStoredConfiguration() );
         return ProcessStatus.Halt;
     }
 
@@ -882,75 +733,27 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final Instant startTime = Instant.now();
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
 
-        final ArrayList<NavTreeItem> navigationData = new ArrayList<>();
         final Map<String, Object> inputParameters = pwmRequest.readBodyAsJsonMap( PwmHttpRequestWrapper.Flag.BypassValidation );
         final boolean modifiedSettingsOnly = ( boolean ) inputParameters.get( "modifiedSettingsOnly" );
-        final double level = ( double ) inputParameters.get( "level" );
+        final int level = ( int ) ( ( double ) inputParameters.get( "level" ) );
         final String filterText = ( String ) inputParameters.get( "text" );
 
-        {
-            // root node
-            final NavTreeItem categoryInfo = new NavTreeItem();
-            categoryInfo.setId( "ROOT" );
-            categoryInfo.setName( "ROOT" );
-            navigationData.add( categoryInfo );
-        }
+        final NavTreeSettings navTreeSettings = NavTreeSettings.builder()
+                .modifiedSettingsOnly( modifiedSettingsOnly )
+                .level( level )
+                .filterText( filterText )
+                .locale( pwmRequest.getLocale() )
+                .build();
 
-        {
-            final StoredConfiguration storedConfiguration = configManagerBean.getStoredConfiguration();
-            final List<PwmSettingCategory> categories = NavTreeHelper.filteredCategories(
-                    pwmRequest.getPwmApplication(),
-                    storedConfiguration,
-                    pwmRequest.getLocale(),
-                    modifiedSettingsOnly,
-                    level,
-                    filterText
-            );
-            navigationData.addAll( NavTreeHelper.makeSettingNavItems( categories, storedConfiguration, pwmRequest.getLocale() ) );
-        }
+        final StoredConfiguration storedConfiguration = configManagerBean.getStoredConfiguration();
 
-        boolean includeDisplayText = true;
-        if ( level >= 1 )
-        {
-            for ( final PwmLocaleBundle localeBundle : PwmLocaleBundle.values() )
-            {
-                if ( !localeBundle.isAdminOnly() )
-                {
-                    final Set<String> modifiedKeys = new TreeSet<>();
-                    if ( modifiedSettingsOnly )
-                    {
-                        modifiedKeys.addAll( NavTreeHelper.determineModifiedKeysSettings( localeBundle, pwmRequest.getConfig(), configManagerBean.getStoredConfiguration() ) );
-                    }
-                    if ( !modifiedSettingsOnly || !modifiedKeys.isEmpty() )
-                    {
-                        final NavTreeItem categoryInfo = new NavTreeItem();
-                        categoryInfo.setId( localeBundle.toString() );
-                        categoryInfo.setName( localeBundle.getTheClass().getSimpleName() );
-                        categoryInfo.setParent( "DISPLAY_TEXT" );
-                        categoryInfo.setType( NavTreeHelper.NavItemType.displayText );
-                        categoryInfo.setKeys( new TreeSet<>( modifiedSettingsOnly ? modifiedKeys : localeBundle.getDisplayKeys() ) );
-                        navigationData.add( categoryInfo );
-                        includeDisplayText = true;
-                    }
-                }
-            }
-        }
-
-        if ( includeDisplayText )
-        {
-            final NavTreeItem categoryInfo = new NavTreeItem();
-            categoryInfo.setId( "DISPLAY_TEXT" );
-            categoryInfo.setName( "Display Text" );
-            categoryInfo.setType( NavTreeHelper.NavItemType.navigation );
-            categoryInfo.setParent( "ROOT" );
-            navigationData.add( categoryInfo );
-        }
-
-        NavTreeHelper.moveNavItemToTopOfList( PwmSettingCategory.NOTES.toString(), navigationData );
-        NavTreeHelper.moveNavItemToTopOfList( PwmSettingCategory.TEMPLATES.toString(), navigationData );
+        final List<NavTreeItem> navigationData = NavTreeDataMaker.makeNavTreeItems(
+                pwmRequest.getPwmApplication(),
+                storedConfiguration,
+                navTreeSettings );
 
         LOGGER.trace( pwmRequest, () -> "completed navigation tree data request in " + TimeDuration.fromCurrent( startTime ).asCompactString() );
-        pwmRequest.outputJsonResult( RestResultBean.withData( navigationData ) );
+        pwmRequest.outputJsonResult( RestResultBean.withData( new ArrayList<>( navigationData ) ) );
         return ProcessStatus.Halt;
     }
 
@@ -959,78 +762,15 @@ public class ConfigEditorServlet extends ControlledPwmServlet
             throws IOException, PwmUnrecoverableException
     {
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
-        final LinkedHashMap<String, Object> returnMap = new LinkedHashMap<>( generateSettingData(
-                pwmRequest.getPwmApplication(),
+        final SettingData settingData =  SettingDataMaker.generateSettingData(
                 configManagerBean.getStoredConfiguration(),
                 pwmRequest.getLabel(),
                 pwmRequest.getLocale()
-        )
         );
 
-        if ( pwmRequest.getPwmApplication().getApplicationMode() == PwmApplicationMode.CONFIGURATION && !PwmConstants.TRIAL_MODE )
-        {
-            if ( !configManagerBean.isConfigUnlockedWarningShown() )
-            {
-                returnMap.put( "configUnlocked", true );
-                configManagerBean.setConfigUnlockedWarningShown( true );
-            }
-        }
-
-        final RestResultBean restResultBean = RestResultBean.withData( new LinkedHashMap<>( returnMap ) );
+        final RestResultBean restResultBean = RestResultBean.withData( settingData );
         pwmRequest.outputJsonResult( restResultBean );
         return ProcessStatus.Halt;
-    }
-
-    public static Map<String, Object> generateSettingData(
-            final PwmApplication pwmApplication,
-            final StoredConfiguration storedConfiguration,
-            final SessionLabel sessionLabel,
-            final Locale locale
-
-    ) throws PwmUnrecoverableException
-    {
-        final LinkedHashMap<String, Object> returnMap = new LinkedHashMap<>();
-        final MacroMachine macroMachine = MacroMachine.forNonUserSpecific( pwmApplication, sessionLabel );
-        final PwmSettingTemplateSet template = storedConfiguration.getTemplateSet();
-
-        {
-            final LinkedHashMap<String, Object> settingMap = new LinkedHashMap<>();
-            for ( final PwmSetting setting : PwmSetting.values() )
-            {
-
-                settingMap.put( setting.getKey(), SettingInfo.forSetting( setting, template, macroMachine, locale ) );
-            }
-            returnMap.put( "settings", settingMap );
-        }
-        {
-            final LinkedHashMap<String, Object> categoryMap = new LinkedHashMap<>();
-            for ( final PwmSettingCategory category : PwmSettingCategory.values() )
-            {
-                categoryMap.put( category.getKey(), CategoryInfo.forCategory( category, macroMachine, locale ) );
-            }
-            returnMap.put( "categories", categoryMap );
-        }
-        {
-            final LinkedHashMap<String, Object> labelMap = new LinkedHashMap<>();
-            for ( final PwmLocaleBundle localeBundle : PwmLocaleBundle.values() )
-            {
-                final LocaleInfo localeInfo = new LocaleInfo();
-                localeInfo.description = localeBundle.getTheClass().getSimpleName();
-                localeInfo.key = localeBundle.toString();
-                localeInfo.adminOnly = localeBundle.isAdminOnly();
-                labelMap.put( localeBundle.getTheClass().getSimpleName(), localeInfo );
-            }
-            returnMap.put( "locales", labelMap );
-        }
-        {
-            final LinkedHashMap<String, Object> varMap = new LinkedHashMap<>();
-            varMap.put( "ldapProfileIds", storedConfiguration.readSetting( PwmSetting.LDAP_PROFILE_LIST, null ).toNativeObject() );
-            varMap.put( "currentTemplate", storedConfiguration.getTemplateSet() );
-            varMap.put( "configurationNotes", storedConfiguration.readConfigProperty( ConfigurationProperty.NOTES ) );
-            returnMap.put( "var", varMap );
-        }
-        return Collections.unmodifiableMap( returnMap );
-
     }
 
     @ActionHandler( action = "testMacro" )
@@ -1045,17 +785,9 @@ public class ConfigEditorServlet extends ControlledPwmServlet
                 return ProcessStatus.Halt;
             }
 
-            final MacroMachine macroMachine;
-            if ( pwmRequest.isAuthenticated() )
-            {
-                macroMachine = pwmRequest.getPwmSession().getSessionManager().getMacroMachine();
-            }
-            else
-            {
-                macroMachine = MacroMachine.forNonUserSpecific( pwmRequest.getPwmApplication(), pwmRequest.getLabel() );
-            }
+            final MacroRequest macroRequest = SampleDataGenerator.sampleMacroRequest( pwmRequest.getPwmApplication() );
             final String input = inputMap.get( "input" );
-            final String output = macroMachine.expandMacros( input );
+            final String output = macroRequest.expandMacros( input );
             pwmRequest.outputJsonResult( RestResultBean.withData( output ) );
         }
         catch ( final PwmUnrecoverableException e )
@@ -1074,7 +806,7 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final ConfigManagerBean configManagerBean = getBean( pwmRequest );
         final Map<String, String> inputMap = pwmRequest.readBodyAsJsonStringMap( PwmHttpRequestWrapper.Flag.BypassValidation );
         final String profile = inputMap.get( "profile" );
-        final String dn = inputMap.containsKey( "dn" ) ? inputMap.get( "dn" ) : "";
+        final String dn = inputMap.getOrDefault( "dn", "" );
 
         final LdapBrowser ldapBrowser = new LdapBrowser(
                 pwmRequest.getPwmApplication().getLdapConnectionService().getChaiProviderFactory(),
@@ -1114,27 +846,14 @@ public class ConfigEditorServlet extends ControlledPwmServlet
         final Map<String, String> inputMap = pwmRequest.readBodyAsJsonStringMap( PwmHttpRequestWrapper.Flag.BypassValidation );
 
         final String settingKey = inputMap.get( "setting" );
-        final PwmSetting setting = PwmSetting.forKey( settingKey );
-        PwmSettingCategory category = null;
-        for ( final PwmSettingCategory loopCategory : PwmSettingCategory.values() )
-        {
-            if ( loopCategory.hasProfiles() )
-            {
-                final Optional<PwmSetting> profileSetting = loopCategory.getProfileSetting();
-                if ( profileSetting.isPresent() && profileSetting.get() == setting )
-                {
-                    category = loopCategory;
-                }
-            }
-        }
+        final PwmSetting setting = PwmSetting.forKey( settingKey )
+                .orElseThrow( () -> new IllegalStateException( "invalid setting parameter value" ) );
+
+        final PwmSettingCategory category = PwmSettingCategory.forProfileSetting( setting )
+                .orElseThrow( () -> new IllegalStateException( "specified key does not associated with a profile-enabled category" ) );
 
         final String sourceID = inputMap.get( "sourceID" );
         final String destinationID = inputMap.get( "destinationID" );
-
-        if ( category == null )
-        {
-            throw new IllegalStateException();
-        }
 
         try
         {

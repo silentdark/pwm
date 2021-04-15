@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,18 @@ import java.util.Optional;
 
 public enum ProfileDefinition
 {
+    ChangePassword(
+            Type.AUTHENTICATED,
+            ChangePasswordProfile.class,
+            ChangePasswordProfile.ChangePasswordProfileFactory.class,
+            PwmSettingCategory.CHANGE_PASSWORD_PROFILE,
+            PwmSetting.QUERY_MATCH_CHANGE_PASSWORD ),
+    AccountInformation(
+            Type.AUTHENTICATED,
+            AccountInformationProfile.class,
+            AccountInformationProfile.AccountInformationProfileFactory.class,
+            PwmSettingCategory.ACCOUNT_INFO_PROFILE,
+            PwmSetting.ACCOUNT_INFORMATION_QUERY_MATCH ),
     Helpdesk(
             Type.AUTHENTICATED,
             HelpdeskProfile.class,

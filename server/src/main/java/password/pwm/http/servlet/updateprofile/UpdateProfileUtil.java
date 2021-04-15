@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.operations.ActionExecutor;
 
 import javax.servlet.ServletException;
@@ -142,13 +142,13 @@ public class UpdateProfileUtil
                 formValues,
                 userLocale,
                 Collections.singletonList( userIdentity ),
-                validationFlags.toArray( new FormUtility.ValidationFlag[ validationFlags.size() ] )
+                validationFlags.toArray( new FormUtility.ValidationFlag[0] )
         );
     }
 
     static void sendProfileUpdateEmailNotice(
             final PwmApplication pwmApplication,
-            final MacroMachine macroMachine,
+            final MacroRequest macroRequest,
             final UserInfo userInfo,
             final Locale locale,
             final SessionLabel sessionLabel
@@ -161,7 +161,7 @@ public class UpdateProfileUtil
         pwmApplication.getEmailQueue().submitEmail(
                 configuredEmailSetting,
                 userInfo,
-                macroMachine
+                macroRequest
         );
 
         if ( configuredEmailSetting == null )
@@ -214,9 +214,7 @@ public class UpdateProfileUtil
         {
             formValueMap.put(
                     formConfiguration,
-                    updateProfileBean.getFormData().keySet().contains( formConfiguration.getName() )
-                            ? updateProfileBean.getFormData().get( formConfiguration.getName() )
-                            : ""
+                    updateProfileBean.getFormData().getOrDefault( formConfiguration.getName(), "" )
             );
         }
         return formValueMap;
@@ -321,7 +319,7 @@ public class UpdateProfileUtil
                             : updateProfileProfile.getTokenDurationSMS( pwmRequest.getConfig() );
 
                     TokenUtil.initializeAndSendToken(
-                            pwmRequest.commonValues(),
+                            pwmRequest.getPwmRequestContext(),
                             TokenUtil.TokenInitAndSendRequest.builder()
                                     .userInfo( pwmRequest.getPwmSession().getUserInfo() )
                                     .tokenDestinationItem( tokenDestinationItem )
@@ -349,7 +347,7 @@ public class UpdateProfileUtil
             final SessionLabel sessionLabel,
             final Locale locale,
             final UserInfo userInfo,
-            final MacroMachine macroMachine,
+            final MacroRequest macroRequest,
             final UpdateProfileProfile updateProfileProfile,
             final Map<String, String> formValues,
             final ChaiUser theUser
@@ -365,7 +363,7 @@ public class UpdateProfileUtil
         // write values.
         LOGGER.info( () -> "updating profile for " + userInfo.getUserIdentity() );
 
-        LdapOperationsHelper.writeFormValuesToLdap( theUser, formMap, macroMachine, false );
+        LdapOperationsHelper.writeFormValuesToLdap( theUser, formMap, macroRequest, false );
 
         postUpdateActionsAndEmail( pwmApplication, sessionLabel, locale, userInfo.getUserIdentity(), updateProfileProfile );
 
@@ -389,7 +387,7 @@ public class UpdateProfileUtil
                 locale,
                 userIdentity,
                 pwmApplication.getProxiedChaiUser( userIdentity ).getChaiProvider() );
-        final MacroMachine reloadedMacroMachine = MacroMachine.forUser( pwmApplication, sessionLabel, reloadedUserInfo, null, null );
+        final MacroRequest reloadedMacroRequest = MacroRequest.forUser( pwmApplication, sessionLabel, reloadedUserInfo, null, null );
 
         {
             // execute configured actions
@@ -400,14 +398,14 @@ public class UpdateProfileUtil
 
                 final ActionExecutor actionExecutor = new ActionExecutor.ActionExecutorSettings( pwmApplication, reloadedUserInfo.getUserIdentity() )
                         .setExpandPwmMacros( true )
-                        .setMacroMachine( reloadedMacroMachine )
+                        .setMacroMachine( reloadedMacroRequest )
                         .createActionExecutor();
 
                 actionExecutor.executeActions( actions, sessionLabel );
             }
         }
 
-        sendProfileUpdateEmailNotice( pwmApplication, reloadedMacroMachine, reloadedUserInfo, locale, sessionLabel );
+        sendProfileUpdateEmailNotice( pwmApplication, reloadedMacroRequest, reloadedUserInfo, locale, sessionLabel );
     }
 
     static TokenDestinationItem tokenDestinationItemForCurrentValidation(

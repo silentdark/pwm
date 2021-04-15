@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ import password.pwm.i18n.Message;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.password.PasswordRuleReaderHelper;
 
 import javax.servlet.http.HttpServletRequest;
@@ -65,11 +65,11 @@ public class PasswordRequirementsTag extends TagSupport
             final PwmPasswordPolicy passwordPolicy,
             final Configuration config,
             final Locale locale,
-            final MacroMachine macroMachine
+            final MacroRequest macroRequest
     )
     {
         final List<String> ruleTexts = new ArrayList<>(  );
-        final PolicyValues policyValues = new PolicyValues( passwordPolicy, passwordPolicy.getRuleHelper(), locale, config, macroMachine );
+        final PolicyValues policyValues = new PolicyValues( passwordPolicy, passwordPolicy.getRuleHelper(), locale, config, macroRequest );
         for ( final RuleTextGenerator ruleTextGenerator : RULE_TEXT_GENERATORS )
         {
             ruleTexts.addAll( ruleTextGenerator.generate( policyValues ) );
@@ -114,11 +114,12 @@ public class PasswordRequirementsTag extends TagSupport
         private PasswordRuleReaderHelper ruleHelper;
         private Locale locale;
         private Configuration config;
-        private MacroMachine macroMachine;
+        private MacroRequest macroRequest;
     }
 
     private static class CaseSensitiveRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             if ( policyValues.getRuleHelper().readBooleanValue( PwmPasswordRule.CaseSensitive ) )
@@ -134,6 +135,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MinLengthRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MinimumLength );
@@ -156,6 +158,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MaxLengthRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MaximumLength );
@@ -169,6 +172,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MinAlphaRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MinimumAlpha );
@@ -182,6 +186,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MaxAlphaRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MaximumAlpha );
@@ -195,6 +200,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class NumericCharsRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final PasswordRuleReaderHelper ruleHelper = policyValues.getRuleHelper();
@@ -233,6 +239,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class SpecialCharsRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final PasswordRuleReaderHelper ruleHelper = policyValues.getRuleHelper();
@@ -264,13 +271,14 @@ public class PasswordRequirementsTag extends TagSupport
                 {
                     returnValues.add( getLocalString( Message.Requirement_LastSpecial, maxValue, policyValues ) );
                 }
-                return returnValues;
+                return Collections.unmodifiableList( returnValues );
             }
         }
     }
 
     private static class MaximumRepeatRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MaximumRepeat );
@@ -284,6 +292,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MaximumSequentialRepeatRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MaximumSequentialRepeat );
@@ -297,6 +306,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MinimumLowerRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MinimumLowerCase );
@@ -310,6 +320,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MaximumLowerRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MaximumLowerCase );
@@ -323,6 +334,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MinimumUpperRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MinimumUpperCase );
@@ -336,6 +348,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MaximumUpperRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MaximumUpperCase );
@@ -349,6 +362,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MinimumUniqueRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MinimumUnique );
@@ -362,6 +376,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class DisallowedValuesRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final List<String> setValue = policyValues.getRuleHelper().getDisallowedValues();
@@ -372,7 +387,7 @@ public class PasswordRequirementsTag extends TagSupport
                 {
                     fieldValue.append( " " );
 
-                    final String expandedValue = policyValues.getMacroMachine().expandMacros( loopValue );
+                    final String expandedValue = policyValues.getMacroRequest().expandMacros( loopValue );
                     fieldValue.append( StringUtil.escapeHtml( expandedValue ) );
                 }
                 return Collections.singletonList( getLocalString( Message.Requirement_DisAllowedValues, fieldValue.toString(), policyValues ) );
@@ -383,6 +398,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class WordlistRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             if ( policyValues.getRuleHelper().readBooleanValue( PwmPasswordRule.EnableWordlist ) )
@@ -395,6 +411,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class DisallowedAttributesRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final List<String> setValue = policyValues.getRuleHelper().getDisallowedAttributes();
@@ -409,6 +426,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MaximumOldCharsRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MaximumOldChars );
@@ -422,6 +440,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class MinimumLifetimeRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final int value = policyValues.getRuleHelper().readIntValue( PwmPasswordRule.MinimumLifetime );
@@ -452,6 +471,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class ADRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             final ADPolicyComplexity adPolicyLevel = policyValues.getRuleHelper().getADComplexityLevel();
@@ -471,6 +491,7 @@ public class PasswordRequirementsTag extends TagSupport
 
     private static class UniqueRequiredRuleTextGenerator implements RuleTextGenerator
     {
+        @Override
         public List<String> generate( final PolicyValues policyValues )
         {
             if ( policyValues.getRuleHelper().readBooleanValue( PwmPasswordRule.UniqueRequired ) )
@@ -541,6 +562,7 @@ public class PasswordRequirementsTag extends TagSupport
         this.form = form;
     }
 
+    @Override
     public int doEndTag( )
             throws javax.servlet.jsp.JspTagException
     {
@@ -572,11 +594,11 @@ public class PasswordRequirementsTag extends TagSupport
             }
             else
             {
-                final MacroMachine macroMachine = pwmSession.getSessionManager().getMacroMachine( );
+                final MacroRequest macroRequest = pwmSession.getSessionManager().getMacroMachine( );
 
                 final String pre = prepend != null && prepend.length() > 0 ? prepend : "";
                 final String sep = separator != null && separator.length() > 0 ? separator : "<br/>";
-                final List<String> requirementsList = getPasswordRequirementsStrings( passwordPolicy, config, locale, macroMachine );
+                final List<String> requirementsList = getPasswordRequirementsStrings( passwordPolicy, config, locale, macroRequest );
 
                 final StringBuilder requirementsText = new StringBuilder();
                 for ( final String requirementStatement : requirementsList )

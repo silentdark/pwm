@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,7 +56,6 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.List;
 
@@ -80,6 +79,7 @@ public class SessionFilter extends AbstractPwmFilter
         return !pwmURL.isRestService();
     }
 
+    @Override
     public void processFilter(
             final PwmApplicationMode mode,
             final PwmRequest pwmRequest,
@@ -95,7 +95,7 @@ public class SessionFilter extends AbstractPwmFilter
 
         if ( !pwmURL.isResourceURL() )
         {
-            pwmRequest.debugHttpRequestToLog( "" );
+            pwmRequest.debugHttpRequestToLog( "", null );
         }
 
         if ( !pwmURL.isRestService() && !pwmURL.isResourceURL() )
@@ -136,7 +136,7 @@ public class SessionFilter extends AbstractPwmFilter
         }
 
         final TimeDuration requestExecuteTime = TimeDuration.fromCurrent( startTime );
-        pwmRequest.debugHttpRequestToLog( "completed requestID=" + requestID + " in " + requestExecuteTime.asCompactString() );
+        pwmRequest.debugHttpRequestToLog( "completed requestID=" + requestID, () -> requestExecuteTime );
         pwmRequest.getPwmApplication().getStatisticsManager().updateAverageValue( AvgStatistic.AVG_REQUEST_PROCESS_TIME, requestExecuteTime.asMillis() );
         pwmRequest.getPwmSession().getSessionStateBean().getRequestCount().incrementAndGet();
         pwmRequest.getPwmSession().getSessionStateBean().getAvgRequestDuration().update( requestExecuteTime.asMillis() );
@@ -277,6 +277,7 @@ public class SessionFilter extends AbstractPwmFilter
         return ProcessStatus.Continue;
     }
 
+    @Override
     public void destroy( )
     {
     }
@@ -394,9 +395,7 @@ public class SessionFilter extends AbstractPwmFilter
             {
                 if ( !verificationParamName.equals( paramName ) )
                 {
-                    final List<String> paramValues = Arrays.asList( req.getParameterValues( paramName ) );
-
-                    for ( final String value : paramValues )
+                    for ( final String value : req.getParameterValues( paramName ) )
                     {
                         redirectURL = PwmURL.appendAndEncodeUrlParameters( redirectURL, paramName, value );
                     }

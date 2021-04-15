@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -127,7 +127,7 @@ public class DerbyLocalDB extends AbstractJDBCLocalDB
         try
         {
             //load driver.
-            driver = ( Driver ) Class.forName( driverClasspath ).newInstance();
+            driver = ( Driver ) Class.forName( driverClasspath ).getDeclaredConstructor().newInstance();
             final Connection connection = driver.connect( connectionURL, new Properties() );
             connection.setAutoCommit( false );
 
@@ -188,6 +188,7 @@ public class DerbyLocalDB extends AbstractJDBCLocalDB
         );
     }
 
+    @Override
     public void truncate( final LocalDB.DB db )
             throws LocalDBException
     {

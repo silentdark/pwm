@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,10 +35,11 @@ import java.io.Serializable;
 import java.io.StringWriter;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 @Value
-public class PwmLogEvent implements Serializable, Comparable
+public class PwmLogEvent implements Serializable, Comparable<PwmLogEvent>
 {
     private static final int MAX_MESSAGE_LENGTH = 50_000;
 
@@ -51,6 +52,18 @@ public class PwmLogEvent implements Serializable, Comparable
     private final Throwable throwable;
     private final String username;
     private final String sourceAddress;
+
+    private static final Comparator<PwmLogEvent> COMPARATOR = Comparator.comparing(
+            PwmLogEvent::getTimestamp,
+            Comparator.nullsLast( Comparator.naturalOrder() ) )
+            .thenComparing(
+                    PwmLogEvent::getSessionID,
+                    Comparator.nullsLast( Comparator.naturalOrder() ) )
+            .thenComparing(
+                    PwmLogEvent::getRequestID,
+                    Comparator.nullsLast( Comparator.naturalOrder() ) )
+            .thenComparing( PwmLogEvent::getLevel,
+                    Comparator.nullsLast( Comparator.naturalOrder() ) );
 
 
     public static PwmLogEvent fromEncodedString( final String encodedString )
@@ -141,13 +154,10 @@ public class PwmLogEvent implements Serializable, Comparable
         return output.toString();
     }
 
-    public int compareTo( final Object o )
+    @Override
+    public int compareTo( final PwmLogEvent o )
     {
-        if ( !( o instanceof PwmLogEvent ) )
-        {
-            throw new IllegalArgumentException( "cannot compare with non PwmLogEvent" );
-        }
-        return this.getTimestamp().compareTo( ( ( PwmLogEvent ) o ).getTimestamp() );
+        return COMPARATOR.compare( this, o );
     }
 
     String toEncodedString( )
@@ -216,7 +226,7 @@ public class PwmLogEvent implements Serializable, Comparable
             sb.append( this.getTimestamp().toString() );
             sb.append( ", " );
         }
-        sb.append( StringUtil.padEndToLength( getLevel().toString(), 5, ' ' ) );
+        sb.append( StringUtil.padRight( getLevel().toString(), 5, ' ' ) );
         sb.append( ", " );
         sb.append( shortenTopic( this.topic ) );
         sb.append( ", " );

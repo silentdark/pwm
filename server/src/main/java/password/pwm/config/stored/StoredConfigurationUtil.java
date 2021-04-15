@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,13 +26,19 @@ import password.pwm.config.Configuration;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingCategory;
 import password.pwm.config.PwmSettingSyntax;
-import password.pwm.config.StoredValue;
+import password.pwm.config.PwmSettingTemplateSet;
+import password.pwm.config.value.LocalizedStringArrayValue;
 import password.pwm.config.value.PasswordValue;
+import password.pwm.config.value.StoredValue;
+import password.pwm.config.value.StringValue;
+import password.pwm.config.value.ValueTypeConverter;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.PasswordData;
+import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.PwmExceptionLoggingConsumer;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
@@ -44,25 +50,25 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public abstract class StoredConfigurationUtil
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( StoredConfigurationUtil.class );
 
-    public static List<String> profilesForSetting
-            (
-                    final PwmSetting pwmSetting,
-                    final StoredConfiguration storedConfiguration
-            )
+    public static List<String> profilesForSetting(
+            final PwmSetting pwmSetting,
+            final StoredConfiguration storedConfiguration
+    )
     {
         if ( !pwmSetting.getCategory().hasProfiles() && pwmSetting.getSyntax() != PwmSettingSyntax.PROFILE )
         {
@@ -88,7 +94,6 @@ public abstract class StoredConfigurationUtil
     )
     {
         final PwmSetting profileSetting = category.getProfileSetting().orElseThrow( IllegalStateException::new );
-
         return profilesForProfileSetting( profileSetting, storedConfiguration );
     }
 
@@ -97,67 +102,39 @@ public abstract class StoredConfigurationUtil
             final StoredConfiguration storedConfiguration
     )
     {
-        final Object nativeObject = storedConfiguration.readSetting( profileSetting, null ).toNativeObject();
-        final List<String> settingValues = ( List<String> ) nativeObject;
-        final LinkedList<String> profiles = new LinkedList<>( settingValues );
+        final StoredValue storedValue = storedConfiguration.readSetting( profileSetting, null );
+        final List<String> settingValues = ValueTypeConverter.valueToStringArray( storedValue );
+        final List<String> profiles = new ArrayList<>( settingValues );
         profiles.removeIf( StringUtil::isEmpty );
         return Collections.unmodifiableList( profiles );
-
     }
 
-    public static String changeLogAsDebugString(
-            final StoredConfiguration storedConfiguration,
-            final Set<StoredConfigItemKey> configChangeLog,
-            final Locale locale
-    )
+    public static StoredConfiguration copyConfigAndBlankAllPasswords( final StoredConfiguration storedConfig )
             throws PwmUnrecoverableException
     {
+        final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( storedConfig );
 
-        final Map<String, String> outputMap = StoredConfigurationUtil.makeDebugMap( storedConfiguration, configChangeLog, locale );
-        final StringBuilder output = new StringBuilder();
-        if ( outputMap.isEmpty() )
-        {
-            output.append( "No setting changes." );
-        }
-        else
-        {
-            for ( final Map.Entry<String, String> entry : outputMap.entrySet() )
-            {
-                final String keyName = entry.getKey();
-                final String value = entry.getValue();
-                output.append( keyName );
-                output.append( "\n" );
-                output.append( " Value: " );
-                output.append( value );
-                output.append( "\n" );
-            }
-        }
-        return output.toString();
-
-    }
-
-    public static StoredConfiguration copyConfigAndBlankAllPasswords( final StoredConfiguration input )
-            throws PwmUnrecoverableException
-    {
-        final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( input );
-
-        for ( final StoredConfigItemKey storedConfigItemKey : input.modifiedItems() )
+        final Consumer<StoredConfigItemKey> valueModifier = PwmExceptionLoggingConsumer.wrapConsumer( storedConfigItemKey ->
         {
             if ( storedConfigItemKey.getRecordType() == StoredConfigItemKey.RecordType.SETTING )
             {
                 final PwmSetting pwmSetting = storedConfigItemKey.toPwmSetting();
                 if ( pwmSetting.getSyntax() == PwmSettingSyntax.PASSWORD )
                 {
-                    final ValueMetaData valueMetaData = input.readSettingMetadata( pwmSetting, storedConfigItemKey.getProfileID() );
+                    final ValueMetaData valueMetaData = storedConfig.readSettingMetadata( pwmSetting, storedConfigItemKey.getProfileID() );
                     final UserIdentity userIdentity = valueMetaData == null ? null : valueMetaData.getUserIdentity();
                     final PasswordValue passwordValue = new PasswordValue( new PasswordData( PwmConstants.LOG_REMOVED_VALUE_REPLACEMENT ) );
                     modifier.writeSetting( pwmSetting, storedConfigItemKey.getProfileID(), passwordValue, userIdentity );
                 }
             }
-        }
+        } );
 
+        storedConfig.modifiedItems()
+                .parallelStream()
+                .filter( ( key ) -> StoredConfigItemKey.RecordType.SETTING.equals( key.getRecordType() ) )
+                .forEach( valueModifier );
 
-        final Optional<String> pwdHash = input.readConfigProperty( ConfigurationProperty.PASSWORD_HASH );
+        final Optional<String> pwdHash = storedConfig.readConfigProperty( ConfigurationProperty.PASSWORD_HASH );
         if ( pwdHash.isPresent() )
         {
             modifier.writeConfigProperty( ConfigurationProperty.PASSWORD_HASH, PwmConstants.LOG_REMOVED_VALUE_REPLACEMENT );
@@ -168,36 +145,39 @@ public abstract class StoredConfigurationUtil
 
     public static List<String> validateValues( final StoredConfiguration storedConfiguration )
     {
-        final Instant startTime = Instant.now();
-        final List<String> errorStrings = new ArrayList<>();
-
-        for ( final StoredConfigItemKey storedConfigItemKey : storedConfiguration.modifiedItems() )
+        final Function<StoredConfigItemKey, Stream<String>> validateSettingFunction = storedConfigItemKey ->
         {
-            if ( storedConfigItemKey.getRecordType() == StoredConfigItemKey.RecordType.SETTING )
-            {
-                final PwmSetting pwmSetting = storedConfigItemKey.toPwmSetting();
-                final String profileID = storedConfigItemKey.getProfileID();
-                final StoredValue loopValue = storedConfiguration.readSetting( pwmSetting, profileID );
+            final PwmSetting pwmSetting = storedConfigItemKey.toPwmSetting();
+            final String profileID = storedConfigItemKey.getProfileID();
+            final StoredValue loopValue = storedConfiguration.readSetting( pwmSetting, profileID );
 
-                try
+            try
+            {
+                final List<String> errors = loopValue.validateValue( pwmSetting );
+                for ( final String loopError : errors )
                 {
-                    final List<String> errors = loopValue.validateValue( pwmSetting );
-                    for ( final String loopError : errors )
-                    {
-                        errorStrings.add( pwmSetting.toMenuLocationDebug( storedConfigItemKey.getProfileID(), PwmConstants.DEFAULT_LOCALE ) + " - " + loopError );
-                    }
-                }
-                catch ( final Exception e )
-                {
-                    LOGGER.error( () -> "unexpected error during validate value for "
-                            + pwmSetting.toMenuLocationDebug( profileID, PwmConstants.DEFAULT_LOCALE ) + ", error: "
-                            + e.getMessage(), e );
+                    return Stream.of( pwmSetting.toMenuLocationDebug( storedConfigItemKey.getProfileID(), PwmConstants.DEFAULT_LOCALE ) + " - " + loopError );
                 }
             }
-        }
+            catch ( final Exception e )
+            {
+                LOGGER.error( () -> "unexpected error during validate value for "
+                        + pwmSetting.toMenuLocationDebug( profileID, PwmConstants.DEFAULT_LOCALE ) + ", error: "
+                        + e.getMessage(), e );
+            }
+            return Stream.empty();
+        };
 
-        LOGGER.trace( () -> "StoredConfiguration validator completed in " + TimeDuration.compactFromCurrent( startTime ) );
-        return errorStrings;
+        final Instant startTime = Instant.now();
+        final List<String> errorStrings = storedConfiguration.modifiedItems()
+                .parallelStream()
+                .filter( key -> StoredConfigItemKey.RecordType.SETTING.equals( key.getRecordType() ) )
+                .flatMap( validateSettingFunction )
+                .collect( Collectors.toList() );
+
+
+        LOGGER.trace( () -> "StoredConfiguration validator completed", () -> TimeDuration.fromCurrent( startTime ) );
+        return Collections.unmodifiableList( errorStrings );
     }
 
     public static Set<StoredConfigItemKey> search( final StoredConfiguration storedConfiguration, final String searchTerm, final Locale locale )
@@ -354,7 +334,7 @@ public abstract class StoredConfigurationUtil
             throw new PwmOperationalException( new ErrorInformation( PwmError.CONFIG_FORMAT_ERROR, null, new String[]
                     {
                             "can not set blank password",
-                    }
+                            }
             ) );
         }
         final String trimmedPassword = password.trim();
@@ -363,10 +343,9 @@ public abstract class StoredConfigurationUtil
             throw new PwmOperationalException( new ErrorInformation( PwmError.CONFIG_FORMAT_ERROR, null, new String[]
                     {
                             "can not set blank password",
-                    }
+                            }
             ) );
         }
-
 
         final String passwordHash = BCrypt.hashPassword( password );
         storedConfiguration.writeConfigProperty( ConfigurationProperty.PASSWORD_HASH, passwordHash );
@@ -389,43 +368,44 @@ public abstract class StoredConfigurationUtil
         LOGGER.debug( () -> "initialized new random security key" );
     }
 
-
     public static Map<String, String> makeDebugMap(
             final StoredConfiguration storedConfiguration,
             final Collection<StoredConfigItemKey> interestedItems,
             final Locale locale
     )
     {
-        final Map<String, String> outputMap = interestedItems.stream()
-                .filter( ( key ) -> key.getRecordType() != StoredConfigItemKey.RecordType.PROPERTY )
-                .filter( ( key ) -> storedConfiguration.readStoredValue( key ).isPresent() )
-                .collect( Collectors.toMap(
-                        key -> key.getLabel( locale ),
-                        key -> storedConfiguration.readStoredValue( key ).get().toDebugString( locale ) ) );
-
-        return Collections.unmodifiableMap( new TreeMap<>( outputMap ) );
+        return interestedItems.stream()
+                .filter( ( key ) -> !key.isRecordType( StoredConfigItemKey.RecordType.PROPERTY ) )
+                .collect( Collectors.toUnmodifiableMap(
+                        ( key ) -> key.getLabel( locale ),
+                        ( key ) -> StoredConfigurationUtil.getValueOrDefault( storedConfiguration, key ).toDebugString( locale )
+                ) );
     }
 
     public static Set<StoredConfigItemKey> allPossibleSettingKeysForConfiguration(
             final StoredConfiguration storedConfiguration
     )
     {
-        final Set<StoredConfigItemKey> loopResults = new HashSet<>();
-        for ( final PwmSetting loopSetting : PwmSetting.values() )
+        final Function<PwmSetting, Stream<StoredConfigItemKey>> function = loopSetting ->
         {
             if ( loopSetting.getCategory().hasProfiles() )
             {
-                for ( final String profile : storedConfiguration.profilesForSetting( loopSetting ) )
-                {
-                    loopResults.add( StoredConfigItemKey.fromSetting( loopSetting, profile ) );
-                }
+                return storedConfiguration.profilesForSetting( loopSetting )
+                        .stream()
+                        .map( profileId -> StoredConfigItemKey.fromSetting( loopSetting, profileId ) )
+                        .collect( Collectors.toList() )
+                        .stream();
             }
             else
             {
-                loopResults.add( StoredConfigItemKey.fromSetting( loopSetting, null ) );
+                return Stream.of( StoredConfigItemKey.fromSetting( loopSetting, null ) );
             }
-        }
-        return Collections.unmodifiableSet( loopResults );
+        };
+
+        return PwmSetting.sortedValues().stream()
+                .parallel()
+                .flatMap( function )
+                .collect( Collectors.toUnmodifiableSet() );
     }
 
     public static Set<StoredConfigItemKey> changedValues (
@@ -435,8 +415,7 @@ public abstract class StoredConfigurationUtil
     {
         final Instant startTime = Instant.now();
 
-        final Set<StoredConfigItemKey> interestedReferences = new HashSet<>();
-        interestedReferences.addAll( originalConfiguration.modifiedItems() );
+        final Set<StoredConfigItemKey> interestedReferences = new HashSet<>( originalConfiguration.modifiedItems() );
         interestedReferences.addAll( modifiedConfiguration.modifiedItems() );
 
         final Set<StoredConfigItemKey> deltaReferences = interestedReferences
@@ -449,8 +428,43 @@ public abstract class StoredConfigurationUtil
                         }
                 ).collect( Collectors.toSet() );
 
-        LOGGER.trace( () -> "generated changeLog items via compare in " + TimeDuration.compactFromCurrent( startTime ) );
+        LOGGER.trace( () -> "generated changeLog items via compare", () -> TimeDuration.fromCurrent( startTime ) );
 
         return Collections.unmodifiableSet( deltaReferences );
+    }
+
+    public static StoredValue getValueOrDefault(
+            final StoredConfiguration storedConfiguration,
+            final StoredConfigItemKey key
+    )
+    {
+        final Optional<StoredValue> storedValue = storedConfiguration.readStoredValue( key );
+
+        if ( storedValue.isPresent() )
+        {
+            return storedValue.get();
+        }
+
+        switch ( key.getRecordType() )
+        {
+            case SETTING:
+            {
+                final PwmSettingTemplateSet templateSet = storedConfiguration.getTemplateSet();
+                return key.toPwmSetting().getDefaultValue( templateSet );
+            }
+
+            case LOCALE_BUNDLE:
+            {
+                return new LocalizedStringArrayValue( Collections.emptyMap() );
+            }
+
+            case PROPERTY:
+                return new StringValue( "" );
+
+            default:
+                JavaHelper.unhandledSwitchStatement( key );
+        }
+
+        throw new IllegalStateException();
     }
 }

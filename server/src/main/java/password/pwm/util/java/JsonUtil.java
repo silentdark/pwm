@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -158,7 +158,8 @@ public class JsonUtil
         {
         }
 
-        public synchronized JsonElement serialize( final X509Certificate cert, final Type type, final JsonSerializationContext jsonSerializationContext )
+        @Override
+        public JsonElement serialize( final X509Certificate cert, final Type type, final JsonSerializationContext jsonSerializationContext )
         {
             try
             {
@@ -170,6 +171,7 @@ public class JsonUtil
             }
         }
 
+        @Override
         public X509Certificate deserialize( final JsonElement jsonElement, final Type type, final JsonDeserializationContext jsonDeserializationContext )
                 throws JsonParseException
         {
@@ -207,12 +209,14 @@ public class JsonUtil
         {
         }
 
-        public synchronized JsonElement serialize( final Date date, final Type type, final JsonSerializationContext jsonSerializationContext )
+        @Override
+        public JsonElement serialize( final Date date, final Type type, final JsonSerializationContext jsonSerializationContext )
         {
             return new JsonPrimitive( ISO_DATE_FORMAT.format( date.toInstant() ) );
         }
 
-        public synchronized Date deserialize( final JsonElement jsonElement, final Type type, final JsonDeserializationContext jsonDeserializationContext )
+        @Override
+        public Date deserialize( final JsonElement jsonElement, final Type type, final JsonDeserializationContext jsonDeserializationContext )
         {
             try
             {
@@ -245,12 +249,14 @@ public class JsonUtil
         {
         }
 
-        public synchronized JsonElement serialize( final Instant instant, final Type type, final JsonSerializationContext jsonSerializationContext )
+        @Override
+        public JsonElement serialize( final Instant instant, final Type type, final JsonSerializationContext jsonSerializationContext )
         {
             return new JsonPrimitive( JavaHelper.toIsoDate( instant ) );
         }
 
-        public synchronized Instant deserialize( final JsonElement jsonElement, final Type type, final JsonDeserializationContext jsonDeserializationContext )
+        @Override
+        public Instant deserialize( final JsonElement jsonElement, final Type type, final JsonDeserializationContext jsonDeserializationContext )
         {
             try
             {
@@ -270,7 +276,8 @@ public class JsonUtil
         {
         }
 
-        public synchronized ChallengeSet deserialize( final JsonElement jsonElement, final Type type, final JsonDeserializationContext jsonDeserializationContext )
+        @Override
+        public ChallengeSet deserialize( final JsonElement jsonElement, final Type type, final JsonDeserializationContext jsonDeserializationContext )
         {
             try
             {
@@ -286,6 +293,7 @@ public class JsonUtil
 
     private static class ByteArrayToBase64TypeAdapter implements JsonSerializer<byte[]>, JsonDeserializer<byte[]>
     {
+        @Override
         public byte[] deserialize( final JsonElement json, final Type typeOfT, final JsonDeserializationContext context ) throws JsonParseException
         {
             try
@@ -300,6 +308,7 @@ public class JsonUtil
             }
         }
 
+        @Override
         public JsonElement serialize( final byte[] src, final Type typeOfSrc, final JsonSerializationContext context )
         {
             try
@@ -317,6 +326,7 @@ public class JsonUtil
 
     private static class PasswordDataTypeAdapter implements JsonSerializer<PasswordData>, JsonDeserializer<PasswordData>
     {
+        @Override
         public PasswordData deserialize( final JsonElement json, final Type typeOfT, final JsonDeserializationContext context ) throws JsonParseException
         {
             try
@@ -331,6 +341,7 @@ public class JsonUtil
             }
         }
 
+        @Override
         public JsonElement serialize( final PasswordData src, final Type typeOfSrc, final JsonSerializationContext context )
         {
             try
@@ -349,11 +360,13 @@ public class JsonUtil
 
     private static class PwmLdapVendorTypeAdaptor implements JsonSerializer<PwmLdapVendor>, JsonDeserializer<PwmLdapVendor>
     {
+        @Override
         public PwmLdapVendor deserialize( final JsonElement json, final Type typeOfT, final JsonDeserializationContext context ) throws JsonParseException
         {
             return PwmLdapVendor.fromString( json.getAsString() );
         }
 
+        @Override
         public JsonElement serialize( final PwmLdapVendor src, final Type typeOfSrc, final JsonSerializationContext context )
         {
             return new JsonPrimitive( src.name() );

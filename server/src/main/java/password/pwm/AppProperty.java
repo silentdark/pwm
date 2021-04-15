@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,7 +74,8 @@ public enum AppProperty
     CONFIG_THEME                                    ( "config.theme" ),
     CONFIG_JBCRYPT_PWLIB_ENABLE                     ( "config.enableJbCryptPwLibrary" ),
     CONFIG_EDITOR_BLOCK_OLD_IE                      ( "configEditor.blockOldIE" ),
-    CONFIG_EDITOR_QUERY_FILTER_TEST_LIMIT           ( "configEditor.queryFilter.testLimit" ),
+    CONFIG_EDITOR_USER_PERMISSION_MATCH_LIMIT       ( "configEditor.userPermission.matchResultsLimit" ),
+    CONFIG_EDITOR_USER_PERMISSION_TIMEOUT_SECONDS   ( "configEditor.userPermission.matchTimeoutSeconds" ),
     CONFIG_EDITOR_IDLE_TIMEOUT                      ( "configEditor.idleTimeoutSeconds" ),
     CONFIG_GUIDE_IDLE_TIMEOUT                       ( "configGuide.idleTimeoutSeconds" ),
     CONFIG_MANAGER_ZIPDEBUG_MAXLOGBYTES             ( "configManager.zipDebug.maxLogBytes" ),
@@ -199,6 +200,7 @@ public enum AppProperty
     HEALTH_SUPPORT_BUNDLE_FILE_WRITE_COUNT          ( "health.supportBundle.file.writeRetentionCount" ),
     HEALTH_DISK_MIN_FREE_WARNING                    ( "health.disk.minFreeWarning" ),
     HEALTH_CERTIFICATE_WARN_SECONDS                 ( "health.certificate.warnSeconds" ),
+    HEALTH_DB_CAUTION_DURATION_MS                   ( "health.database.cautionDurationMS" ),
     HEALTH_LDAP_CAUTION_DURATION_MS                 ( "health.ldap.cautionDurationMS" ),
     HEALTH_LDAP_PROXY_WARN_PW_EXPIRE_SECONDS        ( "health.ldap.proxy.pwExpireWarnSeconds" ),
     HEALTH_LDAP_USER_SEARCH_TERM                    ( "health.ldap.userSearch.searchTerm" ),
@@ -303,6 +305,8 @@ public enum AppProperty
     QUEUE_EMAIL_RETRY_TIMEOUT_MS                    ( "queue.email.retryTimeoutMs" ),
     QUEUE_EMAIL_MAX_COUNT                           ( "queue.email.maxCount" ),
     QUEUE_EMAIL_MAX_THREADS                         ( "queue.email.maxThreads" ),
+    QUEUE_EMAIL_MAX_ITEMS_PER_CONNECTION            ( "queue.email.maxItemsPerConnection" ),
+    QUEUE_EMAIL_MAX_SECONDS_PER_CONNECTION          ( "queue.email.maxSecondsPerConnection" ),
     QUEUE_SMS_RETRY_TIMEOUT_MS                      ( "queue.sms.retryTimeoutMs" ),
     QUEUE_SMS_MAX_COUNT                             ( "queue.sms.maxCount" ),
     QUEUE_SYSLOG_RETRY_TIMEOUT_MS                   ( "queue.syslog.retryTimeoutMs" ),
@@ -311,7 +315,7 @@ public enum AppProperty
     RECAPTCHA_CLIENT_JS_URL                         ( "recaptcha.clientJsUrl" ),
     RECAPTCHA_CLIENT_IFRAME_URL                     ( "recaptcha.clientIframeUrl" ),
     RECAPTCHA_VALIDATE_URL                          ( "recaptcha.validateUrl" ),
-    REPORTING_LDAP_SEARCH_TIMEOUT                   ( "reporting.ldap.searchTimeoutMs" ),
+    REPORTING_LDAP_SEARCH_TIMEOUT_MS                ( "reporting.ldap.searchTimeoutMs" ),
     REPORTING_LDAP_SEARCH_THREADS                   ( "reporting.ldap.searchThreads" ),
     REPORTING_MAX_REPORT_AGE_SECONDS                ( "reporting.maxReportAgeSeconds" ),
     SECURITY_STRIP_INLINE_JAVASCRIPT                ( "security.html.stripInlineJavascript" ),

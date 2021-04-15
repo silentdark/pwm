@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,12 +32,11 @@ import password.pwm.util.Validator;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
-import password.pwm.util.logging.PwmLogger;
 
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -52,8 +51,6 @@ import java.util.Set;
 
 public class PwmHttpRequestWrapper
 {
-    private static final PwmLogger LOGGER = PwmLogger.forClass( PwmHttpRequestWrapper.class );
-
     private final HttpServletRequest httpServletRequest;
     private final Configuration configuration;
 
@@ -65,7 +62,7 @@ public class PwmHttpRequestWrapper
             );
 
     private static final Set<String> HTTP_HEADER_DEBUG_STRIP_VALUES =
-            Collections.unmodifiableSet( new HashSet<>( Arrays.asList(
+            Collections.unmodifiableSet( new HashSet<>( Collections.singletonList(
                     HttpHeader.Authorization.getHttpName() ) )
             );
 
@@ -306,7 +303,7 @@ public class PwmHttpRequestWrapper
             }
         }
 
-        return resultSet;
+        return Collections.unmodifiableList( resultSet );
     }
 
     public String readHeaderValueAsString( final HttpHeader headerName )
@@ -411,21 +408,13 @@ public class PwmHttpRequestWrapper
 
     private static String decodeStringToDefaultCharSet( final String input )
     {
-        String decodedValue = input;
-        try
-        {
-            decodedValue = new String( input.getBytes( "ISO-8859-1" ), PwmConstants.DEFAULT_CHARSET );
-        }
-        catch ( final UnsupportedEncodingException e )
-        {
-            LOGGER.error( () -> "error decoding request parameter: " + e.getMessage() );
-        }
-        return decodedValue;
+        return new String( input.getBytes( StandardCharsets.ISO_8859_1 ), PwmConstants.DEFAULT_CHARSET );
     }
 
     public HttpMethod getMethod( )
     {
-        return HttpMethod.fromString( this.getHttpServletRequest().getMethod() );
+        return HttpMethod.fromString( this.getHttpServletRequest().getMethod() )
+                .orElseThrow( () -> new IllegalStateException( "http method not registered" ) );
     }
 
     public Configuration getConfig( )
@@ -562,6 +551,16 @@ public class PwmHttpRequestWrapper
             }
             throw e;
         }
+    }
+
+    public static boolean isPrettyPrintJsonParameterTrue( final HttpServletRequest request )
+    {
+        return Boolean.parseBoolean( request.getParameter( PwmConstants.PARAM_FORMAT_JSON_PRETTY ) );
+    }
+
+    public boolean isPrettyPrintJsonParameterTrue()
+    {
+        return isPrettyPrintJsonParameterTrue( this.getHttpServletRequest() );
     }
 }
 

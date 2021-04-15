@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,8 +28,10 @@ import password.pwm.PwmConstants;
 import password.pwm.config.Configuration;
 import password.pwm.config.PwmSetting;
 import password.pwm.http.ContextManager;
+import password.pwm.http.bean.ImmutableByteArray;
 import password.pwm.util.logging.PwmLogger;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -45,18 +47,17 @@ import java.lang.management.ThreadInfo;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.ByteBuffer;
-
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -103,7 +104,7 @@ public class JavaHelper
                         "D",
                         "E",
                         "F",
-                };
+                        };
 
         if ( in == null || in.length <= 0 )
         {
@@ -148,9 +149,9 @@ public class JavaHelper
         return new String( chars );
     }
 
-    public static <E extends Enum<E>> List<E> readEnumListFromStringCollection( final Class<E> enumClass, final Collection<String> inputs )
+    public static <E extends Enum<E>> Set<E> readEnumSetFromStringCollection( final Class<E> enumClass, final Collection<String> inputs )
     {
-        final List<E> returnList = new ArrayList<E>();
+        final Set<E> returnList = EnumSet.noneOf( enumClass );
         for ( final String input : inputs )
         {
             final E item = readEnumFromString( enumClass, null, input );
@@ -159,7 +160,14 @@ public class JavaHelper
                 returnList.add( item );
             }
         }
-        return Collections.unmodifiableList( returnList );
+        return Collections.unmodifiableSet( returnList );
+    }
+
+    public static <E extends Enum<E>> Set<E> enumSetFromArray( final E[] arrayValues )
+    {
+        return arrayValues == null || arrayValues.length == 0
+                ? Collections.emptySet()
+                : Collections.unmodifiableSet( EnumSet.copyOf( Arrays.asList( arrayValues ) ) );
     }
 
     public static <E extends Enum<E>> Map<String, String> enumMapToStringMap( final Map<E, String> inputMap )
@@ -272,6 +280,28 @@ public class JavaHelper
         return IOUtils.copyLarge( input, output, 0, -1, buffer );
     }
 
+    public static String copyToString( final InputStream input )
+            throws IOException
+    {
+        final ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        JavaHelper.copy( input, byteArrayOutputStream );
+        return new String( byteArrayOutputStream.toByteArray(), PwmConstants.DEFAULT_CHARSET );
+    }
+
+    public static ImmutableByteArray copyToBytes( final InputStream inputStream )
+            throws IOException
+    {
+        final byte[] bytes = IOUtils.toByteArray( inputStream );
+        return ImmutableByteArray.of( bytes );
+    }
+
+    public static void copy( final String input, final OutputStream output )
+            throws IOException
+    {
+        final ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream( input.getBytes( PwmConstants.DEFAULT_CHARSET ) );
+        JavaHelper.copy( byteArrayInputStream, output );
+    }
+
     public static long copyWhilePredicate(
             final InputStream input,
             final OutputStream output,
@@ -292,20 +322,21 @@ public class JavaHelper
             throws IOException
     {
         final byte[] buffer = new byte[ bufferSize ];
-        long bytesCopied;
+        int bytesCopied;
         long totalCopied = 0;
         do
         {
-            bytesCopied = IOUtils.copyLarge( input, output, 0, bufferSize, buffer );
+            bytesCopied = input.read( buffer );
             if ( bytesCopied > 0 )
             {
+                output.write( buffer, 0, bytesCopied );
                 totalCopied += bytesCopied;
             }
             if ( conditionalTaskExecutor != null )
             {
                 conditionalTaskExecutor.conditionallyExecuteTask();
             }
-            if ( !predicate.test( bytesCopied ) )
+            if ( !predicate.test( totalCopied ) )
             {
                 return totalCopied;
             }
@@ -519,7 +550,7 @@ public class JavaHelper
             return Optional.empty();
         }
 
-        if ( inputException.getClass().isInstance( exceptionType ) )
+        if ( inputException.getClass().isAssignableFrom( exceptionType ) )
         {
             return Optional.of( ( T ) inputException );
         }
@@ -527,7 +558,7 @@ public class JavaHelper
         Throwable nextException = inputException.getCause();
         while ( nextException != null )
         {
-            if ( nextException.getClass().isInstance( exceptionType ) )
+            if ( nextException.getClass().isAssignableFrom( exceptionType ) )
             {
                 return Optional.of( ( T ) inputException );
             }
@@ -648,4 +679,49 @@ public class JavaHelper
     {
         return ByteBuffer.allocate( 8 ).putLong( input ).array();
     }
+
+    public static <E extends Enum<E>> EnumSet<E> copiedEnumSet( final Collection<E> source, final Class<E> classOfT )
+    {
+        return JavaHelper.isEmpty( source )
+                ? EnumSet.noneOf( classOfT )
+                : EnumSet.copyOf( source );
+    }
+
+    public static String requireNonEmpty( final String input )
+    {
+        if ( StringUtil.isEmpty( input ) )
+        {
+            throw new NullPointerException( );
+        }
+        return input;
+    }
+
+    public static String requireNonEmpty( final String input, final String message )
+    {
+        if ( StringUtil.isEmpty( input ) )
+        {
+            throw new NullPointerException( message );
+        }
+        return input;
+    }
+
+    public static <K extends Enum<K>, V> EnumMap<K, V> copiedEnumMap( final Map<K, V> source, final Class<K> classOfT )
+    {
+        if ( source == null )
+        {
+            return new EnumMap<K, V>( classOfT );
+        }
+
+        final EnumMap<K, V> returnMap = new EnumMap<>( classOfT );
+        for ( final Map.Entry<K, V> entry : source.entrySet() )
+        {
+            final K key = entry.getKey();
+            if ( key != null )
+            {
+                returnMap.put( key, entry.getValue() );
+            }
+        }
+        return returnMap;
+    }
+    
 }

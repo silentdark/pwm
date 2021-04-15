@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.StoredValue;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.value.data.UserPermission;
 import password.pwm.error.ErrorInformation;
@@ -40,6 +39,7 @@ import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -53,7 +53,7 @@ public class LdapProfile extends AbstractProfile implements Profile
 
     private static final ProfileDefinition PROFILE_TYPE = ProfileDefinition.LdapProfile;
 
-    protected LdapProfile( final String identifier, final Map<PwmSetting, StoredValue> storedValueMap )
+    protected LdapProfile( final String identifier, final StoredConfiguration storedValueMap )
     {
         super( identifier, storedValueMap );
     }
@@ -124,7 +124,7 @@ public class LdapProfile extends AbstractProfile implements Profile
     }
 
     @Override
-    public List<UserPermission> getPermissionMatches( )
+    public List<UserPermission> profilePermissions( )
     {
         throw new UnsupportedOperationException();
     }
@@ -135,6 +135,8 @@ public class LdapProfile extends AbstractProfile implements Profile
     )
             throws PwmUnrecoverableException
     {
+        final Instant startTime = Instant.now();
+
         {
             final boolean doCanonicalDnResolve = Boolean.parseBoolean( pwmApplication.getConfig().readAppProperty( AppProperty.LDAP_RESOLVE_CANONICAL_DN ) );
             if ( !doCanonicalDnResolve )
@@ -173,7 +175,8 @@ public class LdapProfile extends AbstractProfile implements Profile
 
                 {
                     final String finalCanonical = canonicalValue;
-                    LOGGER.trace( () -> "read and cached canonical ldap DN value for input '" + dnValue + "' as '" + finalCanonical + "'" );
+                    LOGGER.trace( () -> "read and cached canonical ldap DN value for input '" + dnValue + "' as '" + finalCanonical + "'",
+                            () -> TimeDuration.fromCurrent( startTime ) );
                 }
             }
             catch ( final ChaiUnavailableException | ChaiOperationException e )
@@ -202,8 +205,7 @@ public class LdapProfile extends AbstractProfile implements Profile
 
         if ( !StringUtil.isEmpty( testUserDN ) )
         {
-            final String canonicalDN = readCanonicalDN( pwmApplication, testUserDN );
-            return new UserIdentity( canonicalDN, this.getIdentifier() );
+            return UserIdentity.createUserIdentity( testUserDN, this.getIdentifier() ).canonicalized( pwmApplication );
         }
 
         return null;
@@ -214,7 +216,7 @@ public class LdapProfile extends AbstractProfile implements Profile
         @Override
         public Profile makeFromStoredConfiguration( final StoredConfiguration storedConfiguration, final String identifier )
         {
-            return new LdapProfile( identifier, makeValueMap( storedConfiguration, identifier, PROFILE_TYPE.getCategory() ) );
+            return new LdapProfile( identifier, storedConfiguration );
         }
     }
 

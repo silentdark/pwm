@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ import password.pwm.svc.report.ReportSummaryData;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -102,7 +102,7 @@ public class DailySummaryJob implements Runnable
             makeEmailBody( pwmApplication, dailyStatistics, locale, textBody, htmlBody );
             final EmailItemBean emailItem = new EmailItemBean( toAddress, fromAddress, subject, textBody.toString(), htmlBody.toString() );
             LOGGER.debug( () -> "sending daily summary email to " + toAddress );
-            pwmApplication.getEmailQueue().submitEmail( emailItem, null, MacroMachine.forNonUserSpecific( pwmApplication, null ) );
+            pwmApplication.getEmailQueue().submitEmail( emailItem, null, MacroRequest.forNonUserSpecific( pwmApplication, null ) );
         }
     }
 
@@ -224,8 +224,7 @@ public class DailySummaryJob implements Runnable
             // statistics
             htmlBody.append( "<h2>Daily Statistics</h2>" );
             textBody.append( "--Daily Statistics--\n" );
-            final Map<String, String> sortedStats = new TreeMap<>();
-            sortedStats.putAll( dailyStatistics );
+            final Map<String, String> sortedStats = new TreeMap<>( dailyStatistics );
 
             htmlBody.append( "<table border='1'>" );
             for ( final String key : sortedStats.keySet() )

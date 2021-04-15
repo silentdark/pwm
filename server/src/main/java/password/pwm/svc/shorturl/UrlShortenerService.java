@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.config.Configuration;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.option.DataStorageMethod;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthRecord;
 import password.pwm.svc.PwmService;
@@ -48,12 +47,13 @@ public class UrlShortenerService implements PwmService
 
     private PwmApplication pwmApplication;
     private BasicUrlShortener theShortener = null;
-    private STATUS status = PwmService.STATUS.NEW;
+    private STATUS status = STATUS.CLOSED;
 
     public UrlShortenerService( )
     {
     }
 
+    @Override
     public void init( final PwmApplication pwmApplication ) throws PwmUnrecoverableException
     {
         this.pwmApplication = pwmApplication;
@@ -97,16 +97,19 @@ public class UrlShortenerService implements PwmService
         status = PwmService.STATUS.OPEN;
     }
 
+    @Override
     public STATUS status( )
     {
         return status;
     }
 
+    @Override
     public void close( )
     {
         status = PwmService.STATUS.CLOSED;
     }
 
+    @Override
     public List<HealthRecord> healthCheck( )
     {
         return Collections.emptyList();
@@ -134,7 +137,7 @@ public class UrlShortenerService implements PwmService
             {
                 int start = 0;
                 int end = m.start();
-                result.append( text.substring( start, end ) );
+                result.append( text, start, end );
                 start = end;
                 end = m.end();
                 while ( found )
@@ -145,7 +148,7 @@ public class UrlShortenerService implements PwmService
                     if ( found )
                     {
                         end = m.start();
-                        result.append( text.substring( start, end ) );
+                        result.append( text, start, end );
                         start = end;
                         end = m.end();
                     }
@@ -161,8 +164,9 @@ public class UrlShortenerService implements PwmService
         return text;
     }
 
+    @Override
     public ServiceInfoBean serviceInfo( )
     {
-        return new ServiceInfoBean( Collections.<DataStorageMethod>emptyList() );
+        return ServiceInfoBean.builder().build();
     }
 }

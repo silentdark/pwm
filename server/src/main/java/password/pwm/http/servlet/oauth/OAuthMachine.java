@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import java.io.IOException;
 import java.net.URI;
@@ -461,8 +461,8 @@ public class OAuthMachine
             return null;
         }
 
-        final MacroMachine macroMachine = MacroMachine.forUser( pwmRequest, userIdentity );
-        final String username = macroMachine.expandMacros( macroText );
+        final MacroRequest macroRequest = MacroRequest.forUser( pwmRequest, userIdentity );
+        final String username = macroRequest.expandMacros( macroText );
         LOGGER.debug( sessionLabel, () -> "calculated username value for user as: " + username );
 
         final String grantUrl = settings.getLoginURL();

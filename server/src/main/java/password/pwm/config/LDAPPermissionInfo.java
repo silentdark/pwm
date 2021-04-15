@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ package password.pwm.config;
 
 import password.pwm.i18n.Config;
 import password.pwm.util.i18n.LocaleHelper;
-import password.pwm.util.macro.MacroMachine;
+import password.pwm.util.macro.MacroRequest;
 
 import java.io.Serializable;
 import java.util.Locale;
@@ -69,8 +69,8 @@ public class LDAPPermissionInfo implements Serializable
 
         public String getDescription( final Locale locale, final Configuration config )
         {
-            final MacroMachine macroMachine = MacroMachine.forStatic();
-            return macroMachine.expandMacros( LocaleHelper.getLocalizedMessage( locale, "Actor_Description_" + this.toString(), config, Config.class ) );
+            final MacroRequest macroRequest = MacroRequest.forStatic();
+            return macroRequest.expandMacros( LocaleHelper.getLocalizedMessage( locale, "Actor_Description_" + this.toString(), config, Config.class ) );
         }
     }
 }

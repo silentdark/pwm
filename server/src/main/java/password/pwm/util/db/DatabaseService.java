@@ -3,7 +3,7 @@
  * http://www.pwm-project.org
  *
  * Copyright (c) 2006-2009 Novell, Inc.
- * Copyright (c) 2009-2019 The PWM Project
+ * Copyright (c) 2009-2020 The PWM Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ package password.pwm.util.db;
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.PwmApplicationMode;
-import password.pwm.PwmConstants;
 import password.pwm.config.Configuration;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.option.DataStorageMethod;
@@ -31,9 +30,8 @@ import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
 import password.pwm.error.PwmUnrecoverableException;
+import password.pwm.health.HealthMessage;
 import password.pwm.health.HealthRecord;
-import password.pwm.health.HealthStatus;
-import password.pwm.health.HealthTopic;
 import password.pwm.svc.PwmService;
 import password.pwm.svc.stats.EpsStatistic;
 import password.pwm.svc.stats.StatisticsManager;
@@ -77,7 +75,7 @@ public class DatabaseService implements PwmService
     private ErrorInformation lastError;
     private PwmApplication pwmApplication;
 
-    private STATUS status = STATUS.NEW;
+    private STATUS status = STATUS.CLOSED;
 
     private AtomicLoopIntIncrementer slotIncrementer;
     private final Map<Integer, DatabaseAccessorImpl> accessors = new ConcurrentHashMap<>();
@@ -125,7 +123,6 @@ public class DatabaseService implements PwmService
         }
 
         final Instant startTime = Instant.now();
-        status = STATUS.OPENING;
 
         try
         {
@@ -181,8 +178,7 @@ public class DatabaseService implements PwmService
             final String errorMsg = "exception initializing database service: " + t.getMessage();
             LOGGER.warn( () -> errorMsg );
             initialized = false;
-            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_DB_UNAVAILABLE, errorMsg );
-            lastError = errorInformation;
+            lastError = new ErrorInformation( PwmError.ERROR_DB_UNAVAILABLE, errorMsg );
         }
     }
 
@@ -223,6 +219,7 @@ public class DatabaseService implements PwmService
         accessors.clear();
     }
 
+    @Override
     public List<HealthRecord> healthCheck( )
     {
         if ( status == PwmService.STATUS.CLOSED )
@@ -234,7 +231,10 @@ public class DatabaseService implements PwmService
 
         if ( !initialized )
         {
-            returnRecords.add( new HealthRecord( HealthStatus.WARN, HealthTopic.Database, makeUninitializedError().getDetailedErrorMsg() ) );
+            returnRecords.add( HealthRecord.forMessage(
+                    HealthMessage.ServiceClosed,
+                    this.getClass().getSimpleName(),
+                    makeUninitializedError().getDetailedErrorMsg() ) );
             return returnRecords;
         }
 
@@ -247,26 +247,35 @@ public class DatabaseService implements PwmService
         }
         catch ( final PwmException e )
         {
-            returnRecords.add( new HealthRecord( HealthStatus.WARN, HealthTopic.Database, "Error writing to database: " + e.getErrorInformation().toDebugStr() ) );
+            returnRecords.add( HealthRecord.forMessage(
+                    HealthMessage.ServiceClosed,
+                    this.getClass().getSimpleName(),
+                    "error writing to database: " + e.getMessage() ) );
             return returnRecords;
         }
 
         if ( lastError != null )
         {
             final TimeDuration errorAge = TimeDuration.fromCurrent( lastError.getDate() );
+            final long cautionDurationMS = Long.parseLong( pwmApplication.getConfig().readAppProperty( AppProperty.HEALTH_DB_CAUTION_DURATION_MS ) );
 
-            if ( errorAge.isShorterThan( TimeDuration.HOUR ) )
+            if ( errorAge.isShorterThan( cautionDurationMS ) )
             {
-                final String msg = "Database server was recently unavailable ("
-                        + errorAge.asLongString( PwmConstants.DEFAULT_LOCALE )
-                        + " ago at " + lastError.getDate().toString() + "): " + lastError.toDebugStr();
-                returnRecords.add( new HealthRecord( HealthStatus.CAUTION, HealthTopic.Database, msg ) );
+                final String ageString = errorAge.asLongString();
+                final String errorDate = JavaHelper.toIsoDate( lastError.getDate() );
+                final String errorMsg = lastError.toDebugStr();
+                returnRecords.add( HealthRecord.forMessage(
+                        HealthMessage.Database_RecentlyUnreachable,
+                        ageString,
+                        errorDate,
+                        errorMsg
+                ) );
             }
         }
 
         if ( returnRecords.isEmpty() )
         {
-            returnRecords.add( new HealthRecord( HealthStatus.GOOD, HealthTopic.Database, "Database connection to " + this.dbConfiguration.getConnectionString() + " okay" ) );
+            returnRecords.add( HealthRecord.forMessage( HealthMessage.Database_OK, this.dbConfiguration.getConnectionString() ) );
         }
 
         return returnRecords;
@@ -304,14 +313,16 @@ public class DatabaseService implements PwmService
             final DatabaseAboutProperty databaseAboutProperty = entry.getKey();
             debugProperties.put( databaseAboutProperty.name(), entry.getValue() );
         }
+
         if ( status() == STATUS.OPEN )
         {
-            return new ServiceInfoBean( Collections.singletonList( DataStorageMethod.DB ), debugProperties );
+            return ServiceInfoBean.builder()
+                    .storageMethod( DataStorageMethod.DB )
+                    .debugProperties( debugProperties )
+                    .build();
         }
-        else
-        {
-            return new ServiceInfoBean( Collections.emptyList(), debugProperties );
-        }
+
+        return ServiceInfoBean.builder().debugProperties( debugProperties ).build();
     }
 
     public DatabaseAccessor getAccessor( )
