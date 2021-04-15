@@ -1,6 +1,8 @@
 language: java
 before_install:
   - nvm install 'lts/*'
+  - npm install –g @angular/cli
+  - npm install
 cache:
   directories:
     - .autoconf
