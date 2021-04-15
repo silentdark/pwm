@@ -5,15 +5,15 @@ cache:
     - $HOME/.m2
 script:
   - mvn clean package
-deploy:
-  provider: releases
-  api_key:
-    secure: ${GH_TOKEN}
-  file: .onejar/target/pwm-onejar-1.8.0-SNAPSHOT.jar
-  skip_cleanup: true
-  on:
-    repo: silentdark/pwm
-    tags: true
+#deploy:
+#  provider: releases
+#  api_key:
+#    secure: ${GH_TOKEN}
+#  file: .onejar/target/pwm-onejar.jar
+#  skip_cleanup: true
+#  on:
+#    repo: silentdark/pwm
+#    tags: true
 branches:
   only:
     - uat
