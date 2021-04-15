@@ -1,6 +1,6 @@
 language: java
 before_install:
-  - nvm install 14.16.1
+  - nvm install 'lts/*'
 cache:
   directories:
     - .autoconf
@@ -19,5 +19,4 @@ script:
 #    tags: true
 branches:
   only:
-    - uat
-  
+    - uat  
