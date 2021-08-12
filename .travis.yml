@@ -16,7 +16,7 @@ deploy:
   api_key:
     secure: ${GH_TOKEN}
   file: .onejar/target/pwm-onejar.jar
-  skip_cleanup: true
+  cleanup: false
   on:
     repo: silentdark/pwm
     tags: true
