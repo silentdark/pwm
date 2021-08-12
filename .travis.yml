@@ -3,6 +3,7 @@ before_install:
   - nvm install 'lts/*'
   - npm install –g @angular/cli
   - npm install
+  - chmod +x mvnw
 cache:
   directories:
     - .autoconf
