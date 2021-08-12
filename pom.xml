@@ -4,7 +4,7 @@
 
     <groupId>org.pwm-project</groupId>
     <artifactId>pwm-parent</artifactId>
-    <version>2.0.0-SNAPSHOT</version>
+    <version>2.0.0</version>
     <packaging>pom</packaging>
 
     <name>PWM Password Self Service</name>
@@ -35,9 +35,12 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <maven.javadoc.skip>true</maven.javadoc.skip>
+        <jarsigner.skip>true</jarsigner.skip>
+
 
         <!-- profile managed values -->
         <spotbugs.skip>false</spotbugs.skip>
+        <owasp.skip>false</owasp.skip>
         <checkstyle.skip>false</checkstyle.skip>
         <skipTests>false</skipTests>
 
@@ -69,9 +72,21 @@
             </properties>
         </profile>
         <profile>
+            <id>skip-owasp</id>
+            <properties>
+                <spotbugs.owasp>true</spotbugs.owasp>
+            </properties>
+        </profile>
+        <profile>
             <id>enable-javadoc</id>
             <properties>
                 <maven.javadoc.skip>false</maven.javadoc.skip>
+            </properties>
+        </profile>
+        <profile>
+            <id>enable-jarsigner</id>
+            <properties>
+                <jarsigner.skip>false</jarsigner.skip>
             </properties>
         </profile>
     </profiles>
@@ -102,7 +117,7 @@
             <plugin>
                 <groupId>pl.project13.maven</groupId>
                 <artifactId>git-commit-id-plugin</artifactId>
-                <version>4.0.3</version>
+                <version>4.0.5</version>
                 <executions>
                     <execution>
                         <id>get-the-git-infos</id>
@@ -129,7 +144,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
-                <version>3.2.0</version>
+                <version>3.3.0</version>
                 <executions>
                     <execution>
                         <goals>
@@ -230,12 +245,12 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-checkstyle-plugin</artifactId>
-                <version>3.1.1</version>
+                <version>3.1.2</version>
                 <dependencies>
                     <dependency>
                         <groupId>com.puppycrawl.tools</groupId>
                         <artifactId>checkstyle</artifactId>
-                        <version>8.38</version>
+                        <version>8.44</version>
                     </dependency>
                 </dependencies>
                 <executions>
@@ -314,12 +329,12 @@
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
-                <version>4.1.4</version>
+                <version>4.2.3</version>
                 <dependencies>
                     <dependency>
                         <groupId>com.github.spotbugs</groupId>
                         <artifactId>spotbugs</artifactId>
-                        <version>4.2.0</version>
+                        <version>4.2.3</version>
                     </dependency>
                 </dependencies>
                 <configuration>
@@ -342,7 +357,7 @@
             <plugin>
                 <groupId>net.nicoulaj.maven.plugins</groupId>
                 <artifactId>checksum-maven-plugin</artifactId>
-                <version>1.9</version>
+                <version>1.10</version>
                 <executions>
                     <execution>
                         <id>output-checksums</id>
@@ -366,14 +381,46 @@
             <plugin> <!-- checks owsp vulnerability database -->
                 <groupId>org.owasp</groupId>
                 <artifactId>dependency-check-maven</artifactId>
-                <version>6.0.3</version>
+                <version>6.2.2</version>
                 <executions>
                     <execution>
                         <goals>
                             <goal>check</goal>
                         </goals>
+                        <configuration>
+                            <skip>${owasp.skip}</skip>
+                            <yarnAuditAnalyzerEnabled>false</yarnAuditAnalyzerEnabled>
+                            <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
+                        </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jarsigner-plugin</artifactId>
+                <version>3.0.0</version>
+                <executions>
+                    <execution>
+                        <id>sign</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <skip>${jarsigner.skip}</skip>
+                    <keystore>${jarsigner.keystore}</keystore>
+                    <alias>${jarsigner.alias}</alias>
+                    <storepass>${jarsigner.storepass}</storepass>
+                    <keypass>${jarsigner.keypass}</keypass>
+                    <verbose>false</verbose>
+                    <removeExistingSignatures>true</removeExistingSignatures>
+                    <includes>
+                        <include>*.jar</include>
+                        <include>*.war</include>
+                    </includes>
+                </configuration>
             </plugin>
         </plugins>
     </build>
@@ -383,13 +430,13 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>1.18.16</version>
+            <version>1.18.20</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.github.spotbugs</groupId>
             <artifactId>spotbugs-annotations</artifactId>
-            <version>4.2.0</version>
+            <version>4.3.0</version>
             <scope>provided</scope>
         </dependency>
 
@@ -397,19 +444,19 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>4.13.1</version>
+            <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>3.6.28</version>
+            <version>3.11.2</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
-            <version>3.18.1</version>
+            <version>3.20.2</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -427,13 +474,13 @@
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
             <artifactId>jmh-core</artifactId>
-            <version>1.27</version>
+            <version>1.32</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
             <artifactId>jmh-generator-annprocess</artifactId>
-            <version>1.27</version>
+            <version>1.32</version>
             <scope>test</scope>
         </dependency>
 
