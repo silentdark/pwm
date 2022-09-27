@@ -23,29 +23,31 @@ package password.pwm.http.state;
 import password.pwm.config.PwmSetting;
 import password.pwm.error.PwmException;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.http.PwmHttpResponseWrapper;
+import password.pwm.http.PwmCookiePath;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmRequestAttribute;
 import password.pwm.http.bean.PwmSessionBean;
+import password.pwm.svc.secure.DomainSecureService;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmSecurityKey;
-import password.pwm.util.secure.SecureService;
 
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 class CryptoCookieBeanImpl implements SessionBeanProvider
 {
 
     private static final PwmLogger LOGGER = PwmLogger.forClass( CryptoCookieBeanImpl.class );
 
-    private static final PwmHttpResponseWrapper.CookiePath COOKIE_PATH = PwmHttpResponseWrapper.CookiePath.PwmServlet;
+    private static final PwmCookiePath COOKIE_PATH = PwmCookiePath.PwmServlet;
 
     @Override
-    public <E extends PwmSessionBean> E getSessionBean( final PwmRequest pwmRequest, final Class<E> theClass ) throws PwmUnrecoverableException
+    public <E extends PwmSessionBean> E getSessionBean( final PwmRequest pwmRequest, final Class<E> theClass )
+            throws PwmUnrecoverableException
     {
         final Map<Class<? extends PwmSessionBean>, PwmSessionBean> sessionBeans = getRequestBeanMap( pwmRequest );
 
@@ -59,13 +61,16 @@ class CryptoCookieBeanImpl implements SessionBeanProvider
 
         try
         {
-            final String rawValue = pwmRequest.readCookie( cookieName );
+            final Optional<String> rawValue = pwmRequest.readCookie( cookieName );
             final PwmSecurityKey key = keyForSession( pwmRequest );
-            final E cookieBean = pwmRequest.getPwmApplication().getSecureService().decryptObject( rawValue, key, theClass );
-            if ( validateCookie( pwmRequest, cookieName, cookieBean ) )
+            if ( rawValue.isPresent() )
             {
-                sessionBeans.put( theClass, cookieBean );
-                return cookieBean;
+                final E cookieBean = pwmRequest.getPwmDomain().getSecureService().decryptObject( rawValue.get(), key, theClass );
+                if ( validateCookie( pwmRequest, cookieName, cookieBean ) )
+                {
+                    sessionBeans.put( theClass, cookieBean );
+                    return cookieBean;
+                }
             }
         }
         catch ( final PwmException e )
@@ -85,7 +90,7 @@ class CryptoCookieBeanImpl implements SessionBeanProvider
             return false;
         }
 
-        if ( cookieBean.getType() == PwmSessionBean.Type.AUTHENTICATED )
+        if ( cookieBean.getBeanType() == PwmSessionBean.BeanType.AUTHENTICATED )
         {
             if ( cookieBean.getGuid() == null )
             {
@@ -101,7 +106,7 @@ class CryptoCookieBeanImpl implements SessionBeanProvider
             }
         }
 
-        if ( cookieBean.getType() == PwmSessionBean.Type.PUBLIC )
+        if ( cookieBean.getBeanType() == PwmSessionBean.BeanType.PUBLIC )
         {
             if ( cookieBean.getTimestamp() == null )
             {
@@ -110,7 +115,7 @@ class CryptoCookieBeanImpl implements SessionBeanProvider
             }
 
             final TimeDuration cookieLifeDuration = TimeDuration.fromCurrent( cookieBean.getTimestamp() );
-            final long maxIdleSeconds = pwmRequest.getConfig().readSettingAsLong( PwmSetting.IDLE_TIMEOUT_SECONDS );
+            final long maxIdleSeconds = pwmRequest.getDomainConfig().readSettingAsLong( PwmSetting.IDLE_TIMEOUT_SECONDS );
             if ( cookieLifeDuration.isLongerThan( maxIdleSeconds, TimeDuration.Unit.SECONDS ) )
             {
                 LOGGER.trace( pwmRequest, () -> "disregarded existing " + cookieName + " cookie bean due to outdated timestamp (" + cookieLifeDuration.asCompactString() + ")" );
@@ -125,32 +130,29 @@ class CryptoCookieBeanImpl implements SessionBeanProvider
     @Override
     public void saveSessionBeans( final PwmRequest pwmRequest )
     {
-        if ( pwmRequest == null || pwmRequest.getPwmResponse().isCommitted() )
+        if ( pwmRequest == null || pwmRequest.getPwmResponse().isCommitted() || pwmRequest.getPwmResponse() == null  )
         {
             return;
         }
         try
         {
-            if ( pwmRequest != null && pwmRequest.getPwmResponse() != null )
+            final Map<Class<? extends PwmSessionBean>, PwmSessionBean> beansInRequest = getRequestBeanMap( pwmRequest );
+            if ( beansInRequest != null )
             {
-                final Map<Class<? extends PwmSessionBean>, PwmSessionBean> beansInRequest = getRequestBeanMap( pwmRequest );
-                if ( beansInRequest != null )
+                for ( final Map.Entry<Class<? extends PwmSessionBean>, PwmSessionBean> entry : beansInRequest.entrySet() )
                 {
-                    for ( final Map.Entry<Class<? extends PwmSessionBean>, PwmSessionBean> entry : beansInRequest.entrySet() )
+                    final Class<? extends PwmSessionBean> theClass = entry.getKey();
+                    final String cookieName = nameForClass( pwmRequest, theClass );
+                    final PwmSessionBean bean = entry.getValue();
+                    if ( bean == null )
                     {
-                        final Class<? extends PwmSessionBean> theClass = entry.getKey();
-                        final String cookieName = nameForClass( pwmRequest, theClass );
-                        final PwmSessionBean bean = entry.getValue();
-                        if ( bean == null )
-                        {
-                            pwmRequest.getPwmResponse().removeCookie( cookieName, COOKIE_PATH );
-                        }
-                        else
-                        {
-                            final PwmSecurityKey key = keyForSession( pwmRequest );
-                            final String encrytedValue = pwmRequest.getPwmApplication().getSecureService().encryptObjectToString( entry.getValue(), key );
-                            pwmRequest.getPwmResponse().writeCookie( cookieName, encrytedValue, -1, COOKIE_PATH );
-                        }
+                        pwmRequest.getPwmResponse().removeCookie( cookieName, COOKIE_PATH );
+                    }
+                    else
+                    {
+                        final PwmSecurityKey key = keyForSession( pwmRequest );
+                        final String encryptedValue = pwmRequest.getPwmDomain().getSecureService().encryptObjectToString( entry.getValue(), key );
+                        pwmRequest.getPwmResponse().writeCookie( cookieName, encryptedValue, -1, COOKIE_PATH );
                     }
                 }
             }
@@ -183,8 +185,8 @@ class CryptoCookieBeanImpl implements SessionBeanProvider
     private static String nameForClass( final PwmRequest pwmRequest, final Class<? extends PwmSessionBean> theClass )
             throws PwmUnrecoverableException
     {
-        final SecureService secureService = pwmRequest.getPwmApplication().getSecureService();
-        return "b-" + StringUtil.truncate( secureService.hash( theClass.getName() ), 8 );
+        final DomainSecureService domainSecureService = pwmRequest.getPwmDomain().getSecureService();
+        return "b-" + StringUtil.truncate( domainSecureService.ephemeralHmac( theClass.getName() ), 8 );
     }
 
     @Override
@@ -196,9 +198,10 @@ class CryptoCookieBeanImpl implements SessionBeanProvider
     private PwmSecurityKey keyForSession( final PwmRequest pwmRequest )
             throws PwmUnrecoverableException
     {
-        final PwmSecurityKey pwmSecurityKey = pwmRequest.getConfig().getSecurityKey();
-        final String keyHash = pwmSecurityKey.keyHash( pwmRequest.getPwmApplication().getSecureService() );
+        final PwmSecurityKey pwmSecurityKey = pwmRequest.getDomainConfig().getSecurityKey();
+        final String keyHash = pwmSecurityKey.keyHash( pwmRequest.getPwmDomain().getSecureService() );
         final String userGuid = pwmRequest.getPwmSession().getLoginInfoBean().getGuid();
-        return new PwmSecurityKey( keyHash + userGuid );
+        final String keyData = keyHash + pwmRequest.getPwmDomain().getSecureService().ephemeralHmac( userGuid );
+        return new PwmSecurityKey( keyData );
     }
 }

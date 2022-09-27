@@ -23,8 +23,8 @@ package password.pwm.svc.wordlist;
 import password.pwm.PwmApplication;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.AtomicLoopLongIncrementer;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.LongIncrementer;
+import password.pwm.util.java.MiscUtil;
 import password.pwm.util.java.StringUtil;
 
 import java.util.Collection;
@@ -52,42 +52,42 @@ public abstract class AbstractWordlistBucket implements WordlistBucket
 
     private Map<String, String> getWriteTxnForValue(
             final Collection<String> words,
-            final AtomicLoopLongIncrementer valueIncrementer
+            final LongIncrementer valueIncrementer
     )
     {
         switch ( type )
         {
             case SEEDLIST:
             {
-                final Map<String, String> returnSet = new TreeMap<>();
+                final Map<String, String> returnData = new TreeMap<>();
                 for ( final String word : words )
                 {
-                    if ( !StringUtil.isEmpty( word ) )
+                    if ( StringUtil.notEmpty( word ) )
                     {
                         final long nextLong = valueIncrementer.next();
                         final String nextKey = seedlistLongToKey( nextLong );
-                        returnSet.put( nextKey, word );
+                        returnData.put( nextKey, word );
                     }
                 }
-                return Collections.unmodifiableMap( returnSet );
+                return Collections.unmodifiableMap( returnData );
             }
 
             case WORDLIST:
             {
-                final Map<String, String> returnSet = new TreeMap<>();
+                final Map<String, String> returnData = new TreeMap<>();
                 for ( final String word : words )
                 {
-                    if ( !StringUtil.isEmpty( word ) )
+                    if ( StringUtil.notEmpty( word ) )
                     {
                         valueIncrementer.next();
-                        returnSet.put( word, "" );
+                        returnData.put( word, "" );
                     }
                 }
-                return returnSet;
+                return returnData;
             }
 
             default:
-                JavaHelper.unhandledSwitchStatement( type );
+                MiscUtil.unhandledSwitchStatement( type );
         }
 
         throw new IllegalStateException( "unreachable switch statement" );
@@ -98,7 +98,7 @@ public abstract class AbstractWordlistBucket implements WordlistBucket
             throws PwmUnrecoverableException
     {
         final WordlistStatus initialStatus = abstractWordlist.readWordlistStatus();
-        final AtomicLoopLongIncrementer valueIncrementer = AtomicLoopLongIncrementer.builder().initial( initialStatus.getValueCount() ).build();
+        final LongIncrementer valueIncrementer = new LongIncrementer( initialStatus.getValueCount() );
         this.putValues( getWriteTxnForValue( words, valueIncrementer ) );
 
         if ( initialStatus.getValueCount() != valueIncrementer.get() )

@@ -22,12 +22,14 @@ package password.pwm.svc.cache;
 
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
+import password.pwm.bean.DomainID;
 import password.pwm.error.PwmException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthRecord;
+import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
 import password.pwm.util.java.ConditionalTaskExecutor;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StatisticCounterBundle;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
@@ -41,53 +43,51 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 
-public class CacheService implements PwmService
+public class CacheService extends AbstractPwmService implements PwmService
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( CacheService.class );
 
     private MemoryCacheStore memoryCacheStore;
 
-    private STATUS status = STATUS.CLOSED;
-
     private ConditionalTaskExecutor traceDebugOutputter;
 
     @Override
-    public STATUS status( )
+    protected Set<PwmApplication.Condition> openConditions()
     {
-        return status;
+        return Collections.emptySet();
     }
 
     @Override
-    public void init( final PwmApplication pwmApplication )
+    public STATUS postAbstractInit( final PwmApplication pwmApplication, final DomainID domainID )
             throws PwmException
     {
         final boolean enabled = Boolean.parseBoolean( pwmApplication.getConfig().readAppProperty( AppProperty.CACHE_ENABLE ) );
         if ( !enabled )
         {
             LOGGER.debug( () -> "skipping cache service init due to app property setting" );
-            status = STATUS.CLOSED;
-            return;
+            return STATUS.CLOSED;
         }
 
         final int maxMemItems = Integer.parseInt( pwmApplication.getConfig().readAppProperty( AppProperty.CACHE_MEMORY_MAX_ITEMS ) );
         memoryCacheStore = new MemoryCacheStore( maxMemItems );
-        this.traceDebugOutputter = new ConditionalTaskExecutor(
-                ( ) -> outputTraceInfo(),
-                new ConditionalTaskExecutor.TimeDurationPredicate( 1, TimeDuration.Unit.MINUTES )
-        );
-        status = STATUS.OPEN;
+        this.traceDebugOutputter = ConditionalTaskExecutor.forPeriodicTask(
+                this::outputTraceInfo,
+                TimeDuration.MINUTE.asDuration() );
+
+        return STATUS.OPEN;
     }
 
     @Override
-    public void close( )
+    public void shutdownImpl( )
     {
-        status = STATUS.CLOSED;
+        setStatus( STATUS.CLOSED );
     }
 
     @Override
-    public List<HealthRecord> healthCheck( )
+    public List<HealthRecord> serviceHealthCheck( )
     {
         return Collections.emptyList();
     }
@@ -95,7 +95,7 @@ public class CacheService implements PwmService
     @Override
     public ServiceInfoBean serviceInfo( )
     {
-        if ( status == STATUS.CLOSED )
+        if ( status() == STATUS.CLOSED )
         {
             return ServiceInfoBean.builder().build();
         }
@@ -103,15 +103,15 @@ public class CacheService implements PwmService
         final Map<String, String> debugInfo = new TreeMap<>( );
         debugInfo.put( "itemCount", String.valueOf( memoryCacheStore.itemCount() ) );
         debugInfo.put( "byteCount", String.valueOf( memoryCacheStore.byteCount() ) );
-        debugInfo.putAll( JsonUtil.deserializeStringMap( JsonUtil.serializeMap( memoryCacheStore.getCacheStoreInfo().debugStats() ) ) );
-        debugInfo.putAll( JsonUtil.deserializeStringMap( JsonUtil.serializeMap( memoryCacheStore.storedClassHistogram( "histogram." ) ) ) );
+        debugInfo.putAll( JsonFactory.get().deserializeStringMap( JsonFactory.get().serializeMap( memoryCacheStore.getCacheStoreInfo().debugStats() ) ) );
+        debugInfo.putAll( JsonFactory.get().deserializeStringMap( JsonFactory.get().serializeMap( memoryCacheStore.storedClassHistogram( "histogram." ) ) ) );
         return ServiceInfoBean.builder().debugProperties( debugInfo ).build();
     }
 
     public Map<String, Serializable> debugInfo( )
     {
         final Map<String, Serializable> debugInfo = new LinkedHashMap<>( );
-        debugInfo.put( "memory-statistics", JsonUtil.serializeMap( memoryCacheStore.getCacheStoreInfo().debugStats() ) );
+        debugInfo.put( "memory-statistics", JsonFactory.get().serializeMap( memoryCacheStore.getCacheStoreInfo().debugStats() ) );
         debugInfo.put( "memory-items", new ArrayList<Serializable>( memoryCacheStore.getCacheDebugItems() ) );
         debugInfo.put( "memory-histogram", new HashMap<>( memoryCacheStore.storedClassHistogram( "" ) ) );
         return Collections.unmodifiableMap( debugInfo );
@@ -120,7 +120,7 @@ public class CacheService implements PwmService
     public void put( final CacheKey cacheKey, final CachePolicy cachePolicy, final Serializable payload )
             throws PwmUnrecoverableException
     {
-        if ( status != STATUS.OPEN )
+        if ( status() != STATUS.OPEN )
         {
             return;
         }
@@ -140,7 +140,7 @@ public class CacheService implements PwmService
         Objects.requireNonNull( cacheKey );
         Objects.requireNonNull( classOfT );
 
-        if ( status != STATUS.OPEN )
+        if ( status() != STATUS.OPEN )
         {
             return null;
         }
@@ -164,7 +164,7 @@ public class CacheService implements PwmService
         Objects.requireNonNull( classOfT );
         Objects.requireNonNull( cacheLoader );
 
-        if ( status != STATUS.OPEN )
+        if ( status() != STATUS.OPEN )
         {
             return cacheLoader.read();
         }
@@ -182,9 +182,9 @@ public class CacheService implements PwmService
         {
             final StatisticCounterBundle<CacheStore.DebugKey> info = memoryCacheStore.getCacheStoreInfo();
             traceOutput.append( "memCache=" );
-            traceOutput.append( JsonUtil.serializeMap( info.debugStats() ) );
+            traceOutput.append( JsonFactory.get().serializeMap( info.debugStats() ) );
             traceOutput.append( ", histogram=" );
-            traceOutput.append( JsonUtil.serializeMap( memoryCacheStore.storedClassHistogram( "" ) ) );
+            traceOutput.append( JsonFactory.get().serializeMap( memoryCacheStore.storedClassHistogram( "" ) ) );
         }
         LOGGER.trace( () -> traceOutput );
     }

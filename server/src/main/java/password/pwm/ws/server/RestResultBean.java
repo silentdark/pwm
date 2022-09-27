@@ -20,52 +20,62 @@
 
 package password.pwm.ws.server;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Value;
-import password.pwm.PwmApplication;
-import password.pwm.config.Configuration;
+import password.pwm.PwmDomain;
+import password.pwm.config.DomainConfig;
 import password.pwm.error.ErrorInformation;
 import password.pwm.http.PwmRequest;
 import password.pwm.i18n.Config;
 import password.pwm.i18n.Message;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
+import password.pwm.util.json.JsonProvider;
 
 import java.io.Serializable;
+import java.lang.reflect.Type;
 import java.util.Locale;
 
 @Value
-@Builder( toBuilder =  true )
-public class RestResultBean implements Serializable
+@Builder( toBuilder =  true, access = AccessLevel.PACKAGE )
+public class RestResultBean<T> implements Serializable
 {
-    private boolean error;
-    private int errorCode;
-    private String errorMessage;
-    private String errorDetail;
-    private String successMessage;
-    private Serializable data;
+    private static final long serialVersionUID = 1L;
 
-    public static RestResultBean withData( final Serializable data )
+    private final T data;
+    private final boolean error;
+    private final int errorCode;
+    private final String errorMessage;
+    private final String errorDetail;
+    private final String successMessage;
+
+    @SuppressFBWarnings( "SE_TRANSIENT_FIELD_NOT_RESTORED" )
+    private final transient Class<T> classOfT;
+
+    public static <T> RestResultBean<T> withData( final T data, final Class<T> classOfT )
     {
-        return RestResultBean.builder()
+        return RestResultBean.<T>builder()
                 .data( data )
+                .classOfT( classOfT )
                 .build();
     }
 
-    public static RestResultBean fromError(
+    public static <T> RestResultBean<T> fromError(
             final ErrorInformation errorInformation,
-            final PwmApplication pwmApplication,
+            final PwmDomain pwmDomain,
             final Locale locale,
-            final Configuration config,
+            final DomainConfig config,
             final boolean forceDetail
     )
     {
         final String errorDetail =
                 errorInformation != null
-                        && ( forceDetail || pwmApplication != null && pwmApplication.determineIfDetailErrorMsgShown() )
-                ? errorInformation.toDebugStr()
-                : null;
+                        && ( forceDetail || pwmDomain != null && pwmDomain.determineIfDetailErrorMsgShown() )
+                        ? errorInformation.toDebugStr()
+                        : null;
 
-        return RestResultBean.builder()
+        return RestResultBean.<T>builder()
                 .error( errorInformation != null )
                 .errorMessage( errorInformation == null ? null : errorInformation.toUserStr( locale, config ) )
                 .errorDetail( errorDetail )
@@ -73,38 +83,39 @@ public class RestResultBean implements Serializable
                 .build();
     }
 
-    public static RestResultBean fromError(
+    public static <T> RestResultBean<T> fromError(
             final RestRequest restRequestBean,
             final ErrorInformation errorInformation
     )
     {
-        final PwmApplication pwmApplication = restRequestBean.getPwmApplication();
-        final Configuration config = restRequestBean.getPwmApplication().getConfig();
+        final PwmDomain pwmDomain = restRequestBean.getDomain();
+        final DomainConfig config = restRequestBean.getDomain().getConfig();
         final Locale locale = restRequestBean.getLocale();
-        return fromError( errorInformation, pwmApplication, locale, config, false );
+        return fromError( errorInformation, pwmDomain, locale, config, false );
     }
 
-    public static RestResultBean fromErrorWithData(
+    public static <T> RestResultBean<T> fromErrorWithData(
             final RestRequest restRequestBean,
             final ErrorInformation errorInformation,
-            final Serializable serializable
+            final T serializable
     )
     {
-        final PwmApplication pwmApplication = restRequestBean.getPwmApplication();
-        final Configuration config = restRequestBean.getPwmApplication().getConfig();
+        final PwmDomain pwmDomain = restRequestBean.getDomain();
+        final DomainConfig config = restRequestBean.getDomain().getConfig();
         final Locale locale = restRequestBean.getLocale();
-        return fromError( errorInformation, pwmApplication, locale, config, false ).toBuilder().data( serializable ).build();
+        final RestResultBean<T> tempBean = fromError( errorInformation, pwmDomain, locale, config, false );
+        return tempBean.toBuilder().data( serializable ).build();
     }
 
 
-    public static RestResultBean fromError(
+    public static <T> RestResultBean<T> fromError(
             final ErrorInformation errorInformation
     )
     {
         return fromError( errorInformation, null, null, null, false );
     }
 
-    public static RestResultBean fromError(
+    public static <T> RestResultBean<T> fromError(
             final ErrorInformation errorInformation,
             final boolean showDetails
     )
@@ -112,117 +123,131 @@ public class RestResultBean implements Serializable
         return fromError( errorInformation, null, null, null, showDetails );
     }
 
-    public static RestResultBean fromError(
+    public static <T> RestResultBean<T> fromError(
             final ErrorInformation errorInformation,
             final PwmRequest pwmRequest,
             final boolean forceDetail
     )
     {
-        return fromError( errorInformation, pwmRequest.getPwmApplication(), pwmRequest.getLocale(), pwmRequest.getConfig(), forceDetail );
+        return fromError( errorInformation, pwmRequest.getPwmDomain(), pwmRequest.getLocale(), pwmRequest.getDomainConfig(), forceDetail );
     }
 
-    public static RestResultBean fromError(
+    public static <T> RestResultBean<T> fromError(
             final ErrorInformation errorInformation,
             final PwmRequest pwmRequest
     )
     {
-        return fromError( errorInformation, pwmRequest.getPwmApplication(), pwmRequest.getLocale(), pwmRequest.getConfig(), false );
+        return fromError( errorInformation, pwmRequest.getPwmDomain(), pwmRequest.getLocale(), pwmRequest.getDomainConfig(), false );
     }
 
 
-    public static RestResultBean forSuccessMessage(
-            final Serializable data,
+    public static <T> RestResultBean<T> forSuccessMessage(
+            final T data,
             final Locale locale,
-            final Configuration config,
+            final DomainConfig config,
             final Message message,
             final String... fieldValues
 
     )
     {
         final String msgText = Message.getLocalizedMessage( locale, message, config, fieldValues );
-        return RestResultBean.builder()
+        return RestResultBean.<T>builder()
                 .successMessage( msgText )
                 .data( data )
                 .build();
     }
 
-    public static RestResultBean forSuccessMessage(
+    public static <T> RestResultBean<T> forSuccessMessage(
             final Locale locale,
-            final Configuration config,
+            final DomainConfig config,
             final Message message,
             final String... fieldValues
 
     )
     {
         final String msgText = Message.getLocalizedMessage( locale, message, config, fieldValues );
-        return RestResultBean.builder()
+        return RestResultBean.<T>builder()
                 .successMessage( msgText )
                 .build();
     }
 
-    public static RestResultBean forSuccessMessage(
-            final Serializable data,
+    public static <T> RestResultBean<T> forSuccessMessage(
+            final T data,
             final PwmRequest pwmRequest,
             final Message message,
             final String... fieldValues
     )
     {
-        return forSuccessMessage( data, pwmRequest.getLocale(), pwmRequest.getConfig(), message, fieldValues );
+        return forSuccessMessage( data, pwmRequest.getLocale(), pwmRequest.getDomainConfig(), message, fieldValues );
     }
 
-    public static RestResultBean forSuccessMessage(
-            final Serializable data,
+    public static <T> RestResultBean<T> forSuccessMessage(
+            final T data,
             final RestRequest restRequest,
             final Message message,
             final String... fieldValues
     )
     {
-        return forSuccessMessage( data, restRequest.getLocale(), restRequest.getConfig(), message, fieldValues );
+        return forSuccessMessage( data, restRequest.getLocale(), restRequest.getDomain().getConfig(), message, fieldValues );
     }
 
-    public static RestResultBean forSuccessMessage(
+    public static <T> RestResultBean<T> forSuccessMessage(
             final RestRequest restRequest,
             final Message message,
             final String... fieldValues
     )
     {
-        return forSuccessMessage( restRequest.getLocale(), restRequest.getConfig(), message, fieldValues );
+        return forSuccessMessage( restRequest.getLocale(), restRequest.getDomain().getConfig(), message, fieldValues );
     }
 
-    public static RestResultBean forSuccessMessage(
+    public static <T> RestResultBean<T> forSuccessMessage(
             final PwmRequest pwmRequest,
             final Message message,
             final String... fieldValues
     )
     {
-        return forSuccessMessage( pwmRequest.getLocale(), pwmRequest.getConfig(), message, fieldValues );
+        return forSuccessMessage( pwmRequest.getLocale(), pwmRequest.getDomainConfig(), message, fieldValues );
     }
 
-    public static RestResultBean forConfirmMessage(
+    public static <T> RestResultBean<T> forConfirmMessage(
             final Locale locale,
-            final Configuration config,
+            final DomainConfig config,
             final Config message
     )
     {
         final String msgText = Config.getLocalizedMessage( locale, message, config );
-        return RestResultBean.builder()
-            .successMessage( msgText )
-            .build();
+        return RestResultBean.<T>builder()
+                .successMessage( msgText )
+                .build();
     }
 
-    public static RestResultBean forConfirmMessage(
+    public static <T> RestResultBean<T> forConfirmMessage(
             final PwmRequest pwmRequest,
             final Config message
     )
     {
-        return forConfirmMessage( pwmRequest.getLocale(), pwmRequest.getConfig(), message );
+        return forConfirmMessage( pwmRequest.getLocale(), pwmRequest.getDomainConfig(), message );
     }
 
 
     public String toJson( final boolean prettyPrintJson )
     {
+        final Type innerType;
+        if ( data == null )
+        {
+            innerType = Object.class;
+        }
+        else if ( classOfT != null )
+        {
+            innerType = classOfT;
+        }
+        else
+        {
+            innerType = data.getClass();
+        }
+
         return prettyPrintJson
-                ? JsonUtil.serialize( this, JsonUtil.Flag.PrettyPrint ) + "\n"
-                : JsonUtil.serialize( this );
+                ? JsonFactory.get().serialize( this, RestResultBean.class, innerType, JsonProvider.Flag.PrettyPrint ) + "\n"
+                : JsonFactory.get().serialize( this, RestResultBean.class, innerType );
     }
 }

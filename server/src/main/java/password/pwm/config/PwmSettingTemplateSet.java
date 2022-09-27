@@ -20,47 +20,36 @@
 
 package password.pwm.config;
 
+import lombok.Value;
+import password.pwm.util.java.CollectionUtil;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
+@Value
 public class PwmSettingTemplateSet implements Serializable
 {
     private final Set<PwmSettingTemplate> templates;
 
     public PwmSettingTemplateSet( final Set<PwmSettingTemplate> templates )
     {
-        final Set<PwmSettingTemplate> workingSet = EnumSet.noneOf( PwmSettingTemplate.class );
+        final Set<PwmSettingTemplate> workingSet = CollectionUtil.copyToEnumSet( templates, PwmSettingTemplate.class );
 
-        if ( templates != null )
-        {
-            for ( final PwmSettingTemplate template : templates )
-            {
-                if ( template != null )
-                {
-                    workingSet.add( template );
-                }
-            }
-        }
+        final Set<PwmSettingTemplate.Type> seenTypes = workingSet.stream()
+                .map( PwmSettingTemplate::getType )
+                .collect( Collectors.toSet() );
 
-        final Set<PwmSettingTemplate.Type> seenTypes = EnumSet.noneOf( PwmSettingTemplate.Type.class );
-        for ( final PwmSettingTemplate template : workingSet )
-        {
-            seenTypes.add( template.getType() );
-        }
+        workingSet.addAll( EnumSet.allOf( PwmSettingTemplate.Type.class ).stream()
+                .filter( type -> !seenTypes.contains( type ) )
+                .map( PwmSettingTemplate.Type::getDefaultValue )
+                .collect( Collectors.toSet( ) ) );
 
-        for ( final PwmSettingTemplate.Type type : PwmSettingTemplate.Type.values() )
-        {
-            if ( !seenTypes.contains( type ) )
-            {
-                workingSet.add( type.getDefaultValue() );
-            }
-        }
-
-        this.templates = Collections.unmodifiableSet( workingSet );
+        this.templates = Set.copyOf( workingSet );
     }
 
     public Set<PwmSettingTemplate> getTemplates( )
@@ -73,6 +62,11 @@ public class PwmSettingTemplateSet implements Serializable
         return new PwmSettingTemplateSet( null );
     }
 
+    public boolean contains( final PwmSettingTemplate template )
+    {
+        return templates.contains( template );
+    }
+
     /**
      * Get all possible templateSets, useful for testing.
      * @return A list of all possible template sets.
@@ -81,7 +75,7 @@ public class PwmSettingTemplateSet implements Serializable
     {
         final List<PwmSettingTemplateSet> templateSets = new ArrayList<>();
 
-        for ( final PwmSettingTemplate template : PwmSettingTemplate.values() )
+        for ( final PwmSettingTemplate template : EnumSet.allOf( PwmSettingTemplate.class ) )
         {
             final PwmSettingTemplateSet templateSet = new PwmSettingTemplateSet( Collections.singleton( template ) );
             templateSets.add( templateSet );

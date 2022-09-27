@@ -21,12 +21,14 @@
 package password.pwm.util.cli.commands;
 
 import password.pwm.PwmApplication;
-import password.pwm.svc.stats.StatisticsManager;
+import password.pwm.svc.stats.StatisticsService;
 import password.pwm.util.cli.CliParameters;
+import password.pwm.util.java.PwmTimeUtil;
 import password.pwm.util.java.TimeDuration;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.Collections;
 import java.util.Locale;
 
@@ -35,10 +37,10 @@ public class ExportStatsCommand extends AbstractCliCommand
 
     @Override
     void doCommand( )
-            throws Exception
+            throws IOException
     {
         final PwmApplication pwmApplication = cliEnvironment.getPwmApplication();
-        final StatisticsManager statsManger = pwmApplication.getStatisticsManager();
+        final StatisticsService statsManger = pwmApplication.getStatisticsManager();
 
         final File outputFile = ( File ) cliEnvironment.getOptions().get( CliParameters.REQUIRED_NEW_OUTPUT_FILE.getName() );
         final long startTime = System.currentTimeMillis();
@@ -49,7 +51,7 @@ public class ExportStatsCommand extends AbstractCliCommand
             counter = statsManger.outputStatsToCsv( fileOutputStream, Locale.getDefault(), true );
             fileOutputStream.close();
         }
-        out( "completed writing " + counter + " rows of stats output in " + TimeDuration.fromCurrent( startTime ).asLongString() );
+        out( "completed writing " + counter + " rows of stats output in " + PwmTimeUtil.asLongString( TimeDuration.fromCurrent( startTime ) ) );
     }
 
     @Override

@@ -33,7 +33,7 @@ import password.pwm.http.HttpMethod;
 import password.pwm.svc.httpclient.PwmHttpClient;
 import password.pwm.svc.httpclient.PwmHttpClientConfiguration;
 import password.pwm.svc.httpclient.PwmHttpClientRequest;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
 import java.io.Serializable;
@@ -46,13 +46,16 @@ public class HttpTelemetrySender implements TelemetrySender
     private static final PwmLogger LOGGER = PwmLogger.forClass( HttpTelemetrySender.class );
 
     private PwmApplication pwmApplication;
+    private SessionLabel sessionLabel;
     private Settings settings;
 
+
     @Override
-    public void init( final PwmApplication pwmApplication, final String initString )
+    public void init( final PwmApplication pwmDomain, final SessionLabel sessionLabel, final String initString )
     {
-        this.pwmApplication = pwmApplication;
-        settings = JsonUtil.deserialize( initString, HttpTelemetrySender.Settings.class );
+        this.pwmApplication = pwmDomain;
+        this.sessionLabel = sessionLabel;
+        settings = JsonFactory.get().deserialize( initString, HttpTelemetrySender.Settings.class );
     }
 
     @Override
@@ -63,7 +66,7 @@ public class HttpTelemetrySender implements TelemetrySender
                 .trustManagerType( PwmHttpClientConfiguration.TrustManagerType.promiscuous )
                 .build();
         final PwmHttpClient pwmHttpClient = pwmApplication.getHttpClientService().getPwmHttpClient( pwmHttpClientConfiguration );
-        final String body = JsonUtil.serialize( statsPublishBean );
+        final String body = JsonFactory.get().serialize( statsPublishBean );
         final Map<String, String> headers = new HashMap<>();
         headers.put( HttpHeader.ContentType.getHttpName(), HttpContentType.json.getHeaderValueWithEncoding() );
         headers.put( HttpHeader.Accept.getHttpName(), PwmConstants.AcceptValue.json.getHeaderValue() );
@@ -74,9 +77,9 @@ public class HttpTelemetrySender implements TelemetrySender
                 .headers( headers )
                 .build();
 
-        LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "preparing to send telemetry data to '" + settings.getUrl() + ")" );
-        pwmHttpClient.makeRequest( pwmHttpClientRequest, SessionLabel.TELEMETRY_SESSION_LABEL );
-        LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "sent telemetry data to '" + settings.getUrl() + ")" );
+        LOGGER.trace( sessionLabel, () -> "preparing to send telemetry data to '" + settings.getUrl() + ")" );
+        pwmHttpClient.makeRequest( pwmHttpClientRequest, sessionLabel );
+        LOGGER.trace( sessionLabel, () -> "sent telemetry data to '" + settings.getUrl() + ")" );
     }
 
     @Getter

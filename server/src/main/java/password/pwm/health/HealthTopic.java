@@ -20,6 +20,7 @@
 
 package password.pwm.health;
 
+import password.pwm.config.SettingReader;
 import password.pwm.i18n.Health;
 import password.pwm.util.i18n.LocaleHelper;
 
@@ -42,10 +43,10 @@ public enum HealthTopic
 
     public String getKey( )
     {
-        return HealthTopic.class.getSimpleName() + "_" + this.toString();
+        return HealthTopic.class.getSimpleName() + "_" + this;
     }
 
-    public String getDescription( final Locale locale, final password.pwm.config.Configuration config )
+    public String getDescription( final Locale locale, final SettingReader config )
     {
         return LocaleHelper.getLocalizedMessage( locale, this.getKey(), config, Health.class );
     }

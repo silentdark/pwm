@@ -25,8 +25,9 @@ import lombok.Value;
 import password.pwm.http.bean.DisplayElement;
 import password.pwm.svc.report.ReportService;
 import password.pwm.svc.report.ReportStatusInfo;
-import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.PwmNumberFormat;
+import password.pwm.util.java.PwmTimeUtil;
+import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 
 import java.io.Serializable;
@@ -76,14 +77,15 @@ public class ReportStatusBean implements Serializable
                 if ( reportInfo.getJobDuration() != null )
                 {
                     presentableMap.add( new DisplayElement( "jobTime", DisplayElement.Type.string, "Job Time",
-                            reportInfo.getJobDuration().asLongString( locale ) ) );
+                            PwmTimeUtil.asLongString( reportInfo.getJobDuration(), locale ) ) );
                 }
                 if ( reportInfo.getCount() > 0 )
                 {
                     final BigDecimal eventRate = reportService.getEventRate().setScale( 2, RoundingMode.UP );
                     if ( eventRate != null )
                     {
-                        presentableMap.add( new DisplayElement( "usersPerSecond", DisplayElement.Type.number, "Users/Second", eventRate.toString() ) );
+                        presentableMap.add( new DisplayElement( "usersPerMinute", DisplayElement.Type.number, "Users/Minute",
+                                eventRate.multiply( new BigDecimal( "60" ) ).toString() ) );
                     }
                     if ( !BigDecimal.ZERO.equals( eventRate ) )
                     {
@@ -91,7 +93,7 @@ public class ReportStatusBean implements Serializable
                         final float secondsRemaining = usersRemaining / eventRate.floatValue();
                         final TimeDuration remainingDuration = TimeDuration.of( ( int ) secondsRemaining, TimeDuration.Unit.SECONDS );
                         presentableMap.add( new DisplayElement( "timeRemaining", DisplayElement.Type.string, "Estimated Time Remaining",
-                                remainingDuration.asLongString( locale ) ) );
+                                PwmTimeUtil.asLongString( remainingDuration, locale ) ) );
                     }
                 }
                 availableCommands.add( ReportService.ReportCommand.Stop );
@@ -103,7 +105,7 @@ public class ReportStatusBean implements Serializable
                 if ( reportInfo.getFinishDate() != null )
                 {
                     presentableMap.add( new DisplayElement( "lastCompleted", DisplayElement.Type.timestamp,  "Last Job Completed",
-                            JavaHelper.toIsoDate( reportInfo.getFinishDate() ) ) );
+                            StringUtil.toIsoDate( reportInfo.getFinishDate() ) ) );
                 }
                 availableCommands.add( ReportService.ReportCommand.Start );
                 if ( reportService.getTotalRecords() > 0 )

@@ -22,10 +22,10 @@ package password.pwm.svc.httpclient;
 
 import lombok.Value;
 import password.pwm.AppProperty;
-import password.pwm.config.Configuration;
+import password.pwm.config.AppConfig;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.MiscUtil;
 import password.pwm.util.secure.CertificateReadingTrustManager;
 import password.pwm.util.secure.PromiscuousTrustManager;
 import password.pwm.util.secure.PwmHashAlgorithm;
@@ -39,12 +39,12 @@ import java.util.Iterator;
 @Value
 class HttpTrustManagerHelper
 {
-    private final Configuration appConfig;
+    private final AppConfig appConfig;
     private final PwmHttpClientConfiguration pwmHttpClientConfiguration;
     private final PwmHttpClientConfiguration.TrustManagerType trustManagerType;
 
     HttpTrustManagerHelper(
-            final Configuration appConfig,
+            final AppConfig appConfig,
             final PwmHttpClientConfiguration pwmHttpClientConfiguration
     )
     {
@@ -66,7 +66,7 @@ class HttpTrustManagerHelper
             return false;
         }
 
-        final Configuration appConfig = getAppConfig();
+        final AppConfig appConfig = getAppConfig();
         if ( !Boolean.parseBoolean( appConfig.readAppProperty( AppProperty.HTTP_CLIENT_ENABLE_HOSTNAME_VERIFICATION ) ) )
         {
             return false;
@@ -109,7 +109,7 @@ class HttpTrustManagerHelper
             }
 
             default:
-                JavaHelper.unhandledSwitchStatement( trustManagerType );
+                MiscUtil.unhandledSwitchStatement( trustManagerType );
 
         }
 
@@ -123,18 +123,18 @@ class HttpTrustManagerHelper
 
         if ( PwmHttpClientConfiguration.TrustManagerType.configuredCertificates == type )
         {
-            value.append( "=" );
+            value.append( '=' );
             for ( final Iterator<X509Certificate> iterator = pwmHttpClientConfiguration.getCertificates().iterator(); iterator.hasNext(); )
             {
                 final X509Certificate certificate = iterator.next();
                 value.append( X509Utils.hash( certificate, PwmHashAlgorithm.SHA1 ) );
                 if ( iterator.hasNext() )
                 {
-                    value.append( "," );
+                    value.append( ',' );
                 }
             }
         }
-        value.append( "]" );
+        value.append( ']' );
         return value.toString();
     }
 }

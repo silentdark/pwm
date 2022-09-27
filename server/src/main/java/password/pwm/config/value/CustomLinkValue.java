@@ -20,14 +20,12 @@
 
 package password.pwm.config.value;
 
-import com.google.gson.reflect.TypeToken;
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlElement;
+import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.XmlOutputProcessData;
 import password.pwm.config.value.data.CustomLinkConfiguration;
-import password.pwm.config.PwmSetting;
-import password.pwm.error.PwmOperationalException;
-import password.pwm.util.java.JsonUtil;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmSecurityKey;
 
 import java.util.ArrayList;
@@ -59,9 +57,7 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
                 }
                 else
                 {
-                    List<CustomLinkConfiguration> srcList = JsonUtil.deserialize( input, new TypeToken<List<CustomLinkConfiguration>>()
-                    {
-                    } );
+                    List<CustomLinkConfiguration> srcList = JsonFactory.get().deserializeList( input, CustomLinkConfiguration.class );
                     srcList = srcList == null ? Collections.emptyList() : srcList;
                     while ( srcList.contains( null ) )
                     {
@@ -73,17 +69,12 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
 
             @Override
             public CustomLinkValue fromXmlElement( final PwmSetting pwmSetting, final XmlElement settingElement, final PwmSecurityKey key )
-                    throws PwmOperationalException
             {
                 final List<XmlElement> valueElements = settingElement.getChildren( "value" );
                 final List<CustomLinkConfiguration> values = new ArrayList<>();
                 for ( final XmlElement loopValueElement  : valueElements )
                 {
-                    final String value = loopValueElement.getText();
-                    if ( value != null && value.length() > 0 && loopValueElement.getAttributeValue( "locale" ) == null )
-                    {
-                        values.add( JsonUtil.deserialize( value, CustomLinkConfiguration.class ) );
-                    }
+                    loopValueElement.getText().ifPresent( value -> values.add( JsonFactory.get().deserialize( value, CustomLinkConfiguration.class ) ) );
                 }
                 return new CustomLinkValue( values );
             }
@@ -93,11 +84,11 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
     @Override
     public List<XmlElement> toXmlValues( final String valueElementName, final XmlOutputProcessData xmlOutputProcessData )
     {
-        final List<XmlElement> returnList = new ArrayList<>();
+        final List<XmlElement> returnList = new ArrayList<>( values.size() );
         for ( final CustomLinkConfiguration value : values )
         {
-            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
-            valueElement.addText( JsonUtil.serialize( value ) );
+            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+            valueElement.setText( JsonFactory.get().serialize( value ) );
             returnList.add( valueElement );
         }
         return returnList;
@@ -106,7 +97,7 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
     @Override
     public List<CustomLinkConfiguration> toNativeObject( )
     {
-        return Collections.unmodifiableList( values );
+        return values;
     }
 
     @Override
@@ -120,7 +111,7 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
             }
         }
 
-        final Set<String> seenNames = new HashSet<>();
+        final Set<String> seenNames = new HashSet<>( values.size() );
         for ( final CustomLinkConfiguration loopConfig : values )
         {
             if ( seenNames.contains( loopConfig.getName().toLowerCase() ) )
@@ -141,12 +132,12 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
             final StringBuilder sb = new StringBuilder();
             for ( final CustomLinkConfiguration formRow : values )
             {
-                sb.append( "Link Name:" ).append( formRow.getName() ).append( "\n" );
+                sb.append( "Link Name:" ).append( formRow.getName() ).append( '\n' );
                 sb.append( " Type:" ).append( formRow.getType() );
-                sb.append( "\n" );
-                sb.append( " Description:" ).append( JsonUtil.serializeMap( formRow.getLabels() ) ).append( "\n" );
-                sb.append( " New Window:" ).append( formRow.isCustomLinkNewWindow() ).append( "\n" );
-                sb.append( " Url:" ).append( formRow.getCustomLinkUrl() ).append( "\n" );
+                sb.append( '\n' );
+                sb.append( " Description:" ).append( JsonFactory.get().serializeMap( formRow.getLabels() ) ).append( '\n' );
+                sb.append( " New Window:" ).append( formRow.isCustomLinkNewWindow() ).append( '\n' );
+                sb.append( " Url:" ).append( formRow.getCustomLinkUrl() ).append( '\n' );
             }
             return sb.toString();
         }

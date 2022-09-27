@@ -48,6 +48,8 @@ public enum PwmRequestAttribute
     AccountInfo,
 
     SetupResponses_ResponseInfo,
+    SetupResponses_ChallengeSet,
+    SetupResponses_SetupData,
     SetupResponses_AllowSkip,
 
     SetupOtp_QrCodeValue,
@@ -65,6 +67,9 @@ public enum PwmRequestAttribute
     ConfigLoginHistory,
     ConfigEnablePersistentLogin,
     ApplicationPath,
+
+    DomainId,
+    DomainList,
 
     ConfigHasCertificates,
 

@@ -20,17 +20,20 @@
 
 package password.pwm.http;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.PwmApplicationMode;
 import password.pwm.PwmConstants;
 import password.pwm.PwmEnvironment;
 import password.pwm.bean.SessionLabel;
-import password.pwm.config.Configuration;
+import password.pwm.config.AppConfig;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.profile.LdapProfile;
+import password.pwm.config.stored.ConfigurationFileManager;
 import password.pwm.config.stored.ConfigurationProperty;
-import password.pwm.config.stored.ConfigurationReader;
+import password.pwm.config.stored.StoredConfigKey;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.stored.StoredConfigurationModifier;
 import password.pwm.config.value.StoredValue;
@@ -42,7 +45,9 @@ import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.PropertyConfigurationImporter;
 import password.pwm.util.PwmScheduler;
+import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.PwmTimeUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
@@ -51,8 +56,8 @@ import password.pwm.util.secure.X509Utils;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletRequest;
 import javax.servlet.http.HttpSession;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Serializable;
@@ -88,7 +93,7 @@ public class ContextManager implements Serializable
     private transient ScheduledExecutorService taskMaster;
 
     private transient volatile PwmApplication pwmApplication;
-    private transient ConfigurationReader configReader;
+    private transient ConfigurationFileManager configReader;
     private ErrorInformation startupErrorInformation;
 
     private final AtomicInteger restartCount = new AtomicInteger( 0 );
@@ -113,9 +118,9 @@ public class ContextManager implements Serializable
             return appInRequest;
         }
 
-        final PwmApplication pwmApplication = getPwmApplication( request.getServletContext() );
-        request.setAttribute( PwmConstants.REQUEST_ATTR_PWM_APPLICATION, pwmApplication );
-        return pwmApplication;
+        final PwmApplication pwmDomain = getPwmApplication( request.getServletContext() );
+        request.setAttribute( PwmConstants.REQUEST_ATTR_PWM_APPLICATION, pwmDomain );
+        return pwmDomain;
     }
 
     public static PwmApplication getPwmApplication( final HttpSession session ) throws PwmUnrecoverableException
@@ -150,6 +155,16 @@ public class ContextManager implements Serializable
         }
 
         return ( ContextManager ) theManager;
+    }
+
+    public static String readEulaText( final ContextManager contextManager, final String filename )
+            throws IOException
+    {
+        final String path = PwmConstants.URL_PREFIX_PUBLIC + "/resources/text/" + filename;
+        final InputStream inputStream = contextManager.getResourceAsStream( path );
+        final ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        JavaHelper.copyWhilePredicate( inputStream, byteArrayOutputStream, o -> true );
+        return byteArrayOutputStream.toString( PwmConstants.DEFAULT_CHARSET.name() );
     }
 
     public PwmApplication getPwmApplication( )
@@ -195,6 +210,7 @@ public class ContextManager implements Serializable
         throw new PwmUnrecoverableException( errorInformation );
     }
 
+    @SuppressFBWarnings( "MDM_SETDEFAULTLOCALE" )
     public void initialize( )
     {
         final Instant startTime = Instant.now();
@@ -208,20 +224,20 @@ public class ContextManager implements Serializable
             outputError( "unable to set default locale as Java machine default locale: " + e.getMessage() );
         }
 
-        Configuration configuration = null;
+        AppConfig appConfig = null;
         PwmApplicationMode mode = PwmApplicationMode.ERROR;
 
         final ParameterReader parameterReader = new ParameterReader( servletContext );
         {
-            final String applicationPathStr = parameterReader.readApplicationPath();
-            if ( applicationPathStr == null || applicationPathStr.isEmpty() )
+            final Optional<String> applicationPathStr = parameterReader.readApplicationPath();
+            if ( applicationPathStr.isEmpty() )
             {
                 startupErrorInformation = new ErrorInformation( PwmError.ERROR_ENVIRONMENT_ERROR, "application path is not specified" );
                 return;
             }
             else
             {
-                applicationPath = new File( applicationPathStr );
+                applicationPath = new File( applicationPathStr.get() );
             }
         }
 
@@ -230,8 +246,8 @@ public class ContextManager implements Serializable
         {
             configurationFile = locateConfigurationFile( applicationPath, PwmConstants.DEFAULT_CONFIG_FILE_FILENAME );
 
-            configReader = new ConfigurationReader( configurationFile );
-            configuration = configReader.getConfiguration();
+            configReader = new ConfigurationFileManager( configurationFile );
+            appConfig = configReader.getConfiguration();
 
             mode = startupErrorInformation == null ? configReader.getConfigMode() : PwmApplicationMode.ERROR;
 
@@ -263,7 +279,7 @@ public class ContextManager implements Serializable
         try
         {
             final PwmEnvironment pwmEnvironment = PwmEnvironment.builder()
-                    .config( configuration )
+                    .config( appConfig )
                     .applicationPath( applicationPath )
                     .applicationMode( mode )
                     .configurationFile( configurationFile )
@@ -288,7 +304,7 @@ public class ContextManager implements Serializable
 
         taskMaster = Executors.newSingleThreadScheduledExecutor(
                 PwmScheduler.makePwmThreadFactory(
-                        PwmScheduler.makeThreadName( pwmApplication, this.getClass() ) + "-",
+                        PwmScheduler.makeThreadName( SESSION_LABEL, pwmApplication, this.getClass() ) + "-",
                         true
                 ) );
 
@@ -322,7 +338,7 @@ public class ContextManager implements Serializable
     }
 
     private void checkConfigForAutoImportLdapCerts(
-            final ConfigurationReader configReader
+            final ConfigurationFileManager configReader
     )
     {
         if ( configReader == null || configReader.getStoredConfiguration() == null )
@@ -339,7 +355,7 @@ public class ContextManager implements Serializable
         }
 
         LOGGER.info( SESSION_LABEL, () -> "configuration file contains property \"" + ConfigurationProperty.IMPORT_LDAP_CERTIFICATES.getKey()
-                + "\"=true, will import attempt ldap certificate import every " + RESTART_DELAY.asLongString() + " until successful" );
+                + "\"=true, will import attempt ldap certificate import every " + PwmTimeUtil.asLongString( RESTART_DELAY ) + " until successful" );
         taskMaster.scheduleWithFixedDelay( new AutoImportLdapCertJob(), RESTART_DELAY.asMillis(), RESTART_DELAY.asMillis(), TimeUnit.MILLISECONDS );
     }
 
@@ -402,7 +418,7 @@ public class ContextManager implements Serializable
         taskMaster.schedule( new RestartFlagWatcher(), 0, TimeUnit.MILLISECONDS );
     }
 
-    public ConfigurationReader getConfigReader( )
+    public ConfigurationFileManager getConfigReader( )
     {
         return configReader;
     }
@@ -446,7 +462,7 @@ public class ContextManager implements Serializable
                         final PropertyConfigurationImporter importer = new PropertyConfigurationImporter();
 
                         final StoredConfiguration storedConfiguration;
-                        try ( InputStream fileInputStream = new FileInputStream( silentPropertiesFile ) )
+                        try ( InputStream fileInputStream = Files.newInputStream( silentPropertiesFile.toPath() ) )
                         {
                             storedConfiguration = importer.readConfiguration( fileInputStream );
                         }
@@ -468,11 +484,11 @@ public class ContextManager implements Serializable
                     try
                     {
                         Files.move( source, dest );
-                        LOGGER.info( SESSION_LABEL, () -> "file " + source.toString() + " has been renamed to " + dest.toString() );
+                        LOGGER.info( SESSION_LABEL, () -> "file " + source + " has been renamed to " + dest );
                     }
                     catch ( final IOException e )
                     {
-                        LOGGER.error( SESSION_LABEL, () -> "error renaming file " + source.toString() + " to " + dest.toString() + ", error: " + e.getMessage() );
+                        LOGGER.error( SESSION_LABEL, () -> "error renaming file " + source + " to " + dest + ", error: " + e.getMessage() );
                     }
                 }
             }
@@ -517,7 +533,7 @@ public class ContextManager implements Serializable
 
                 try
                 {
-                        reInitialize();
+                    reInitialize();
                 }
                 catch ( final Exception e )
                 {
@@ -576,7 +592,7 @@ public class ContextManager implements Serializable
         return new File( applicationPath.getAbsolutePath() + File.separator + filename );
     }
 
-    public File locateWebInfFilePath( )
+    public Optional<File> locateWebInfFilePath( )
     {
         final String realPath = servletContext.getRealPath( "/WEB-INF" );
 
@@ -585,16 +601,16 @@ public class ContextManager implements Serializable
             final File servletPath = new File( realPath );
             if ( servletPath.exists() )
             {
-                return servletPath;
+                return Optional.of( servletPath );
             }
         }
 
-        return null;
+        return Optional.empty();
     }
 
     private static void outputError( final String outputText )
     {
-        final String msg = PwmConstants.PWM_APP_NAME + " " + JavaHelper.toIsoDate( Instant.now() ) + " " + outputText;
+        final String msg = PwmConstants.PWM_APP_NAME + " " + StringUtil.toIsoDate( Instant.now() ) + " " + outputText;
         System.out.println( msg );
         System.out.println( msg );
     }
@@ -614,10 +630,10 @@ public class ContextManager implements Serializable
             this.servletContext = servletContext;
         }
 
-        String readApplicationPath( )
+        Optional<String> readApplicationPath( )
         {
-            final String contextAppPathSetting = readEnvironmentParameter( PwmEnvironment.EnvironmentParameter.applicationPath );
-            if ( contextAppPathSetting != null )
+            final Optional<String> contextAppPathSetting = readEnvironmentParameter( PwmEnvironment.EnvironmentParameter.applicationPath );
+            if ( contextAppPathSetting.isPresent() )
             {
                 return contextAppPathSetting;
             }
@@ -631,11 +647,10 @@ public class ContextManager implements Serializable
 
         Set<PwmEnvironment.ApplicationFlag> readApplicationFlags( )
         {
-            final String contextAppFlagsValue = readEnvironmentParameter( PwmEnvironment.EnvironmentParameter.applicationFlags );
-
-            if ( contextAppFlagsValue != null && !contextAppFlagsValue.isEmpty() )
+            final Optional<String> contextAppFlagsValue = readEnvironmentParameter( PwmEnvironment.EnvironmentParameter.applicationFlags );
+            if ( contextAppFlagsValue.isPresent() )
             {
-                return PwmEnvironment.ParseHelper.parseApplicationFlagValueParameter( contextAppFlagsValue );
+                return PwmEnvironment.ParseHelper.parseApplicationFlagValueParameter( contextAppFlagsValue.get() );
             }
 
             final String contextPath = servletContext.getContextPath().replace( "/", "" );
@@ -644,12 +659,12 @@ public class ContextManager implements Serializable
 
         Map<PwmEnvironment.ApplicationParameter, String> readApplicationParams( final File applicationPath  )
         {
-            // attempt to read app params finle from specified env param file value
+            // attempt to read app params file from specified env param file value
             {
-                final String contextAppParamsValue = readEnvironmentParameter( PwmEnvironment.EnvironmentParameter.applicationParamFile );
-                if ( !StringUtil.isEmpty( contextAppParamsValue ) )
+                final Optional<String> contextAppParamsValue = readEnvironmentParameter( PwmEnvironment.EnvironmentParameter.applicationParamFile );
+                if ( contextAppParamsValue.isPresent() )
                 {
-                    return PwmEnvironment.ParseHelper.readAppParametersFromPath( contextAppParamsValue );
+                    return PwmEnvironment.ParseHelper.readAppParametersFromPath( contextAppParamsValue.get() );
                 }
             }
 
@@ -677,19 +692,17 @@ public class ContextManager implements Serializable
         }
 
 
-        private String readEnvironmentParameter( final PwmEnvironment.EnvironmentParameter environmentParameter )
+        private Optional<String> readEnvironmentParameter( final PwmEnvironment.EnvironmentParameter environmentParameter )
         {
-            final String value = servletContext.getInitParameter(
-                    environmentParameter.toString() );
-
-            if ( value != null && !value.isEmpty() )
+            final String value = servletContext.getInitParameter( environmentParameter.toString() );
+            if ( StringUtil.notEmpty( value ) )
             {
                 if ( !UNSPECIFIED_VALUE.equalsIgnoreCase( value ) )
                 {
-                    return value;
+                    return Optional.of( value );
                 }
             }
-            return null;
+            return Optional.empty();
         }
     }
 
@@ -724,28 +737,31 @@ public class ContextManager implements Serializable
         {
             LOGGER.trace( SESSION_LABEL, () -> "beginning auto-import ldap cert due to config property '"
                     + ConfigurationProperty.IMPORT_LDAP_CERTIFICATES.getKey() + "'" );
-            final Configuration configuration = new Configuration( configReader.getStoredConfiguration() );
+            final AppConfig appConfig = new AppConfig( configReader.getStoredConfiguration() );
             final StoredConfigurationModifier modifiedConfig = StoredConfigurationModifier.newModifier( configReader.getStoredConfiguration() );
 
             int importedCerts = 0;
-            for ( final LdapProfile ldapProfile : configuration.getLdapProfiles().values() )
+            for ( final DomainConfig domainConfig : appConfig.getDomainConfigs().values() )
             {
-                final List<String> ldapUrls = ldapProfile.getLdapUrls();
-                if ( !JavaHelper.isEmpty( ldapUrls ) )
+                for ( final LdapProfile ldapProfile : domainConfig.getLdapProfiles().values() )
                 {
-                    final Set<X509Certificate> certs = X509Utils.readCertsForListOfLdapUrls( ldapUrls, configuration );
-                    if ( !JavaHelper.isEmpty( certs ) )
+                    final List<String> ldapUrls = ldapProfile.getLdapUrls();
+                    if ( !CollectionUtil.isEmpty( ldapUrls ) )
                     {
-                        importedCerts += certs.size();
-                        for ( final X509Certificate cert : certs )
+                        final Set<X509Certificate> certs = X509Utils.readCertsForListOfLdapUrls( ldapUrls, appConfig );
+                        if ( !CollectionUtil.isEmpty( certs ) )
                         {
-                            LOGGER.trace( SESSION_LABEL, () -> "imported cert: " + X509Utils.makeDebugText( cert ) );
+                            importedCerts += certs.size();
+                            for ( final X509Certificate cert : certs )
+                            {
+                                LOGGER.trace( SESSION_LABEL, () -> "imported cert: " + X509Utils.makeDebugText( cert ) );
+                            }
+                            final StoredValue storedValue = X509CertificateValue.fromX509( certs );
+
+                            final StoredConfigKey key = StoredConfigKey.forSetting( PwmSetting.LDAP_SERVER_CERTS, ldapProfile.getIdentifier(), domainConfig.getDomainID() );
+                            modifiedConfig.writeSetting( key, storedValue, null );
                         }
-                        final StoredValue storedValue = X509CertificateValue.fromX509( certs );
-
-                        modifiedConfig.writeSetting( PwmSetting.LDAP_SERVER_CERTS, ldapProfile.getIdentifier(), storedValue, null );
                     }
-
                 }
             }
 
@@ -768,7 +784,7 @@ public class ContextManager implements Serializable
         }
     }
 
-    private void reInitialize() throws PwmException
+    private void reInitialize()
     {
         initialize();
     }

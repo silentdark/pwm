@@ -21,15 +21,12 @@
 package password.pwm.util.cli.commands;
 
 import password.pwm.util.cli.CliEnvironment;
+import password.pwm.util.cli.CliException;
 import password.pwm.util.cli.CliParameters;
 
 public interface CliCommand
 {
-
-
-    void execute( String cli, CliEnvironment cliEnvironment );
+    void execute( String cli, CliEnvironment cliEnvironment ) throws CliException;
 
     CliParameters getCliParameters( );
-
-
 }

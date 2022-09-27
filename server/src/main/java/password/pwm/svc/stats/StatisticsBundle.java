@@ -22,7 +22,7 @@ package password.pwm.svc.stats;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StringUtil;
 
 import java.io.Serializable;
@@ -30,20 +30,20 @@ import java.math.BigInteger;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.atomic.LongAccumulator;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class StatisticsBundle
 {
-    private final Map<Statistic, LongAdder> incrementerMap = new EnumMap<>( Statistic.class );
+    private final Map<Statistic, LongAccumulator> incrementerMap = new EnumMap<>( Statistic.class );
     private final Map<AvgStatistic, AverageBean> avgMap = new EnumMap<>( AvgStatistic.class );
 
     StatisticsBundle( )
     {
         for ( final Statistic statistic : Statistic.values() )
         {
-            incrementerMap.put( statistic, new LongAdder() );
+            incrementerMap.put( statistic, JavaHelper.newAbsLongAccumulator() );
         }
         for ( final AvgStatistic avgStatistic : AvgStatistic.values() )
         {
@@ -68,26 +68,26 @@ public class StatisticsBundle
             final AverageBean averageBean = avgMap.get( epsStatistic );
             if ( !averageBean.isZero() )
             {
-                outputMap.put( epsStatistic.name(), JsonUtil.serialize( averageBean ) );
+                outputMap.put( epsStatistic.name(), JsonFactory.get().serialize( averageBean ) );
             }
         }
 
-        return JsonUtil.serializeMap( outputMap );
+        return JsonFactory.get().serializeMap( outputMap );
     }
 
     public static StatisticsBundle input( final String inputString )
     {
-        final Map<String, String> loadedMap = JsonUtil.deserializeStringMap( inputString );
+        final Map<String, String> loadedMap = JsonFactory.get().deserializeStringMap( inputString );
         final StatisticsBundle bundle = new StatisticsBundle();
 
         for ( final Statistic loopStat : Statistic.values() )
         {
             final String value = loadedMap.get( loopStat.name() );
-            if ( !StringUtil.isEmpty( value ) )
+            if ( StringUtil.notEmpty( value ) )
             {
                 final long longValue = JavaHelper.silentParseLong( value, 0 );
-                final LongAdder longAdder = new LongAdder();
-                longAdder.add( longValue );
+                final LongAccumulator longAdder = JavaHelper.newAbsLongAccumulator();
+                longAdder.accumulate( longValue );
                 bundle.incrementerMap.put( loopStat, longAdder );
             }
         }
@@ -95,9 +95,9 @@ public class StatisticsBundle
         for ( final AvgStatistic loopStat : AvgStatistic.values() )
         {
             final String value = loadedMap.get( loopStat.name() );
-            if ( !StringUtil.isEmpty( value ) )
+            if ( StringUtil.notEmpty( value ) )
             {
-                final AverageBean avgBean = JsonUtil.deserialize( value, AverageBean.class );
+                final AverageBean avgBean = JsonFactory.get().deserialize( value, AverageBean.class );
                 bundle.avgMap.put( loopStat, avgBean );
             }
         }
@@ -107,7 +107,7 @@ public class StatisticsBundle
 
     void incrementValue( final Statistic statistic )
     {
-        incrementerMap.get( statistic ).increment();
+        incrementerMap.get( statistic ).accumulate( 1 );
     }
 
     void updateAverageValue( final AvgStatistic statistic, final long timeDuration )
@@ -183,4 +183,5 @@ public class StatisticsBundle
             }
         }
     }
+
 }

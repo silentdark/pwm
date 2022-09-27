@@ -21,17 +21,19 @@
 package password.pwm.util.secure;
 
 import password.pwm.PwmApplication;
+import password.pwm.bean.DomainID;
 import password.pwm.bean.PrivateKeyCertificate;
-import password.pwm.config.Configuration;
+import password.pwm.config.AppConfig;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.value.StoredValue;
+import password.pwm.config.stored.StoredConfigKey;
 import password.pwm.config.stored.StoredConfigurationModifier;
 import password.pwm.config.value.PrivateKeyValue;
+import password.pwm.config.value.StoredValue;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.PasswordData;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.self.SelfCertFactory;
 
@@ -41,7 +43,7 @@ import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Enumeration;
+import java.util.Iterator;
 import java.util.List;
 
 public class HttpsServerCertificateManager
@@ -66,14 +68,14 @@ public class HttpsServerCertificateManager
     }
 
     private static KeyStore exportKey(
-            final Configuration configuration,
+            final AppConfig appConfig,
             final KeyStoreFormat format,
             final PasswordData passwordData,
             final String alias
     )
             throws PwmUnrecoverableException
     {
-        final PrivateKeyCertificate privateKeyCertificate = configuration.readSettingAsPrivateKey( PwmSetting.HTTPS_CERT );
+        final PrivateKeyCertificate privateKeyCertificate = appConfig.readSettingAsPrivateKey( PwmSetting.HTTPS_CERT );
         if ( privateKeyCertificate == null )
         {
             return null;
@@ -142,12 +144,12 @@ public class HttpsServerCertificateManager
             final String effectiveAlias;
             {
                 final List<String> allAliases = new ArrayList<>();
-                for ( final Enumeration<String> aliasEnum = keyStore.aliases(); aliasEnum.hasMoreElements(); )
+                for ( final Iterator<String> aliasEnum = keyStore.aliases().asIterator(); aliasEnum.hasNext(); )
                 {
-                    final String value = aliasEnum.nextElement();
+                    final String value = aliasEnum.next();
                     allAliases.add( value );
                 }
-                effectiveAlias = allAliases.size() == 1 ? allAliases.iterator().next() : alias;
+                effectiveAlias = allAliases.size() == 1 ? allAliases.get( 0 ) : alias;
             }
 
             final KeyStore.PasswordProtection passwordProtection = new KeyStore.PasswordProtection( charPassword );
@@ -168,7 +170,7 @@ public class HttpsServerCertificateManager
             final PrivateKey key = entry.getPrivateKey();
             final List<X509Certificate> certificates = Arrays.asList( ( X509Certificate[] ) entry.getCertificateChain() );
 
-            LOGGER.debug( () -> "importing certificate chain: " + JsonUtil.serializeCollection( X509Utils.makeDebugInfoMap( certificates ) ) );
+            LOGGER.debug( () -> "importing certificate chain: " + JsonFactory.get().serializeCollection( X509CertInfo.makeDebugInfoMap( certificates ) ) );
             privateKeyCertificate = new PrivateKeyCertificate( certificates, key );
         }
         catch ( final Exception e )
@@ -181,8 +183,9 @@ public class HttpsServerCertificateManager
             throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_CERTIFICATE_ERROR, errorMsg, errorDetail ) );
         }
 
+        final StoredConfigKey key = StoredConfigKey.forSetting( PwmSetting.HTTPS_CERT, null, DomainID.systemId() );
         final StoredValue storedValue = new PrivateKeyValue( privateKeyCertificate );
-        storedConfiguration.writeSetting( PwmSetting.HTTPS_CERT, null, storedValue, null );
+        storedConfiguration.writeSetting( key, storedValue, null );
     }
 
 }

@@ -24,6 +24,7 @@ import lombok.Builder;
 import lombok.Value;
 import password.pwm.PwmConstants;
 import password.pwm.i18n.PwmLocaleBundle;
+import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.Percent;
 import password.pwm.util.logging.PwmLogger;
 
@@ -37,6 +38,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.function.Function;
 
 @Value
 @Builder
@@ -57,12 +59,10 @@ public class LocaleStats
 
     public static Map<PwmLocaleBundle, LocaleStats> getAllLocaleStats()
     {
-        final Map<PwmLocaleBundle, LocaleStats> returnMap = new LinkedHashMap<>(  );
-        for ( final PwmLocaleBundle pwmLocaleBundle : PwmLocaleBundle.allValues() )
-        {
-            returnMap.put( pwmLocaleBundle, createLocaleStatsForBundle( pwmLocaleBundle ) );
-        }
-        return Collections.unmodifiableMap( returnMap );
+        return Collections.unmodifiableMap( PwmLocaleBundle.allValues().stream().collect( CollectionUtil.collectorToLinkedMap(
+                Function.identity(),
+                LocaleStats::createLocaleStatsForBundle
+        ) ) );
     }
 
 
@@ -117,13 +117,13 @@ public class LocaleStats
                         + loopStats.getPerLocalePresentLocalizations().getOrDefault( locale, 0 );
                 perLocalePresentLocalizations.put( locale, combinedPresent );
 
-                final Percent percent = new Percent( combinedPresent, totalKeys );
+                final Percent percent = Percent.of( combinedPresent, totalKeys );
                 perLocalePercentLocalizations.put( locale, percent.pretty( 0 ) );
             }
 
         }
 
-        final Percent totalPercentage = new Percent( presentSlots, totalSlots );
+        final Percent totalPercentage = Percent.of( presentSlots, totalSlots );
 
         return LocaleStats.builder()
                 .localesExamined( LocaleHelper.knownBuiltInLocales() )
@@ -150,9 +150,9 @@ public class LocaleStats
         int missingSlots = 0;
         int presentSlots = 0;
 
-        final Map<Locale, Integer> perLocaleMissingLocalizations = new LinkedHashMap<>( );
-        final Map<Locale, Integer> perLocalePresentLocalizations = new LinkedHashMap<>( );
-        final Map<Locale, String> perLocalePercentLocalizations = new LinkedHashMap<>();
+        final Map<Locale, Integer> perLocaleMissingLocalizations = new LinkedHashMap<>( knownLocales.size() );
+        final Map<Locale, Integer> perLocalePresentLocalizations = new LinkedHashMap<>( knownLocales.size() );
+        final Map<Locale, String> perLocalePercentLocalizations = new LinkedHashMap<>( knownLocales.size() );
 
         for ( final Locale locale : knownLocales )
         {
@@ -165,11 +165,11 @@ public class LocaleStats
             perLocaleMissingLocalizations.put( locale, missingKeys.size() );
             perLocalePresentLocalizations.put( locale, totalKeysInBundle - missingKeys.size() );
 
-            final Percent percent = new Percent( presentKeys, totalKeysInBundle );
+            final Percent percent = Percent.of( presentKeys, totalKeysInBundle );
             perLocalePercentLocalizations.put( locale, percent.pretty( 0 ) );
         }
 
-        final Percent totalPercentage = new Percent( presentSlots, totalSlots );
+        final Percent totalPercentage = Percent.of( presentSlots, totalSlots );
 
         return LocaleStats.builder()
                 .localesExamined( knownLocales )
@@ -202,7 +202,7 @@ public class LocaleStats
             {
                 if ( DEBUG_FLAG )
                 {
-                    LOGGER.trace( () -> "missing resource bundle: bundle=" + pwmLocaleBundle.getTheClass().getName() + ", locale=" + locale.toString() );
+                    LOGGER.trace( () -> "missing resource bundle: bundle=" + pwmLocaleBundle.getTheClass().getName() + ", locale=" + locale );
                 }
                 returnList.addAll( pwmLocaleBundle.getDisplayKeys() );
             }
@@ -216,7 +216,7 @@ public class LocaleStats
                     {
                         if ( DEBUG_FLAG )
                         {
-                            LOGGER.trace( () -> "missing resource: bundle=" + pwmLocaleBundle.getTheClass().toString() + ", locale=" + locale.toString() + "' key=" + key );
+                            LOGGER.trace( () -> "missing resource: bundle=" + pwmLocaleBundle.getTheClass() + ", locale=" + locale + "' key=" + key );
                         }
                         returnList.add( key );
                     }
@@ -227,8 +227,8 @@ public class LocaleStats
         {
             if ( DEBUG_FLAG )
             {
-                LOGGER.trace( () -> "error loading resource bundle for class='" + pwmLocaleBundle.getTheClass().toString()
-                        + ", locale=" + locale.toString() + "', error: " + e.getMessage() );
+                LOGGER.trace( () -> "error loading resource bundle for class='" + pwmLocaleBundle.getTheClass()
+                        + ", locale=" + locale + "', error: " + e.getMessage() );
             }
         }
         Collections.sort( returnList );

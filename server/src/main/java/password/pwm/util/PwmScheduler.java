@@ -20,173 +20,220 @@
 
 package password.pwm.util;
 
-import org.jetbrains.annotations.NotNull;
 import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
+import password.pwm.bean.SessionLabel;
+import password.pwm.error.PwmError;
+import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.java.AtomicLoopIntIncrementer;
-import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.GregorianCalendar;
+import java.util.List;
 import java.util.Objects;
 import java.util.TimeZone;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public class PwmScheduler
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmScheduler.class );
     private static final AtomicLoopIntIncrementer THREAD_ID_COUNTER = new AtomicLoopIntIncrementer();
-    private final ScheduledExecutorService applicationExecutorService;
-    private final String instanceID;
 
-    public PwmScheduler( final String instanceID )
+    private final PwmApplication pwmApplication;
+
+    public PwmScheduler( final PwmApplication pwmApplication )
     {
-        this.instanceID = instanceID;
-        applicationExecutorService = makeSingleThreadExecutorService( instanceID, this.getClass() );
+        this.pwmApplication = Objects.requireNonNull( pwmApplication );
     }
 
     public void shutdown()
     {
-        applicationExecutorService.shutdown();
     }
 
-    public Future immediateExecuteInNewThread(
+    public void immediateExecuteRunnableInNewThread(
             final Runnable runnable,
+            final SessionLabel sessionLabel,
             final String threadName
     )
     {
+        checkIfSchedulerClosed();
+
         Objects.requireNonNull( runnable );
 
-        final Instant itemStartTime = Instant.now();
-        final String name = "runtime thread #" + THREAD_ID_COUNTER.next() + " " + threadName;
+        final ExecutorService executor = makeMultiThreadExecutor( 1, pwmApplication, sessionLabel, runnable.getClass(), threadName );
 
-        LOGGER.trace( () -> "started " + name );
-
-        final ScheduledExecutorService executor = makeSingleThreadExecutorService( instanceID, runnable.getClass() );
-
-        if ( applicationExecutorService.isShutdown() )
-        {
-            return null;
-        }
-
-        final Runnable logOutputWrapper = () ->
-        {
-            runnable.run();
-            LOGGER.trace( () -> "completed " + name, () -> TimeDuration.fromCurrent( itemStartTime ) );
-        };
-
-        final WrappedRunner wrappedRunner =  new WrappedRunner( logOutputWrapper, executor, WrappedRunner.Flag.ShutdownExecutorAfterExecution );
-        applicationExecutorService.submit( wrappedRunner );
-        return wrappedRunner.getFuture();
+        executor.submit( runnable );
     }
 
     public void scheduleDailyZuluZeroStartJob(
             final Runnable runnable,
-            final ExecutorService executorService,
-            final TimeDuration offset
+            final ScheduledExecutorService executorService,
+            final TimeDuration zuluOffset
     )
     {
         final TimeDuration delayTillNextZulu = TimeDuration.fromCurrent( nextZuluZeroTime() );
-        final TimeDuration delayTillNextOffset = delayTillNextZulu.add( offset );
+        final TimeDuration delayTillNextOffset = zuluOffset == null ? TimeDuration.ZERO : delayTillNextZulu.add( zuluOffset );
         scheduleFixedRateJob( runnable, executorService, delayTillNextOffset, TimeDuration.DAY );
     }
 
-    public Future scheduleJob(
+    public ScheduledFuture<?> scheduleJob(
             final Runnable runnable,
-            final ExecutorService executor,
+            final ScheduledExecutorService executor,
             final TimeDuration delay
     )
     {
+        checkIfSchedulerClosed();
+
         Objects.requireNonNull( runnable );
         Objects.requireNonNull( executor );
         Objects.requireNonNull( delay );
 
-        if ( applicationExecutorService.isShutdown() )
+        return executor.schedule( runnable, delay.asMillis(), TimeUnit.MILLISECONDS );
+    }
+
+    public <T> List<T> executeImmediateThreadPerJobAndAwaitCompletion(
+            final int maxThreadCount,
+            final List<Callable<T>> callables,
+            final SessionLabel sessionLabel,
+            final Class<?> theClass
+    )
+            throws PwmUnrecoverableException
+    {
+        checkIfSchedulerClosed();
+
+        final ExecutorService executor = makeMultiThreadExecutor( maxThreadCount, pwmApplication, sessionLabel, theClass, null );
+
+        final List<Future<T>> futures = callables.stream()
+                .map( executor::submit )
+                .collect( Collectors.toUnmodifiableList() );
+
+
+        final List<T> results = new ArrayList<>();
+        for ( final Future<T> f : futures )
         {
-            return null;
+            results.add( awaitFutureCompletion( f ) );
         }
 
-        final WrappedRunner wrappedRunner = new WrappedRunner( runnable, executor );
-        applicationExecutorService.schedule( wrappedRunner, delay.asMillis(), TimeUnit.MILLISECONDS );
-        return wrappedRunner.getFuture();
+        executor.shutdown();
+        return Collections.unmodifiableList( results );
     }
+
+    private static <T> T awaitFutureCompletion( final Future<T> future )
+            throws PwmUnrecoverableException
+    {
+        try
+        {
+            return future.get();
+        }
+        catch ( final InterruptedException e )
+        {
+            final String msg = "error in thread, error: " + e.getMessage();
+            LOGGER.warn( () -> msg, e );
+            throw PwmUnrecoverableException.newException( PwmError.ERROR_INTERNAL, msg );
+        }
+        catch ( final ExecutionException e )
+        {
+            final String msg = "error in thread, error: " + e.getMessage();
+            final Throwable realException = e.getCause();
+            if ( realException instanceof PwmUnrecoverableException )
+            {
+                throw ( PwmUnrecoverableException ) e.getCause();
+            }
+            throw PwmUnrecoverableException.newException( PwmError.ERROR_INTERNAL, msg );
+        }
+    }
+
 
     public void scheduleFixedRateJob(
             final Runnable runnable,
-            final ExecutorService executor,
+            final ScheduledExecutorService executor,
             final TimeDuration initialDelay,
             final TimeDuration frequency
     )
     {
-        if ( applicationExecutorService.isShutdown() )
-        {
-            return;
-        }
+        checkIfSchedulerClosed();
 
-        if ( initialDelay != null )
-        {
-            applicationExecutorService.schedule( new WrappedRunner( runnable, executor ), initialDelay.asMillis(), TimeUnit.MILLISECONDS );
-        }
-
-        final Runnable jobWithNextScheduler = () ->
-        {
-            new WrappedRunner( runnable, executor ).run();
-            scheduleFixedRateJob( runnable, executor, null, frequency );
-        };
-
-        applicationExecutorService.schedule(  jobWithNextScheduler, frequency.asMillis(), TimeUnit.MILLISECONDS );
+        executor.scheduleAtFixedRate( runnable, initialDelay.asMillis(), frequency.asMillis(), TimeUnit.MILLISECONDS );
     }
 
-    public static ExecutorService makeBackgroundExecutor(
+    public static String makeThreadName(
+            final SessionLabel sessionLabel,
             final PwmApplication pwmApplication,
-            final Class clazz
+            final Class<?> theClass )
+    {
+        return makeThreadName( sessionLabel, pwmApplication, theClass, null );
+    }
+
+    public static String makeThreadName(
+            final SessionLabel sessionLabel,
+            final PwmApplication pwmApplication,
+            final Class<?> theClass,
+            final String threadNameSuffix
     )
     {
-        final ThreadPoolExecutor executor = new ThreadPoolExecutor(
-                1,
-                1,
-                10, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(),
-                makePwmThreadFactory(
-                        makeThreadName( pwmApplication, clazz ) + "-",
-                        true
-                ) );
-        executor.allowCoreThreadTimeOut( true );
-        return executor;
+        final String instanceName = pwmApplication == null
+                ? "-"
+                : pwmApplication.getInstanceID();
+
+
+        return makeThreadName( sessionLabel, instanceName, theClass, threadNameSuffix );
     }
 
+    public static String makeThreadName(
+            final SessionLabel sessionLabel,
+            final String instanceID,
+            final Class<?> theClass,
+            final String threadNameSuffix
 
-    public static String makeThreadName( final PwmApplication pwmApplication, final Class theClass )
+    )
     {
-        String instanceName = "-";
-        if ( pwmApplication != null )
+        final StringBuilder output = new StringBuilder();
+
+        output.append( PwmConstants.PWM_APP_NAME );
+
+        if ( StringUtil.notEmpty( instanceID ) )
         {
-            instanceName = pwmApplication.getInstanceID();
+            output.append( "-" );
+            output.append( instanceID );
         }
 
-        return makeThreadName( instanceName, theClass );
-    }
-
-    public static String makeThreadName( final String instanceID, final Class theClass )
-    {
-        String instanceName = "-";
-        if ( !StringUtil.isEmpty( instanceID ) )
+        if ( theClass != null )
         {
-            instanceName = instanceID;
+            output.append( "-" );
+            output.append( theClass.getSimpleName() );
         }
 
-        return PwmConstants.PWM_APP_NAME + "-" + instanceName + "-" + theClass.getSimpleName();
+        if ( sessionLabel != null && !StringUtil.isEmpty( sessionLabel.getDomain() ) )
+        {
+            output.append( "-" );
+            output.append( sessionLabel.getDomain() );
+        }
+
+        if ( !StringUtil.isEmpty( threadNameSuffix ) )
+        {
+            output.append( "-" );
+            output.append( threadNameSuffix );
+        }
+
+        return output.toString();
     }
 
     public static ThreadFactory makePwmThreadFactory( final String namePrefix, final boolean daemon )
@@ -210,107 +257,77 @@ public class PwmScheduler
         };
     }
 
-    public static ScheduledExecutorService makeSingleThreadExecutorService(
+    public static ThreadPoolExecutor makeMultiThreadExecutor(
+            final int maxThreadCount,
             final PwmApplication pwmApplication,
-            final Class theClass
+            final SessionLabel sessionLabel,
+            final Class<?> theClass
     )
     {
-        return makeSingleThreadExecutorService( pwmApplication.getInstanceID(), theClass );
+        return makeMultiThreadExecutor( maxThreadCount, pwmApplication, sessionLabel, theClass, null );
     }
 
-    public static ScheduledExecutorService makeSingleThreadExecutorService(
-            final String instanceID,
-            final Class theClass
+    public static ThreadPoolExecutor makeMultiThreadExecutor(
+            final int maxThreadCount,
+            final PwmApplication pwmApplication,
+            final SessionLabel sessionLabel,
+            final Class<?> theClass,
+            final String threadNameSuffix
     )
     {
-        return Executors.newSingleThreadScheduledExecutor(
+        return makeMultiThreadExecutor( maxThreadCount, pwmApplication.getInstanceID(), sessionLabel, theClass, threadNameSuffix );
+    }
+
+    public static ThreadPoolExecutor makeMultiThreadExecutor(
+            final int maxThreadCount,
+            final String instanceID,
+            final SessionLabel sessionLabel,
+            final Class<?> theClass,
+            final String threadNameSuffix
+    )
+    {
+        final ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                1,
+                maxThreadCount,
+                1, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
                 makePwmThreadFactory(
-                        makeThreadName( instanceID, theClass ) + "-",
+                        makeThreadName( sessionLabel, instanceID, theClass, threadNameSuffix ) + "-",
                         true
                 ) );
+        executor.allowCoreThreadTimeOut( true );
+        return executor;
     }
 
-    private static class WrappedRunner implements Runnable
+    public static ScheduledExecutorService makeBackgroundServiceExecutor(
+            final PwmApplication pwmApplication,
+            final SessionLabel sessionLabel,
+            final Class<?> clazz
+    )
     {
-        private final Runnable runnable;
-        private final ExecutorService executor;
-        private final Flag[] flags;
-        private volatile Future innerFuture;
-        private volatile boolean hasFailed;
+        return makeBackgroundServiceExecutor( pwmApplication, sessionLabel, clazz, null );
+    }
 
-        enum Flag
-        {
-            ShutdownExecutorAfterExecution,
-        }
+    public static ScheduledExecutorService makeBackgroundServiceExecutor(
+            final PwmApplication pwmApplication,
+            final SessionLabel sessionLabel,
+            final Class<?> clazz,
+            final String threadNameSuffix
+    )
+    {
+        final ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(
+                1,
+                makePwmThreadFactory(
+                        makeThreadName( sessionLabel, pwmApplication, clazz, threadNameSuffix ) + "-",
+                        true
+                ) );
+        executor.setKeepAliveTime( 5, TimeUnit.SECONDS );
+        executor.allowCoreThreadTimeOut( true );
+        return executor;
+    }
 
-        WrappedRunner( final Runnable runnable, final ExecutorService executor, final Flag... flags )
-        {
-            this.runnable = runnable;
-            this.executor = executor;
-            this.flags = flags;
-        }
-
-        Future getFuture()
-        {
-            return new Future()
-            {
-                @Override
-                public boolean cancel( final boolean mayInterruptIfRunning )
-                {
-                    return false;
-                }
-
-                @Override
-                public boolean isCancelled()
-                {
-                    return hasFailed;
-                }
-
-                @Override
-                public boolean isDone()
-                {
-                    return hasFailed || ( innerFuture != null && innerFuture.isDone() );
-                }
-
-                @Override
-                public Object get()
-                {
-                    return null;
-                }
-
-                @Override
-                public Object get( final long timeout, @NotNull final TimeUnit unit )
-                {
-                    return null;
-                }
-            };
-        }
-
-        @Override
-        public void run()
-        {
-            try
-            {
-                if ( !executor.isShutdown() )
-                {
-                    innerFuture = executor.submit( runnable );
-                }
-                else
-                {
-                    hasFailed = true;
-                }
-            }
-            catch ( final Throwable t )
-            {
-                LOGGER.error( () -> "unexpected error running scheduled job: " + t.getMessage(), t );
-                hasFailed = true;
-            }
-
-            if ( JavaHelper.enumArrayContainsValue( flags, Flag.ShutdownExecutorAfterExecution ) )
-            {
-                executor.shutdown();
-            }
-        }
+    private void checkIfSchedulerClosed()
+    {
     }
 
     public static Instant nextZuluZeroTime( )
@@ -320,6 +337,6 @@ public class PwmScheduler
         nextZuluMidnight.set( Calendar.MINUTE, 0 );
         nextZuluMidnight.set( Calendar.SECOND, 0 );
         nextZuluMidnight.add( Calendar.HOUR, 24 );
-        return nextZuluMidnight.getTime().toInstant();
+        return nextZuluMidnight.toInstant();
     }
 }

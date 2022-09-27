@@ -24,8 +24,9 @@ import password.pwm.error.PwmOperationalException;
 import password.pwm.util.java.ClosableIterator;
 
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
-class StubRecordManager implements RecordManager
+class StubRecordManager implements IntruderRecordManager
 {
     @Override
     public boolean checkSubject( final String subject )
@@ -55,35 +56,35 @@ class StubRecordManager implements RecordManager
     }
 
     @Override
-    public IntruderRecord readIntruderRecord( final String subject )
+    public Optional<IntruderRecord> readIntruderRecord( final String subject )
     {
-        return null;
+        return Optional.empty();
     }
 
     @Override
     public ClosableIterator<IntruderRecord> iterator( ) throws PwmOperationalException
     {
-        return new ClosableIterator<IntruderRecord>()
+        return new ClosableIterator<>()
         {
             @Override
-            public boolean hasNext( )
+            public boolean hasNext()
             {
                 return false;
             }
 
             @Override
-            public IntruderRecord next( )
+            public IntruderRecord next()
             {
                 throw new NoSuchElementException();
             }
 
             @Override
-            public void remove( )
+            public void remove()
             {
             }
 
             @Override
-            public void close( )
+            public void close()
             {
             }
         };

@@ -25,8 +25,7 @@ import com.novell.ldapchai.exception.ChaiException;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.jetbrains.annotations.NotNull;
 import password.pwm.PwmApplication;
-import password.pwm.PwmConstants;
-import password.pwm.config.Configuration;
+import password.pwm.config.AppConfig;
 import password.pwm.config.profile.LdapProfile;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
@@ -35,9 +34,10 @@ import password.pwm.svc.cache.CacheKey;
 import password.pwm.svc.cache.CachePolicy;
 import password.pwm.svc.cache.CacheService;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.logging.PwmLogger;
 
 import java.io.Serializable;
 import java.util.Comparator;
@@ -47,40 +47,56 @@ import java.util.StringTokenizer;
 @SuppressFBWarnings( "SE_TRANSIENT_FIELD_NOT_RESTORED" )
 public class UserIdentity implements Serializable, Comparable<UserIdentity>
 {
+    private static final PwmLogger LOGGER = PwmLogger.forClass( UserIdentity.class );
     private static final long serialVersionUID = 1L;
 
     private static final String CRYPO_HEADER = "ui_C-";
     private static final String DELIM_SEPARATOR = "|";
+
+    private static final Comparator<UserIdentity> COMPARATOR = Comparator.comparing(
+            UserIdentity::getDomainID,
+            Comparator.nullsLast( Comparator.naturalOrder() ) )
+            .thenComparing(
+                    UserIdentity::getLdapProfileID,
+                    Comparator.nullsLast( Comparator.naturalOrder() ) )
+            .thenComparing(
+                    UserIdentity::getDomainID,
+                    Comparator.nullsLast( Comparator.naturalOrder() ) );
 
     private transient String obfuscatedValue;
     private transient boolean canonical;
 
     private final String userDN;
     private final String ldapProfile;
-    private final String domain;
+    private final DomainID domainID;
 
     public enum Flag
     {
         PreCanonicalized,
     }
 
-    private UserIdentity( final String userDN, final String ldapProfile, final String domain )
+    private UserIdentity( final String userDN, final String ldapProfile, final DomainID domainID )
     {
         this.userDN = JavaHelper.requireNonEmpty( userDN, "UserIdentity: userDN value cannot be empty" );
         this.ldapProfile = JavaHelper.requireNonEmpty( ldapProfile, "UserIdentity: ldapProfile value cannot be empty" );
-        this.domain = JavaHelper.requireNonEmpty( domain, "UserIdentity: domain value cannot be empty" );
+        this.domainID = Objects.requireNonNull( domainID );
     }
 
-    public UserIdentity( final String userDN, final String ldapProfile, final String domain, final boolean canonical )
+    public UserIdentity( final String userDN, final String ldapProfile, final DomainID domainID, final boolean canonical )
     {
-        this( userDN, ldapProfile, domain );
+        this( userDN, ldapProfile, domainID );
         this.canonical = canonical;
     }
 
-    public static UserIdentity createUserIdentity( final String userDN, final String ldapProfile, final Flag... flags )
+    public static UserIdentity create(
+            final String userDN,
+            final String ldapProfile,
+            final DomainID domainID,
+            final Flag... flags
+    )
     {
         final boolean canonical = JavaHelper.enumArrayContainsValue( flags, Flag.PreCanonicalized );
-        return new UserIdentity( userDN, ldapProfile, PwmConstants.DOMAIN_ID_DEFAULT, canonical );
+        return new UserIdentity( userDN, ldapProfile, domainID, canonical );
     }
 
     public String getUserDN( )
@@ -88,9 +104,9 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
         return userDN;
     }
 
-    public String getDomain()
+    public DomainID getDomainID()
     {
-        return domain;
+        return domainID;
     }
 
     public String getLdapProfileID( )
@@ -98,10 +114,10 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
         return ldapProfile;
     }
 
-    public LdapProfile getLdapProfile( final Configuration configuration )
+    public LdapProfile getLdapProfile( final AppConfig appConfig )
     {
-        Objects.requireNonNull( configuration );
-        final LdapProfile ldapProfile = configuration.getLdapProfiles().get( this.getLdapProfileID() );
+        Objects.requireNonNull( appConfig );
+        final LdapProfile ldapProfile = appConfig.getDomainConfigs().get( domainID ).getLdapProfiles().get( this.getLdapProfileID() );
         if ( ldapProfile == null )
         {
             throw new IllegalStateException( "bogus ldapProfileID on userIdentity: "  + this.getLdapProfileID() );
@@ -118,7 +134,7 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
             throws PwmUnrecoverableException
     {
         // use local cache first.
-        if ( !StringUtil.isEmpty( obfuscatedValue ) )
+        if ( StringUtil.notEmpty( obfuscatedValue ) )
         {
             return obfuscatedValue;
         }
@@ -128,7 +144,7 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
         final CacheKey cacheKey = CacheKey.newKey( this.getClass(), this, "obfuscatedKey" );
         final String cachedValue = cacheService.get( cacheKey, String.class );
 
-        if ( !StringUtil.isEmpty( cachedValue ) )
+        if ( StringUtil.notEmpty( cachedValue ) )
         {
             obfuscatedValue = cachedValue;
             return cachedValue;
@@ -137,7 +153,7 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
         // generate key
         try
         {
-            final String jsonValue = JsonUtil.serialize( this );
+            final String jsonValue = JsonFactory.get().serialize( this );
             final String localValue = CRYPO_HEADER + pwmApplication.getSecureService().encryptToString( jsonValue );
             this.obfuscatedValue = localValue;
             cacheService.put( cacheKey, CachePolicy.makePolicyWithExpiration( TimeDuration.DAY ), localValue );
@@ -151,12 +167,14 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
 
     public String toDelimitedKey( )
     {
-        return this.getLdapProfileID() + DELIM_SEPARATOR + this.getUserDN();
+        return JsonFactory.get().serialize( this );
     }
 
     public String toDisplayString( )
     {
-        return this.getUserDN() + ( ( this.getLdapProfileID() != null && !this.getLdapProfileID().isEmpty() ) ? " (" + this.getLdapProfileID() + ")" : "" );
+        return "[" + this.getDomainID() + "]"
+                + " " + this.getUserDN()
+                + ( ( this.getLdapProfileID() != null && !this.getLdapProfileID().isEmpty() ) ? " (" + this.getLdapProfileID() + ")" : "" );
     }
 
     public static UserIdentity fromObfuscatedKey( final String key, final PwmApplication pwmApplication )
@@ -174,7 +192,7 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
         {
             final String input = key.substring( CRYPO_HEADER.length() );
             final String jsonValue = pwmApplication.getSecureService().decryptStringValue( input );
-            return JsonUtil.deserialize( jsonValue, UserIdentity.class );
+            return JsonFactory.get().deserialize( jsonValue, UserIdentity.class );
         }
         catch ( final Exception e )
         {
@@ -182,26 +200,60 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
         }
     }
 
-    public static UserIdentity fromDelimitedKey( final String key )
+    public static UserIdentity fromDelimitedKey( final SessionLabel sessionLabel, final String key )
             throws PwmUnrecoverableException
     {
         JavaHelper.requireNonEmpty( key );
 
+        try
+        {
+            return JsonFactory.get().deserialize( key, UserIdentity.class );
+        }
+        catch ( final Exception e )
+        {
+            LOGGER.trace( sessionLabel, () -> "unable to deserialize UserIdentity: " + key + " using JSON method: " + e.getMessage() );
+        }
+
+        // old style
         final StringTokenizer st = new StringTokenizer( key, DELIM_SEPARATOR );
+
+        DomainID domainID = null;
         if ( st.countTokens() < 2 )
         {
-            throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_INTERNAL, "not enough tokens while parsing delimited identity key" ) );
+            final String msg = "not enough tokens while parsing delimited identity key";
+            throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_INTERNAL, msg ) );
         }
         else if ( st.countTokens() > 2 )
+        {
+            String domainStr = "";
+            try
+            {
+                domainStr = st.nextToken();
+                domainID = DomainID.create( domainStr );
+            }
+            catch ( final Exception e )
+            {
+                final String msg = "error decoding DomainID '" + domainStr + "' from delimited UserIdentity: " + e.getMessage();
+                throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_INTERNAL, msg ) );
+            }
+        }
+
+        if ( st.countTokens() > 3 )
         {
             throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_INTERNAL, "too many string tokens while parsing delimited identity key" ) );
         }
         final String profileID = st.nextToken();
         final String userDN = st.nextToken();
-        return createUserIdentity( userDN, profileID );
+        return create( userDN, profileID, domainID );
     }
 
-    public static UserIdentity fromKey( final String key, final PwmApplication pwmApplication )
+    /**
+     * Attempt to de-serialize value using delimited or obfuscated key.
+     *
+     * @deprecated  Should be used by calling {@link #fromDelimitedKey(String)} or {@link #fromObfuscatedKey(String, PwmApplication)}.
+     */
+    @Deprecated
+    public static UserIdentity fromKey( final SessionLabel sessionLabel, final String key, final PwmApplication pwmApplication )
             throws PwmUnrecoverableException
     {
         JavaHelper.requireNonEmpty( key );
@@ -211,10 +263,10 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
             return fromObfuscatedKey( key, pwmApplication );
         }
 
-        return fromDelimitedKey( key );
+        return fromDelimitedKey( sessionLabel, key );
     }
 
-    public boolean canonicalEquals( final UserIdentity otherIdentity, final PwmApplication pwmApplication )
+    public boolean canonicalEquals( final SessionLabel sessionLabel, final UserIdentity otherIdentity, final PwmApplication pwmApplication )
             throws PwmUnrecoverableException
     {
         if ( otherIdentity == null )
@@ -222,8 +274,8 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
             return false;
         }
 
-        final UserIdentity thisCanonicalIdentity = this.canonicalized( pwmApplication );
-        final UserIdentity otherCanonicalIdentity = otherIdentity.canonicalized( pwmApplication );
+        final UserIdentity thisCanonicalIdentity = this.canonicalized( sessionLabel, pwmApplication );
+        final UserIdentity otherCanonicalIdentity = otherIdentity.canonicalized( sessionLabel, pwmApplication );
         return thisCanonicalIdentity.equals( otherCanonicalIdentity );
     }
 
@@ -239,7 +291,7 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
             return false;
         }
         final UserIdentity that = ( UserIdentity ) o;
-        return Objects.equals( domain, that.domain )
+        return Objects.equals( domainID, that.domainID )
                 && Objects.equals( ldapProfile, that.ldapProfile )
                 && Objects.equals( userDN, that.userDN );
     }
@@ -247,36 +299,16 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
     @Override
     public int hashCode()
     {
-        return Objects.hash( domain, ldapProfile, userDN );
+        return Objects.hash( domainID, ldapProfile, userDN );
     }
 
     @Override
     public int compareTo( @NotNull final UserIdentity otherIdentity )
     {
-        return comparator().compare( this, otherIdentity );
+        return COMPARATOR.compare( this, otherIdentity );
     }
 
-    private static Comparator<UserIdentity> comparator( )
-    {
-        final Comparator<UserIdentity> domainComparator = Comparator.comparing(
-                UserIdentity::getDomain,
-                Comparator.nullsLast( Comparator.naturalOrder() ) );
-
-        final Comparator<UserIdentity> profileComparator = Comparator.comparing(
-                UserIdentity::getLdapProfileID,
-                Comparator.nullsLast( Comparator.naturalOrder() ) );
-
-        final Comparator<UserIdentity> userComparator = Comparator.comparing(
-                UserIdentity::getDomain,
-                Comparator.nullsLast( Comparator.naturalOrder() ) );
-
-        return domainComparator
-                .thenComparing( profileComparator )
-                .thenComparing( userComparator );
-    }
-
-
-    public UserIdentity canonicalized( final PwmApplication pwmApplication )
+    public UserIdentity canonicalized( final SessionLabel sessionLabel, final PwmApplication pwmApplication )
             throws PwmUnrecoverableException
     {
         if ( this.canonical )
@@ -284,7 +316,7 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
             return this;
         }
 
-        final ChaiUser chaiUser = pwmApplication.getProxiedChaiUser( this );
+        final ChaiUser chaiUser = pwmApplication.domains().get( this.getDomainID() ).getProxiedChaiUser( sessionLabel, this );
         final String userDN;
         try
         {
@@ -294,7 +326,7 @@ public class UserIdentity implements Serializable, Comparable<UserIdentity>
         {
             throw PwmUnrecoverableException.fromChaiException( e );
         }
-        final UserIdentity canonicalziedIdentity = createUserIdentity( userDN, this.getLdapProfileID() );
+        final UserIdentity canonicalziedIdentity = create( userDN, this.getLdapProfileID(), this.getDomainID() );
         canonicalziedIdentity.canonical = true;
         return canonicalziedIdentity;
     }

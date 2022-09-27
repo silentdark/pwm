@@ -25,7 +25,9 @@ import password.pwm.PwmConstants;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
+import password.pwm.error.PwmInternalException;
 import password.pwm.error.PwmUnrecoverableException;
+import password.pwm.util.java.ImmutableByteArray;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmBlockAlgorithm;
 import password.pwm.util.secure.PwmHashAlgorithm;
@@ -47,7 +49,7 @@ public class PasswordData implements Serializable
 
     private static final PwmLogger LOGGER = PwmLogger.forClass( PasswordData.class );
 
-    private final byte[] passwordData;
+    private final ImmutableByteArray passwordData;
 
     // not a secure value, used to detect if key is same over time.
     private final String keyHash;
@@ -101,7 +103,7 @@ public class PasswordData implements Serializable
         {
             throw new NullPointerException( "password data can not be empty" );
         }
-        this.passwordData = SecureEngine.encryptToBytes( passwordData, STATIC_KEY, IN_MEMORY_PASSWORD_ENCRYPT_METHOD );
+        this.passwordData = ImmutableByteArray.of( SecureEngine.encryptToBytes( passwordData, STATIC_KEY, IN_MEMORY_PASSWORD_ENCRYPT_METHOD ) );
         this.keyHash = STATIC_KEY_HASH;
     }
 
@@ -127,7 +129,7 @@ public class PasswordData implements Serializable
             throws PwmUnrecoverableException
     {
         checkCurrentStatus();
-        return SecureEngine.decryptBytes( passwordData, STATIC_KEY, IN_MEMORY_PASSWORD_ENCRYPT_METHOD );
+        return SecureEngine.decryptBytes( passwordData.copyOf(), STATIC_KEY, IN_MEMORY_PASSWORD_ENCRYPT_METHOD );
     }
 
     @Override
@@ -146,7 +148,7 @@ public class PasswordData implements Serializable
     @Override
     public int hashCode( )
     {
-        int result = Arrays.hashCode( passwordData );
+        int result = Arrays.hashCode( passwordData.copyOf() );
         result = 31 * result + keyHash.hashCode();
         return result;
     }
@@ -175,9 +177,8 @@ public class PasswordData implements Serializable
         }
         catch ( final PwmUnrecoverableException e )
         {
-            e.printStackTrace();
+            throw PwmInternalException.fromPwmException( e );
         }
-        return super.equals( obj );
     }
 
     public static PasswordData forStringValue( final String input )

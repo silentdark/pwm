@@ -31,10 +31,10 @@ import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.PwmRequest;
 import password.pwm.svc.event.AuditEvent;
-import password.pwm.svc.event.AuditRecord;
-import password.pwm.svc.event.AuditRecordFactory;
-import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.svc.event.AuditServiceClient;
+import password.pwm.util.java.MiscUtil;
+import password.pwm.util.json.JsonFactory;
+import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 
 import java.io.IOException;
@@ -83,7 +83,7 @@ public class PwmLogger
         PwmLogger.fileAppender = rollingFileAppender;
     }
 
-    public static PwmLogger forClass( final Class className )
+    public static PwmLogger forClass( final Class<?> className )
     {
         return new PwmLogger( className.getName(), false );
     }
@@ -94,7 +94,7 @@ public class PwmLogger
     }
 
     public static PwmLogger forClass(
-            final Class className,
+            final Class<?> className,
             final boolean localDBDisabled
     )
     {
@@ -139,7 +139,8 @@ public class PwmLogger
             try
             {
                 final CharSequence cleanedString = PwmLogger.removeUserDataFromString( pwmRequest.getPwmSession().getLoginInfoBean(), message.get() );
-                cleanedMessage = () -> cleanedString;
+                final CharSequence printableString = StringUtil.cleanNonPrintableCharacters( cleanedString );
+                cleanedMessage = () -> printableString;
             }
             catch ( final PwmUnrecoverableException e1 )
             {
@@ -178,7 +179,7 @@ public class PwmLogger
         final CharSequence effectiveMessage = formatEffectiveMessage( message, timeDuration );
         final PwmLogEvent logEvent = PwmLogEvent.createPwmLogEvent( Instant.now(), topic, effectiveMessage.toString(), sessionLabel,
                 e, effectiveLevel );
-        doLogEvent( sessionLabel, logEvent );
+        doLogEvent( logEvent );
     }
 
     private CharSequence formatEffectiveMessage( final Supplier<CharSequence> message, final Supplier<TimeDuration> timeDuration )
@@ -195,7 +196,7 @@ public class PwmLogger
         return output;
     }
 
-    private void doLogEvent( final SessionLabel sessionLabel, final PwmLogEvent logEvent )
+    private void doLogEvent( final PwmLogEvent logEvent )
     {
         pushMessageToLog4j( logEvent );
 
@@ -221,12 +222,8 @@ public class PwmLogger
                     messageInfo.put( "topic", logEvent.getTopic() );
                     messageInfo.put( "errorMessage", logEvent.getMessage() );
 
-                    final String messageInfoStr = JsonUtil.serializeMap( messageInfo );
-                    final AuditRecord auditRecord = new AuditRecordFactory( pwmApplication ).createSystemAuditRecord(
-                            AuditEvent.FATAL_EVENT,
-                            messageInfoStr
-                    );
-                    pwmApplication.getAuditManager().submit( sessionLabel, auditRecord );
+                    final String messageInfoStr = JsonFactory.get().serializeMap( messageInfo );
+                    AuditServiceClient.submitSystemEvent( pwmApplication, SessionLabel.SYSTEM_LABEL, AuditEvent.FATAL_EVENT, messageInfoStr );
                 }
             }
         }
@@ -239,7 +236,7 @@ public class PwmLogger
     private void pushMessageToLog4j( final PwmLogEvent logEvent )
     {
         final String wrappedMessage = logEvent.getEnhancedMessage();
-        final Throwable throwable = logEvent.getThrowable();
+        final Throwable throwable = logEvent.getLoggedThrowable() == null ? null : logEvent.getLoggedThrowable().toThrowable();
         final PwmLogLevel level = logEvent.getLevel();
 
         if ( initialized )
@@ -266,7 +263,7 @@ public class PwmLogger
                     break;
 
                 default:
-                    JavaHelper.unhandledSwitchStatement( level );
+                    MiscUtil.unhandledSwitchStatement( level );
             }
         }
         else
@@ -307,6 +304,16 @@ public class PwmLogger
 
     public void trace( final SessionLabel sessionLabel, final Supplier<CharSequence> message )
     {
+        doLogEvent( PwmLogLevel.TRACE, sessionLabel, message, null );
+    }
+
+    public void traceDevDebug( final SessionLabel sessionLabel, final Supplier<CharSequence> message )
+    {
+        if ( pwmApplication == null || !pwmApplication.getConfig().isDevDebugMode() )
+        {
+            return;
+        }
+
         doLogEvent( PwmLogLevel.TRACE, sessionLabel, message, null );
     }
 
@@ -423,6 +430,11 @@ public class PwmLogger
     public void error( final SessionLabel sessionLabel, final Supplier<CharSequence> message )
     {
         doLogEvent( PwmLogLevel.ERROR, sessionLabel, message, null );
+    }
+
+    public void error( final SessionLabel sessionLabel, final Supplier<CharSequence> message, final Supplier<TimeDuration> timeDurationSupplier )
+    {
+        doLogEvent( PwmLogLevel.ERROR, sessionLabel, message, null, timeDurationSupplier );
     }
 
     public void error( final SessionLabel sessionLabel, final ErrorInformation errorInformation )
@@ -548,7 +560,7 @@ public class PwmLogger
             while ( length > 0 )
             {
                 final String line = buffer.substring( 0, length );
-                buffer.delete( 0, +length + 1 );
+                buffer.delete( 0, length + 1 );
                 doLogEvent( logLevel, sessionLabel, () -> line, null );
                 length = buffer.indexOf( "\n" );
             }

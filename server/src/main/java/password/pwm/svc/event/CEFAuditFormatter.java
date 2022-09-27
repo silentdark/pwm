@@ -26,18 +26,21 @@ import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
 import password.pwm.bean.SessionLabel;
-import password.pwm.config.Configuration;
+import password.pwm.config.AppConfig;
+import password.pwm.config.PwmSetting;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
 
+import java.net.URI;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 public class CEFAuditFormatter implements AuditFormatter
@@ -49,12 +52,37 @@ public class CEFAuditFormatter implements AuditFormatter
 
     static
     {
+        // ordering is important to this map.
         final Map<String, String> map = new LinkedHashMap<>( );
         map.put( "\\", "\\\\" );
         map.put( "=", "\\=" );
         map.put( "|", "\\|" );
         map.put( "\n", "\\n" );
         CEF_VALUE_ESCAPES = Collections.unmodifiableMap( map );
+    }
+
+    private static Optional<String> deriveLocalServerHostname( final AppConfig appConfig )
+    {
+        if ( appConfig != null )
+        {
+            final String siteUrl = appConfig.readSettingAsString( PwmSetting.PWM_SITE_URL );
+            if ( StringUtil.notEmpty( siteUrl ) )
+            {
+                try
+                {
+                    final URI parsedUri = URI.create( siteUrl );
+                    {
+                        final String uriHost = parsedUri.getHost();
+                        return Optional.ofNullable( uriHost );
+                    }
+                }
+                catch ( final IllegalArgumentException e )
+                {
+                    LOGGER.trace( () -> " error parsing siteURL hostname: " + e.getMessage() );
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     enum CEFAuditField
@@ -93,11 +121,12 @@ public class CEFAuditFormatter implements AuditFormatter
     )
             throws PwmUnrecoverableException
     {
-        final Configuration configuration = pwmApplication.getConfig();
-        final Settings settings = Settings.fromConfiguration( configuration );
-        final Map<String, Object> auditRecordMap = JsonUtil.deserializeMap( JsonUtil.serialize( auditRecord ) );
+        final AppConfig domainConfig = pwmApplication.getConfig();
+        final Settings settings = Settings.fromConfiguration( domainConfig );
+        final String auditRecordAsJson = JsonFactory.get().serialize( auditRecord );
+        final Map<String, Object> auditRecordMap = JsonFactory.get().deserializeMap( auditRecordAsJson, String.class, Object.class );
 
-        final Optional<String> srcHost = JavaHelper.deriveLocalServerHostname( configuration );
+        final Optional<String> srcHost = deriveLocalServerHostname( pwmApplication.getConfig() );
 
         final StringBuilder cefOutput = new StringBuilder(  );
 
@@ -129,7 +158,7 @@ public class CEFAuditFormatter implements AuditFormatter
         }
 
         final int cefLength = CEFAuditFormatter.CEF_EXTENSION_SEPARATOR.length();
-        if ( cefOutput.substring( cefOutput.length() - cefLength ).equals( CEFAuditFormatter.CEF_EXTENSION_SEPARATOR ) )
+        if ( Objects.equals( cefOutput.substring( cefOutput.length() - cefLength ), CEFAuditFormatter.CEF_EXTENSION_SEPARATOR ) )
         {
             cefOutput.replace( cefOutput.length() - cefLength, cefOutput.length(), "" );
         }
@@ -180,12 +209,12 @@ public class CEFAuditFormatter implements AuditFormatter
 
     private void appendCefValue( final String name, final String value, final StringBuilder cefOutput, final Settings settings )
     {
-        if ( !StringUtil.isEmpty( value ) && !StringUtil.isEmpty( name ) )
+        if ( StringUtil.notEmpty( value ) && StringUtil.notEmpty( name ) )
         {
             final String outputValue = trimCEFValue( name, escapeCEFValue( value ), settings );
-            cefOutput.append( " " );
+            cefOutput.append( ' ' );
             cefOutput.append( name );
-            cefOutput.append( "=" );
+            cefOutput.append( '=' );
             cefOutput.append( outputValue );
         }
     }
@@ -222,14 +251,14 @@ public class CEFAuditFormatter implements AuditFormatter
         private String headerProduct;
         private String headerVendor;
 
-        static Settings fromConfiguration( final Configuration configuration )
+        static Settings fromConfiguration( final AppConfig appConfig )
         {
             return Settings.builder()
-                    .cefMaxExtensionChars( JavaHelper.silentParseInt( configuration.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_MAX_EXTENSION_CHARS ), 1023 ) )
-                    .cefTimezone( configuration.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_TIMEZONE ) )
-                    .headerSeverity( configuration.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_HEADER_SEVERITY ) )
-                    .headerProduct( configuration.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_HEADER_PRODUCT ) )
-                    .headerVendor( configuration.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_HEADER_VENDOR ) )
+                    .cefMaxExtensionChars( JavaHelper.silentParseInt( appConfig.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_MAX_EXTENSION_CHARS ), 1023 ) )
+                    .cefTimezone( appConfig.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_TIMEZONE ) )
+                    .headerSeverity( appConfig.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_HEADER_SEVERITY ) )
+                    .headerProduct( appConfig.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_HEADER_PRODUCT ) )
+                    .headerVendor( appConfig.readAppProperty( AppProperty.AUDIT_SYSLOG_CEF_HEADER_VENDOR ) )
                     .build();
         }
     }

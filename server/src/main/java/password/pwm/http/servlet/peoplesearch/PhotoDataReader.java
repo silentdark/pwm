@@ -37,7 +37,7 @@ import password.pwm.http.HttpHeader;
 import password.pwm.http.HttpMethod;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmURL;
-import password.pwm.http.bean.ImmutableByteArray;
+import password.pwm.util.java.ImmutableByteArray;
 import password.pwm.ldap.LdapOperationsHelper;
 import password.pwm.ldap.permission.UserPermissionUtility;
 import password.pwm.ldap.PhotoDataBean;
@@ -45,7 +45,9 @@ import password.pwm.svc.httpclient.PwmHttpClient;
 import password.pwm.svc.httpclient.PwmHttpClientConfiguration;
 import password.pwm.svc.httpclient.PwmHttpClientRequest;
 import password.pwm.svc.httpclient.PwmHttpClientResponse;
+import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.MiscUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
@@ -98,7 +100,7 @@ public class PhotoDataReader
             return PhotoReaderMethod.Ldap;
         }
 
-        final boolean enableInternalHttpProxy = Boolean.parseBoolean( pwmRequest.getConfig().readAppProperty( AppProperty.PHOTO_INTERNAL_HTTP_PROXY_ENABLE ) );
+        final boolean enableInternalHttpProxy = Boolean.parseBoolean( pwmRequest.getDomainConfig().readAppProperty( AppProperty.PHOTO_INTERNAL_HTTP_PROXY_ENABLE ) );
         if ( enableInternalHttpProxy )
         {
             return PhotoReaderMethod.ServerHttp;
@@ -118,12 +120,12 @@ public class PhotoDataReader
         }
 
         final List<UserPermission> permissions = settings.getPhotoPermissions();
-        if ( JavaHelper.isEmpty( permissions ) )
+        if ( CollectionUtil.isEmpty( permissions ) )
         {
             return true;
         }
 
-        final boolean hasPermission = UserPermissionUtility.testUserPermission( pwmRequest.getPwmApplication(), pwmRequest.getLabel(), userIdentity, permissions );
+        final boolean hasPermission = UserPermissionUtility.testUserPermission( pwmRequest.getPwmDomain(), pwmRequest.getLabel(), userIdentity, permissions );
         if ( !hasPermission )
         {
             LOGGER.debug( pwmRequest, () -> "user " + userIdentity + " failed photo query filter, denying photo view ("
@@ -133,12 +135,12 @@ public class PhotoDataReader
         return hasPermission;
     }
 
-    public String figurePhotoURL()
+    public Optional<String> figurePhotoURL()
             throws PwmUnrecoverableException
     {
         if ( !verifyViewPhotoPermission() )
         {
-            return null;
+            return Optional.empty();
         }
 
         final PhotoReaderMethod method = figurePhotoDataReaderMethod( );
@@ -146,21 +148,21 @@ public class PhotoDataReader
         switch ( method )
         {
             case ClientHttp:
-                return getPhotoUrlOverride( userIdentity ).orElse( null );
+                return getPhotoUrlOverride( userIdentity );
 
             case Ldap:
             case ServerHttp:
                 String returnUrl = pwmRequest.getURLwithoutQueryString();
                 returnUrl = PwmURL.appendAndEncodeUrlParameters( returnUrl, PwmConstants.PARAM_ACTION_REQUEST, PeopleSearchServlet.PeopleSearchActions.photo.name() );
                 returnUrl = PwmURL.appendAndEncodeUrlParameters( returnUrl, PwmConstants.PARAM_USERKEY,  userIdentity.toObfuscatedKey( pwmRequest.getPwmApplication() ) );
-                return returnUrl;
+                return Optional.of( returnUrl );
 
             default:
-                JavaHelper.unhandledSwitchStatement( method );
+                MiscUtil.unhandledSwitchStatement( method );
 
         }
 
-        return null;
+        return Optional.empty();
     }
 
     public Optional<PhotoDataBean> readPhotoData( )
@@ -189,7 +191,7 @@ public class PhotoDataReader
                     break;
 
                 default:
-                    JavaHelper.unhandledSwitchStatement( method );
+                    MiscUtil.unhandledSwitchStatement( method );
             }
         }
         finally
@@ -198,7 +200,7 @@ public class PhotoDataReader
             if ( finalData.isPresent() )
             {
                 LOGGER.trace( pwmRequest, () -> "user photo data received for " + userIdentity.toDisplayString()
-                        + " " + finalData.get().toString()
+                        + " " + finalData.get()
                         + " (" + TimeDuration.compactFromCurrent( startTime ) + ")" );
             }
             else
@@ -215,8 +217,8 @@ public class PhotoDataReader
             throws PwmUnrecoverableException, PwmOperationalException
     {
         return LdapOperationsHelper.readPhotoDataFromLdap(
-                pwmRequest.getConfig(),
-                pwmRequest.getPwmApplication().getProxiedChaiUser( userIdentity ).getChaiProvider(),
+                pwmRequest.getDomainConfig(),
+                pwmRequest.getPwmDomain().getProxiedChaiUser( pwmRequest.getLabel(), userIdentity ).getChaiProvider(),
                 userIdentity
         );
     }
@@ -235,7 +237,7 @@ public class PhotoDataReader
             final PwmHttpClientConfiguration configuration = PwmHttpClientConfiguration.builder()
                     .trustManagerType( PwmHttpClientConfiguration.TrustManagerType.promiscuous )
                     .build();
-            final PwmHttpClient pwmHttpClient = pwmRequest.getPwmApplication().getHttpClientService().getPwmHttpClient( configuration );
+            final PwmHttpClient pwmHttpClient = pwmRequest.getPwmDomain().getHttpClientService().getPwmHttpClient( configuration );
             final PwmHttpClientRequest clientRequest = PwmHttpClientRequest.builder()
                     .method( HttpMethod.GET )
                     .url( overrideURL.get() )
@@ -262,10 +264,10 @@ public class PhotoDataReader
     private Optional<String> getPhotoUrlOverride( final UserIdentity userIdentity )
             throws PwmUnrecoverableException
     {
-        final LdapProfile ldapProfile = userIdentity.getLdapProfile( pwmRequest.getConfig() );
+        final LdapProfile ldapProfile = userIdentity.getLdapProfile( pwmRequest.getAppConfig() );
         final String configuredUrl = ldapProfile.readSettingAsString( PwmSetting.LDAP_ATTRIBUTE_PHOTO_URL_OVERRIDE );
 
-        if ( !StringUtil.isEmpty( configuredUrl ) )
+        if ( StringUtil.notEmpty( configuredUrl ) )
         {
             final MacroRequest macroRequest = MacroRequest.forUser( pwmRequest.getPwmRequestContext(), userIdentity );
             return Optional.of( macroRequest.expandMacros( configuredUrl ) );
@@ -280,7 +282,7 @@ public class PhotoDataReader
             final Callable<Optional<PhotoDataBean>> photoReader
     )
     {
-        final long cacheSeconds = JavaHelper.silentParseLong( pwmRequest.getConfig().readAppProperty( AppProperty.PHOTO_CLIENT_CACHE_SECONDS ), 3600 );
+        final long cacheSeconds = JavaHelper.silentParseLong( pwmRequest.getDomainConfig().readAppProperty( AppProperty.PHOTO_CLIENT_CACHE_SECONDS ), 3600 );
         final TimeDuration maxCacheTime = TimeDuration.of( cacheSeconds, TimeDuration.Unit.SECONDS );
         pwmRequest.getPwmResponse().getHttpServletResponse().setDateHeader( HttpHeader.Expires.getHttpName(), System.currentTimeMillis() + ( maxCacheTime.asMillis() ) );
         pwmRequest.getPwmResponse().setHeader( HttpHeader.CacheControl,  "private, max-age=" + maxCacheTime.as( TimeDuration.Unit.SECONDS ) );

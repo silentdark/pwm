@@ -20,7 +20,10 @@
 
 package password.pwm.util.java;
 
-import org.apache.commons.io.output.NullOutputStream;
+import org.jrivard.xmlchai.AccessMode;
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlDocument;
+import org.jrivard.xmlchai.XmlFactory;
 import org.junit.Test;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.Mode;
@@ -30,6 +33,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.TimeValue;
 
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.concurrent.TimeUnit;
 
 public class XmlFactoryBenchmarkExtendedTest
@@ -59,22 +63,15 @@ public class XmlFactoryBenchmarkExtendedTest
     public void benchmarkW3c ()
             throws Exception
     {
-        benchmarkImpl( XmlFactory.FactoryType.W3C );
+        benchmarkImpl( );
     }
 
-    @Benchmark
-    public void benchmarkJDom ()
+    private void benchmarkImpl ()
             throws Exception
     {
-        benchmarkImpl( XmlFactory.FactoryType.JDOM );
-    }
-
-    private void benchmarkImpl ( final XmlFactory.FactoryType factoryType )
-            throws Exception
-    {
-        final XmlFactory xmlFactory = XmlFactory.getFactory( factoryType );
+        final XmlFactory xmlFactory = XmlChai.getFactory();
         final InputStream xmlFactoryTestXmlFile = XmlFactoryTest.class.getResourceAsStream( "XmlFactoryTest.xml" );
-        final XmlDocument xmlDocument = xmlFactory.parseXml( xmlFactoryTestXmlFile );
-        xmlFactory.outputDocument( xmlDocument, new NullOutputStream() );
+        final XmlDocument xmlDocument = xmlFactory.parse( xmlFactoryTestXmlFile, AccessMode.IMMUTABLE );
+        xmlFactory.output( xmlDocument, OutputStream.nullOutputStream() );
     }
 }

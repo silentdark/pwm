@@ -29,7 +29,7 @@ import lombok.Value;
 import password.pwm.bean.ResponseInfoBean;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
-import password.pwm.config.Configuration;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.option.HelpdeskUIMode;
 import password.pwm.config.option.ViewStatusFields;
@@ -48,8 +48,8 @@ import password.pwm.ldap.UserInfoFactory;
 import password.pwm.ldap.ViewableUserInfoDisplayReader;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.form.FormUtility;
-import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.java.CollectionUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
@@ -90,7 +90,7 @@ public class HelpdeskDetailInfoBean implements Serializable
     private Set<StandardButton> enabledButtons;
 
     private HelpdeskVerificationOptionsBean verificationOptions;
-    
+
     public enum StandardButton
     {
         back,
@@ -103,7 +103,7 @@ public class HelpdeskDetailInfoBean implements Serializable
         deleteUser,
     }
 
-     static HelpdeskDetailInfoBean makeHelpdeskDetailInfo(
+    static HelpdeskDetailInfoBean makeHelpdeskDetailInfo(
             final PwmRequest pwmRequest,
             final HelpdeskProfile helpdeskProfile,
             final UserIdentity userIdentity
@@ -133,10 +133,10 @@ public class HelpdeskDetailInfoBean implements Serializable
         try
         {
 
-            final AccountInformationProfile accountInformationProfile = pwmRequest.getPwmSession().getSessionManager().getAccountInfoProfile();
+            final AccountInformationProfile accountInformationProfile = pwmRequest.getAccountInfoProfile();
 
             final List<AccountInformationBean.ActivityRecord> userHistory = AccountInformationBean.makeAuditInfo(
-                    pwmRequest.getPwmApplication(),
+                    pwmRequest.getPwmDomain(),
                     accountInformationProfile,
                     pwmRequest.getLabel(),
                     userInfo,
@@ -152,16 +152,16 @@ public class HelpdeskDetailInfoBean implements Serializable
 
         builder.profileData( getProfileData( helpdeskProfile, userInfo, pwmRequest.getLabel(), pwmRequest.getLocale() ) );
 
-        builder.passwordPolicyRules( makePasswordPolicyRules( userInfo, pwmRequest.getLocale(), pwmRequest.getConfig() ) );
+        builder.passwordPolicyRules( makePasswordPolicyRules( userInfo, pwmRequest.getLocale(), pwmRequest.getDomainConfig() ) );
 
         {
             final List<String> requirementLines = PasswordRequirementsTag.getPasswordRequirementsStrings(
                     userInfo.getPasswordPolicy(),
-                    pwmRequest.getConfig(),
+                    pwmRequest.getDomainConfig(),
                     pwmRequest.getLocale(),
                     macroRequest
             );
-            builder.passwordRequirements( Collections.unmodifiableList( requirementLines ) );
+            builder.passwordRequirements( requirementLines );
         }
 
         if ( ( userInfo.getPasswordPolicy() != null )
@@ -188,23 +188,26 @@ public class HelpdeskDetailInfoBean implements Serializable
 
         {
             final ResponseInfoBean responseInfoBean = userInfo.getResponseInfoBean();
-            if ( responseInfoBean != null && responseInfoBean.getHelpdeskCrMap() != null )
+            if ( responseInfoBean != null )
             {
-                final List<DisplayElement> responseDisplay = new ArrayList<>();
-                int counter = 0;
-                for ( final Map.Entry<Challenge, String> entry : responseInfoBean.getHelpdeskCrMap().entrySet() )
+                final Map<Challenge, String> helpdeskCrMap = responseInfoBean.getHelpdeskCrMap();
+                if ( helpdeskCrMap != null )
                 {
-                    counter++;
-                    responseDisplay.add( new DisplayElement(
-                            "item_" + counter,
-                            DisplayElement.Type.string,
-                            entry.getKey().getChallengeText(),
-                            entry.getValue()
-                    ) );
+                    final List<DisplayElement> responseDisplay = new ArrayList<>(  helpdeskCrMap.size() );
+                    int counter = 0;
+                    for ( final Map.Entry<Challenge, String> entry : helpdeskCrMap.entrySet() )
+                    {
+                        counter++;
+                        responseDisplay.add( new DisplayElement(
+                                "item_" + counter,
+                                DisplayElement.Type.string,
+                                entry.getKey().getChallengeText(),
+                                entry.getValue()
+                        ) );
+                    }
+                    builder.helpdeskResponses = responseDisplay;
                 }
-                builder.helpdeskResponses = responseDisplay;
             }
-
         }
 
         builder.userDisplayName( HelpdeskCardInfoBean.figureDisplayName( helpdeskProfile, macroRequest ) );
@@ -215,7 +218,7 @@ public class HelpdeskDetailInfoBean implements Serializable
             final Set<ViewStatusFields> viewStatusFields = helpdeskProfile.readSettingAsOptionList( PwmSetting.HELPDESK_VIEW_STATUS_VALUES, ViewStatusFields.class );
             builder.statusData( ViewableUserInfoDisplayReader.makeDisplayData(
                     viewStatusFields,
-                    pwmRequest.getConfig(),
+                    pwmRequest.getDomainConfig(),
                     userInfo,
                     null,
                     pwmRequest.getLocale()
@@ -232,10 +235,10 @@ public class HelpdeskDetailInfoBean implements Serializable
 
         final HelpdeskDetailInfoBean helpdeskDetailInfoBean = builder.build();
 
-        if ( pwmRequest.getConfig().isDevDebugMode() )
+        if ( pwmRequest.getAppConfig().isDevDebugMode() )
         {
             LOGGER.trace( pwmRequest, () -> "completed assembly of detail data report for user " + userIdentity
-                    + " in " + timeDuration.asCompactString() + ", contents: " + JsonUtil.serialize( helpdeskDetailInfoBean ) );
+                    + " in " + timeDuration.asCompactString() + ", contents: " + JsonFactory.get().serialize( helpdeskDetailInfoBean ) );
         }
 
         return builder.build();
@@ -351,7 +354,7 @@ public class HelpdeskDetailInfoBean implements Serializable
             }
             else
             {
-                final String value = JavaHelper.isEmpty( entry.getValue() )
+                final String value = CollectionUtil.isEmpty( entry.getValue() )
                         ? ""
                         : entry.getValue().iterator().next();
                 profileData.add( new DisplayElement(
@@ -368,7 +371,7 @@ public class HelpdeskDetailInfoBean implements Serializable
     private static Map<String, String> makePasswordPolicyRules(
             final UserInfo userInfo,
             final Locale locale,
-            final Configuration configuration
+            final DomainConfig domainConfig
     )
             throws PwmUnrecoverableException
     {
@@ -382,12 +385,12 @@ public class HelpdeskDetailInfoBean implements Serializable
                     if ( ChaiPasswordRule.RuleType.BOOLEAN == rule.getRuleType() )
                     {
                         final boolean value = Boolean.parseBoolean( userInfo.getPasswordPolicy().getValue( rule ) );
-                        final String sValue = LocaleHelper.booleanString( value, locale, configuration );
-                        passwordRules.put( rule.getLabel( locale, configuration ), sValue );
+                        final String sValue = LocaleHelper.booleanString( value, locale, domainConfig );
+                        passwordRules.put( rule.getLabel( locale, domainConfig ), sValue );
                     }
                     else
                     {
-                        passwordRules.put( rule.getLabel( locale, configuration ),
+                        passwordRules.put( rule.getLabel( locale, domainConfig ),
                                 userInfo.getPasswordPolicy().getValue( rule ) );
                     }
                 }

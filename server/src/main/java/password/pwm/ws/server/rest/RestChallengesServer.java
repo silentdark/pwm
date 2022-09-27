@@ -23,7 +23,6 @@ package password.pwm.ws.server.rest;
 import com.novell.ldapchai.ChaiUser;
 import com.novell.ldapchai.cr.ChaiChallenge;
 import com.novell.ldapchai.cr.Challenge;
-import com.novell.ldapchai.cr.ChallengeSet;
 import com.novell.ldapchai.cr.ResponseSet;
 import com.novell.ldapchai.cr.bean.ChallengeBean;
 import com.novell.ldapchai.exception.ChaiException;
@@ -44,9 +43,9 @@ import password.pwm.http.HttpMethod;
 import password.pwm.http.PwmHttpRequestWrapper;
 import password.pwm.i18n.Message;
 import password.pwm.ldap.LdapOperationsHelper;
+import password.pwm.svc.cr.CrService;
 import password.pwm.svc.stats.Statistic;
-import password.pwm.svc.stats.StatisticsManager;
-import password.pwm.util.operations.CrService;
+import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.util.password.PasswordUtility;
 import password.pwm.ws.server.RestMethodHandler;
 import password.pwm.ws.server.RestRequest;
@@ -59,11 +58,12 @@ import javax.servlet.annotation.WebServlet;
 import java.io.IOException;
 import java.io.Serializable;
 import java.time.Instant;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @WebServlet(
         urlPatterns = {
@@ -164,7 +164,7 @@ public class RestChallengesServer extends RestServlet
 
         try
         {
-            if ( answers && !restRequest.getPwmApplication().getConfig().readSettingAsBoolean( PwmSetting.ENABLE_WEBSERVICES_READANSWERS ) )
+            if ( answers && !restRequest.getDomain().getConfig().readSettingAsBoolean( PwmSetting.ENABLE_WEBSERVICES_READANSWERS ) )
             {
                 throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_SERVICE_NOT_AVAILABLE, "retrieval of answers is not permitted" ) );
             }
@@ -173,22 +173,18 @@ public class RestChallengesServer extends RestServlet
 
             // gather data
             final ResponseSet responseSet;
-            final ChallengeSet challengeSet;
-            final ChallengeSet helpdeskChallengeSet;
             final String outputUsername;
 
             final ChaiUser chaiUser = targetUserIdentity.getChaiUser();
             final Locale userLocale = restRequest.getLocale();
-            final CrService crService = restRequest.getPwmApplication().getCrService();
-            responseSet = crService.readUserResponseSet( restRequest.getSessionLabel(), targetUserIdentity.getUserIdentity(), chaiUser );
+            final CrService crService = restRequest.getDomain().getCrService();
+            responseSet = crService.readUserResponseSet( restRequest.getSessionLabel(), targetUserIdentity.getUserIdentity(), chaiUser ).orElseThrow();
 
             final PwmPasswordPolicy passwordPolicy = PasswordUtility.readPasswordPolicyForUser(
-                    restRequest.getPwmApplication(),
+                    restRequest.getDomain(),
                     restRequest.getSessionLabel(),
                     targetUserIdentity.getUserIdentity(),
-                    chaiUser,
-                    userLocale
-            );
+                    chaiUser );
             final ChallengeProfile challengeProfile = crService.readUserChallengeProfile(
                     restRequest.getSessionLabel(),
                     targetUserIdentity.getUserIdentity(),
@@ -197,8 +193,6 @@ public class RestChallengesServer extends RestServlet
                     userLocale
             );
 
-            challengeSet = challengeProfile.getChallengeSet();
-            helpdeskChallengeSet = challengeProfile.getHelpdeskChallengeSet();
             outputUsername = targetUserIdentity.getUserIdentity().toDelimitedKey();
 
             // build output
@@ -215,15 +209,18 @@ public class RestChallengesServer extends RestServlet
                     jsonData.minimumRandoms = responseSet.getChallengeSet().getMinRandomRequired();
                 }
                 final Policy policy = new Policy();
-                if ( challengeSet != null )
+
+                challengeProfile.getChallengeSet().ifPresent( challengeSet ->
                 {
                     policy.challenges = challengesToBeans( challengeSet.getChallenges() );
                     policy.minimumRandoms = challengeSet.getMinRandomRequired();
-                }
-                if ( helpdeskChallengeSet != null && helpdesk )
+                } );
+
+                challengeProfile.getHelpdeskChallengeSet().ifPresent( helpdeskChallengeSet ->
                 {
                     policy.helpdeskChallenges = challengesToBeans( helpdeskChallengeSet.getChallenges() );
-                }
+                } );
+
                 if ( policy.challenges != null || policy.helpdeskChallenges != null )
                 {
                     jsonData.policy = policy;
@@ -231,8 +228,8 @@ public class RestChallengesServer extends RestServlet
             }
 
             // update statistics
-            StatisticsManager.incrementStat( restRequest.getPwmApplication(), Statistic.REST_CHALLENGES );
-            return RestResultBean.withData( jsonData );
+            StatisticsClient.incrementStat( restRequest.getDomain(), Statistic.REST_CHALLENGES );
+            return RestResultBean.withData( jsonData, JsonChallengesData.class );
         }
         catch ( final ChaiException e )
         {
@@ -244,7 +241,7 @@ public class RestChallengesServer extends RestServlet
 
     @RestMethodHandler( method = HttpMethod.POST, consumes = HttpContentType.json, produces = HttpContentType.json )
     public RestResultBean doSetChallengeDataJson( final RestRequest restRequest )
-            throws IOException, PwmUnrecoverableException
+            throws  PwmUnrecoverableException
     {
         final JsonChallengesData jsonInput = RestUtility.deserializeJsonBody( restRequest, JsonChallengesData.class );
 
@@ -253,7 +250,7 @@ public class RestChallengesServer extends RestServlet
                 restRequest.readParameterAsString( FIELD_USERNAME, PwmHttpRequestWrapper.Flag.BypassValidation ),
                 FIELD_USERNAME,
                 RestUtility.ReadValueFlag.optional
-        );
+        ).orElseThrow( () -> PwmUnrecoverableException.newException( PwmError.ERROR_FIELD_REQUIRED, FIELD_USERNAME ) );
 
         final TargetUserIdentity targetUserIdentity = RestUtility.resolveRequestedUsername( restRequest, username );
 
@@ -263,12 +260,12 @@ public class RestChallengesServer extends RestServlet
             final String userGUID;
             final String csIdentifer;
             final UserIdentity userIdentity;
-            final CrService crService = restRequest.getPwmApplication().getCrService();
+            final CrService crService = restRequest.getDomain().getCrService();
 
             userIdentity = targetUserIdentity.getUserIdentity();
             chaiUser = targetUserIdentity.getChaiUser();
             userGUID = LdapOperationsHelper.readLdapGuidValue(
-                    restRequest.getPwmApplication(),
+                    restRequest.getDomain(),
                     restRequest.getSessionLabel(),
                     userIdentity,
                     false
@@ -281,13 +278,15 @@ public class RestChallengesServer extends RestServlet
                     restRequest.getLocale()
             );
 
-            csIdentifer = challengeProfile.getChallengeSet().getIdentifier();
+            csIdentifer = challengeProfile.getChallengeSet()
+                    .orElseThrow( () -> new PwmUnrecoverableException( PwmError.ERROR_NO_CHALLENGES.toInfo() ) )
+                    .getIdentifier();
 
             final ResponseInfoBean responseInfoBean = jsonInput.toResponseInfoBean( restRequest.getLocale(), csIdentifer );
             crService.writeResponses( restRequest.getSessionLabel(), userIdentity, chaiUser, userGUID, responseInfoBean );
 
             // update statistics
-            StatisticsManager.incrementStat( restRequest.getPwmApplication(), Statistic.REST_CHALLENGES );
+            StatisticsClient.incrementStat( restRequest.getDomain(), Statistic.REST_CHALLENGES );
 
             return RestResultBean.forSuccessMessage( restRequest, Message.Success_SetupResponse );
         }
@@ -321,12 +320,12 @@ public class RestChallengesServer extends RestServlet
 
             chaiUser = targetUserIdentity.getChaiUser();
             userGUID = LdapOperationsHelper.readLdapGuidValue(
-                    restRequest.getPwmApplication(),
+                    restRequest.getDomain(),
                     restRequest.getSessionLabel(),
                     targetUserIdentity.getUserIdentity(),
                     false );
 
-            final CrService crService = restRequest.getPwmApplication().getCrService();
+            final CrService crService = restRequest.getDomain().getCrService();
             crService.clearResponses(
                     restRequest.getSessionLabel(),
                     targetUserIdentity.getUserIdentity(),
@@ -335,7 +334,7 @@ public class RestChallengesServer extends RestServlet
             );
 
             // update statistics
-            StatisticsManager.incrementStat( restRequest.getPwmApplication(), Statistic.REST_CHALLENGES );
+            StatisticsClient.incrementStat( restRequest.getDomain(), Statistic.REST_CHALLENGES );
 
             return RestResultBean.forSuccessMessage( restRequest, Message.Success_Unknown );
         }
@@ -349,11 +348,13 @@ public class RestChallengesServer extends RestServlet
 
     private static List<ChallengeBean> challengesToBeans( final List<Challenge> challenges )
     {
-        final List<ChallengeBean> returnList = new ArrayList<>();
-        for ( final Challenge challenge : challenges )
+        if ( challenges == null )
         {
-            returnList.add( challenge.asChallengeBean() );
+            return Collections.emptyList();
         }
-        return returnList;
+
+        return challenges.stream()
+                .map( Challenge::asChallengeBean )
+                .collect( Collectors.toUnmodifiableList() );
     }
 }

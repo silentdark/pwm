@@ -20,15 +20,18 @@
 
 package password.pwm.config.value;
 
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlElement;
+import password.pwm.PwmConstants;
+import password.pwm.bean.DomainID;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingFlag;
-import password.pwm.config.stored.StoredConfigXmlSerializer;
+import password.pwm.config.PwmSettingSyntax;
+import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
 import password.pwm.config.value.data.FormConfiguration;
-import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmSecurityKey;
 
 import java.util.Collections;
@@ -58,15 +61,15 @@ public class StringValue extends AbstractValue implements StoredValue
             @Override
             public StringValue fromJson( final String input )
             {
-                final String newValue = JsonUtil.deserialize( input, String.class );
+                final String newValue = JsonFactory.get().deserialize( input, String.class );
                 return new StringValue( newValue );
             }
 
             @Override
             public StringValue fromXmlElement( final PwmSetting pwmSetting, final XmlElement settingElement, final PwmSecurityKey key )
             {
-                final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlSerializer.StoredConfigXmlConstants.XML_ELEMENT_VALUE );
-                final String value = valueElement.map( XmlElement::getText ).orElse( "" );
+                final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlConstants.XML_ELEMENT_VALUE );
+                final String value = valueElement.flatMap( XmlElement::getText ).orElse( "" );
                 return new StringValue( value );
             }
         };
@@ -75,8 +78,8 @@ public class StringValue extends AbstractValue implements StoredValue
     @Override
     public List<XmlElement> toXmlValues( final String valueElementName, final XmlOutputProcessData xmlOutputProcessData )
     {
-        final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
-        valueElement.addText( value );
+        final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+        valueElement.setText( value );
         return Collections.singletonList( valueElement );
     }
 
@@ -89,32 +92,45 @@ public class StringValue extends AbstractValue implements StoredValue
     @Override
     public List<String> validateValue( final PwmSetting pwmSetting )
     {
-        if ( pwmSetting.isRequired() )
+        return validateValue( pwmSetting, value );
+    }
+
+    public static List<String> validateValue( final PwmSetting pwmSetting, final String value )
+    {
+        if ( pwmSetting.isRequired()
+                && StringUtil.isEmpty( value ) )
         {
-            if ( StringUtil.isEmpty( value ) )
-            {
-                return Collections.singletonList( "required value missing" );
-            }
+            return Collections.singletonList( "required value missing" );
         }
 
         final Pattern pattern = pwmSetting.getRegExPattern();
         if ( pattern != null )
         {
             final Matcher matcher = pattern.matcher( value );
-            if ( value != null && value.length() > 0 && !matcher.matches() )
+            if ( StringUtil.notEmpty( value ) && !matcher.matches() )
             {
                 return Collections.singletonList( "incorrect value format for value '" + value + "'" );
             }
         }
 
-        if ( pwmSetting.getFlags().contains( PwmSettingFlag.emailSyntax ) )
+        if ( pwmSetting.getFlags().contains( PwmSettingFlag.emailSyntax )
+                && StringUtil.isEmpty( value )
+                && !FormConfiguration.testEmailAddress( null, value ) )
         {
-            if ( value != null )
+            return Collections.singletonList( "Invalid email address format: '" + value + "'" );
+        }
+
+        if ( StringUtil.notEmpty( value ) && pwmSetting.getSyntax() == PwmSettingSyntax.DOMAIN )
+        {
+            final String lCaseValue = value.toLowerCase( PwmConstants.DEFAULT_LOCALE );
+            final List<String> reservedWords = DomainID.DOMAIN_RESERVED_WORDS;
+            final Optional<String> reservedWordMatch = reservedWords.stream()
+                    .map( String::toLowerCase )
+                    .filter( lCaseValue::contains )
+                    .findFirst();
+            if ( reservedWordMatch.isPresent() )
             {
-                if ( !FormConfiguration.testEmailAddress( null, value ) )
-                {
-                    return Collections.singletonList( "Invalid email address format: '" + value + "'" );
-                }
+                return Collections.singletonList( "contains reserved word '" + reservedWordMatch.get() + "'" );
             }
         }
 

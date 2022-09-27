@@ -21,6 +21,8 @@
 package password.pwm.svc.pwnotify;
 
 import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
+import password.pwm.bean.DomainID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.PwmSetting;
@@ -34,9 +36,9 @@ import password.pwm.health.HealthRecord;
 import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
 import password.pwm.svc.stats.Statistic;
-import password.pwm.svc.stats.StatisticsManager;
+import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.util.PwmScheduler;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.MiscUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
@@ -48,14 +50,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
 
 public class PwNotifyService extends AbstractPwmService implements PwmService
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwNotifyService.class );
 
-    private ExecutorService executorService;
-    private PwmApplication pwmApplication;
+    private PwmDomain pwmDomain;
     private PwNotifyEngine engine;
     private PwNotifySettings settings;
     private Instant nextExecutionTime;
@@ -85,7 +85,7 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
 
     public String debugLog()
     {
-        if ( engine != null && !StringUtil.isEmpty( engine.getDebugLog() ) )
+        if ( engine != null && StringUtil.notEmpty( engine.getDebugLog() ) )
         {
             return engine.getDebugLog();
         }
@@ -99,59 +99,59 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
     }
 
     @Override
-    public void init( final PwmApplication pwmApplication ) throws PwmException
+    public STATUS postAbstractInit( final PwmApplication pwmApplication, final DomainID domainID )
+            throws PwmException
     {
-        this.pwmApplication = pwmApplication;
+        this.pwmDomain = pwmApplication.domains().get( domainID );
 
-        if ( !pwmApplication.getConfig().readSettingAsBoolean( PwmSetting.PW_EXPY_NOTIFY_ENABLE ) )
+        if ( !pwmDomain.getConfig().readSettingAsBoolean( PwmSetting.PW_EXPY_NOTIFY_ENABLE ) )
         {
-            LOGGER.trace( SessionLabel.PWNOTIFY_SESSION_LABEL, () -> "will remain closed, pw notify feature is not enabled" );
-            setStatus( STATUS.CLOSED );
-            return;
+            LOGGER.trace( getSessionLabel(), () -> "will remain closed, pw notify feature is not enabled" );
+            return STATUS.CLOSED;
         }
 
         try
         {
-            if ( pwmApplication.getClusterService() == null || pwmApplication.getClusterService().status() != STATUS.OPEN )
+            if ( pwmApplication.getNodeService() == null || pwmDomain.getPwmApplication().getNodeService().status() != STATUS.OPEN )
             {
                 throw PwmUnrecoverableException.newException( PwmError.ERROR_PWNOTIFY_SERVICE_ERROR, "will remain closed, node service is not running" );
             }
 
-            settings = PwNotifySettings.fromConfiguration( pwmApplication.getConfig() );
-            storageMethod = pwmApplication.getConfig().readSettingAsEnum( PwmSetting.PW_EXPY_NOTIFY_STORAGE_MODE, DataStorageMethod.class );
+            settings = PwNotifySettings.fromConfiguration( pwmDomain.getConfig() );
+            storageMethod = pwmDomain.getConfig().readSettingAsEnum( PwmSetting.PW_EXPY_NOTIFY_STORAGE_MODE, DataStorageMethod.class );
 
             switch ( storageMethod )
             {
                 case LDAP:
                 {
-                    storageService = new PwNotifyLdapStorageService( pwmApplication, settings );
+                    storageService = new PwNotifyLdapStorageService( this, pwmDomain, settings );
                 }
                 break;
 
                 case DB:
                 {
-                    storageService = new PwNotifyDbStorageService( pwmApplication );
+                    storageService = new PwNotifyDbStorageService( pwmDomain );
                 }
                 break;
 
                 default:
-                    JavaHelper.unhandledSwitchStatement( storageMethod );
+                    MiscUtil.unhandledSwitchStatement( storageMethod );
             }
 
-            executorService = PwmScheduler.makeBackgroundExecutor( pwmApplication, this.getClass() );
+            engine = new PwNotifyEngine( this, pwmDomain, storageService, null );
 
-            engine = new PwNotifyEngine( pwmApplication, storageService, () -> status() == STATUS.CLOSED, null );
-
-            pwmApplication.getPwmScheduler().scheduleFixedRateJob( new PwNotifyJob(), executorService, TimeDuration.MINUTE, TimeDuration.MINUTE );
-
-            setStatus( STATUS.OPEN );
+            pwmDomain.getPwmApplication().getPwmScheduler().scheduleFixedRateJob( new PwNotifyJob(), getExecutorService(), TimeDuration.MINUTE, TimeDuration.MINUTE );
         }
         catch ( final PwmUnrecoverableException e )
         {
             setStatus( STATUS.CLOSED );
-            LOGGER.trace( SessionLabel.PWNOTIFY_SESSION_LABEL, () -> "will remain closed, pw notify feature is not enabled due to error: " + e.getMessage() );
+            LOGGER.trace( getSessionLabel(), () -> "will remain closed, pw notify feature is not enabled due to error: " + e.getMessage() );
             setStartupError( e.getErrorInformation() );
+            return STATUS.CLOSED;
+
         }
+
+        return STATUS.OPEN;
     }
 
     public Instant getNextExecutionTime( )
@@ -164,11 +164,11 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
         try
         {
             nextExecutionTime = figureNextJobExecutionTime();
-            LOGGER.debug( SessionLabel.PWNOTIFY_SESSION_LABEL, () -> "scheduled next job execution at " + nextExecutionTime.toString() );
+            LOGGER.debug( getSessionLabel(), () -> "scheduled next job execution at " + nextExecutionTime.toString() );
         }
         catch ( final Exception e )
         {
-            LOGGER.error( SessionLabel.PWNOTIFY_SESSION_LABEL, () -> "error calculating next job execution time: " + e.getMessage() );
+            LOGGER.error( getSessionLabel(), () -> "error calculating next job execution time: " + e.getMessage() );
         }
     }
 
@@ -204,10 +204,9 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
     }
 
     @Override
-    public void close( )
+    public void shutdownImpl( )
     {
         setStatus( STATUS.CLOSED );
-        JavaHelper.closeAndWaitExecutor( executorService, TimeDuration.of( 5, TimeDuration.Unit.SECONDS ) );
     }
 
     @Override
@@ -228,13 +227,13 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
                 final ErrorInformation errorInformation = pwNotifyStoredJobState.getLastError();
                 if ( errorInformation != null )
                 {
-                    returnRecords.add( HealthRecord.forMessage( HealthMessage.PwNotify_Failure, errorInformation.toDebugStr() ) );
+                    returnRecords.add( HealthRecord.forMessage( DomainID.systemId(), HealthMessage.PwNotify_Failure, errorInformation.toDebugStr() ) );
                 }
             }
         }
         catch ( final PwmUnrecoverableException e  )
         {
-            LOGGER.error( SessionLabel.PWNOTIFY_SESSION_LABEL, () -> "error while generating health information: " + e.getMessage() );
+            LOGGER.error( getSessionLabel(), () -> "error while generating health information: " + e.getMessage() );
         }
 
         return Collections.unmodifiableList( returnRecords );
@@ -250,14 +249,14 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
     {
         if ( status() != STATUS.OPEN )
         {
-            LOGGER.trace( SessionLabel.PWNOTIFY_SESSION_LABEL, () -> "ignoring job request start, service is not open" );
+            LOGGER.trace( getSessionLabel(), () -> "ignoring job request start, service is not open" );
             return;
         }
 
         if ( !isRunning() )
         {
             nextExecutionTime = Instant.now();
-            pwmApplication.getPwmScheduler().scheduleJob( new PwNotifyJob(), executorService, TimeDuration.ZERO );
+            pwmDomain.getPwmApplication().getPwmScheduler().scheduleJob( new PwNotifyJob(), getExecutorService(), TimeDuration.ZERO );
         }
     }
 
@@ -296,7 +295,7 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
                 }
                 catch ( final Exception e )
                 {
-                    LOGGER.error( SessionLabel.PWNOTIFY_SESSION_LABEL, () -> "unexpected error running job: " + e.getMessage() );
+                    LOGGER.error( getSessionLabel(), () -> "unexpected error running job: " + e.getMessage() );
                 }
             }
         }
@@ -307,12 +306,12 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
             final Instant start = Instant.now();
             try
             {
-                storageService.writeStoredJobState( new PwNotifyStoredJobState( Instant.now(), null, pwmApplication.getInstanceID(), null, false ) );
-                StatisticsManager.incrementStat( pwmApplication, Statistic.PWNOTIFY_JOBS );
+                storageService.writeStoredJobState( new PwNotifyStoredJobState( Instant.now(), null, pwmDomain.getPwmApplication().getInstanceID(), null, false ) );
+                StatisticsClient.incrementStat( pwmDomain, Statistic.PWNOTIFY_JOBS );
                 engine.executeJob();
 
                 final Instant finish = Instant.now();
-                final PwNotifyStoredJobState pwNotifyStoredJobState = new PwNotifyStoredJobState( start, finish, pwmApplication.getInstanceID(), null, true );
+                final PwNotifyStoredJobState pwNotifyStoredJobState = new PwNotifyStoredJobState( start, finish, pwmDomain.getPwmApplication().getInstanceID(), null, true );
                 storageService.writeStoredJobState( pwNotifyStoredJobState );
             }
             catch ( final Exception e )
@@ -328,7 +327,7 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
                 }
 
                 final Instant finish = Instant.now();
-                final String instanceID = pwmApplication.getInstanceID();
+                final String instanceID = pwmDomain.getPwmApplication().getInstanceID();
                 final PwNotifyStoredJobState pwNotifyStoredJobState = new PwNotifyStoredJobState( start, finish, instanceID, errorInformation, false );
 
                 try
@@ -339,8 +338,8 @@ public class PwNotifyService extends AbstractPwmService implements PwmService
                 {
                     //no hope
                 }
-                StatisticsManager.incrementStat( pwmApplication, Statistic.PWNOTIFY_JOB_ERRORS );
-                LOGGER.debug( SessionLabel.PWNOTIFY_SESSION_LABEL, errorInformation );
+                StatisticsClient.incrementStat( pwmDomain, Statistic.PWNOTIFY_JOB_ERRORS );
+                LOGGER.debug( getSessionLabel(), errorInformation );
                 setStartupError( errorInformation );
             }
         }

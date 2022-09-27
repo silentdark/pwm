@@ -49,7 +49,7 @@ public class EmailServer
     private SmtpServerType type;
 
     private final StatisticCounterBundle<ServerStat> connectionStats = new StatisticCounterBundle<>( ServerStat.class );
-    private final MovingAverage averageSendTime = new MovingAverage( TimeDuration.MINUTE );
+    private final MovingAverage averageSendTime = new MovingAverage( TimeDuration.MINUTE.asDuration() );
     private final AtomicReference<ErrorInformation> lastConnectError = new AtomicReference<>();
 
 
@@ -68,7 +68,7 @@ public class EmailServer
         debugProps.put( "host", host );
         debugProps.put( "type", type.name() );
         debugProps.put( "port", String.valueOf( port ) );
-        if ( !StringUtil.isEmpty( username ) )
+        if ( StringUtil.notEmpty( username ) )
         {
             debugProps.put( "username", username );
         }

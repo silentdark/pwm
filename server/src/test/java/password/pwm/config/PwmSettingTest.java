@@ -20,22 +20,23 @@
 
 package password.pwm.config;
 
+import org.jrivard.xmlchai.AccessMode;
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlDocument;
+import org.jrivard.xmlchai.XmlElement;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import password.pwm.PwmConstants;
-import password.pwm.config.stored.StoredConfigXmlSerializer;
+import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
 import password.pwm.config.value.StoredValue;
 import password.pwm.config.value.StoredValueEncoder;
 import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
-import password.pwm.util.java.XmlDocument;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmSecurityKey;
 
 import java.io.InputStream;
@@ -60,25 +61,29 @@ public class PwmSettingTest
                 .build();
         for ( final PwmSetting pwmSetting : PwmSetting.values() )
         {
+            //System.out.println( pwmSetting.name() + " " + pwmSetting.getKey()  );
             for ( final PwmSettingTemplateSet templateSet : PwmSettingTemplateSet.allValues() )
             {
                 final StoredValue storedValue = pwmSetting.getDefaultValue( templateSet );
                 storedValue.toNativeObject();
                 storedValue.toDebugString( PwmConstants.DEFAULT_LOCALE );
                 storedValue.toDebugJsonObject( PwmConstants.DEFAULT_LOCALE );
-                storedValue.toXmlValues( StoredConfigXmlSerializer.StoredConfigXmlConstants.XML_ELEMENT_VALUE, outputSettings );
+                storedValue.toXmlValues( StoredConfigXmlConstants.XML_ELEMENT_VALUE, outputSettings );
                 storedValue.validateValue( pwmSetting );
                 Assert.assertNotNull( storedValue.valueHash() );
-                JsonUtil.serialize( (Serializable) storedValue.toNativeObject() );
+                if ( storedValue.toNativeObject() != null )
+                {
+                    JsonFactory.get().serialize( ( Serializable ) storedValue.toNativeObject() );
+                }
             }
         }
     }
 
     @Test
-    public void testSettingXmlPresence() throws PwmUnrecoverableException
+    public void testSettingXmlPresence() throws Exception
     {
         final InputStream inputStream = PwmSetting.class.getClassLoader().getResourceAsStream( PwmSettingXml.SETTING_XML_FILENAME );
-        final XmlDocument xmlDoc = XmlFactory.getFactory().parseXml( inputStream );
+        final XmlDocument xmlDoc = XmlChai.getFactory().parse( inputStream, AccessMode.IMMUTABLE );
 
         for ( final PwmSetting pwmSetting : PwmSetting.values() )
         {
@@ -89,10 +94,10 @@ public class PwmSettingTest
     }
 
     @Test
-    public void testSettingXmlDuplication() throws PwmUnrecoverableException
+    public void testSettingXmlDuplication() throws Exception
     {
         final InputStream inputStream = PwmSetting.class.getClassLoader().getResourceAsStream( PwmSettingXml.SETTING_XML_FILENAME );
-        final XmlDocument xmlDoc = XmlFactory.getFactory().parseXml( inputStream );
+        final XmlDocument xmlDoc = XmlChai.getFactory().parse( inputStream, AccessMode.IMMUTABLE );
 
         for ( final PwmSetting pwmSetting : PwmSetting.values() )
         {
@@ -103,16 +108,18 @@ public class PwmSettingTest
     }
 
     @Test
-    public void testUnknownSettingXml() throws PwmUnrecoverableException
+    public void testUnknownSettingXml() throws Exception
     {
         final InputStream inputStream = PwmSetting.class.getClassLoader().getResourceAsStream( PwmSettingXml.SETTING_XML_FILENAME );
-        final XmlDocument xmlDoc = XmlFactory.getFactory().parseXml( inputStream );
+        final XmlDocument xmlDoc = XmlChai.getFactory().parse( inputStream, AccessMode.IMMUTABLE );
 
         final String expression = "/settings/setting";
         final List<XmlElement> results = xmlDoc.evaluateXpathToElements( expression );
         for ( final XmlElement result : results )
         {
-            final String key = result.getAttributeValue( "key" );
+            final String key = result.getAttribute( "key" )
+                    .orElseThrow( () -> new IllegalStateException( "setting element " + result.getName() + " missing key attribute" ) );
+
             Assert.assertFalse( StringUtil.isEmpty( key ) );
             final Optional<PwmSetting> pwmSetting = PwmSetting.forKey( key );
             Assert.assertTrue( "unknown PwmSetting.xml setting reference for key " + key, pwmSetting.isPresent() );
@@ -196,6 +203,7 @@ public class PwmSettingTest
             Assert.assertFalse( seenKeys.contains( pwmSetting.getKey() ) );
             seenKeys.add( pwmSetting.getKey() );
         }
+        Assert.assertEquals( seenKeys.size(), PwmSetting.values().length );
     }
 
     @Test

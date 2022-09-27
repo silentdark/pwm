@@ -20,16 +20,19 @@
 
 package password.pwm.config.value;
 
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlElement;
 import password.pwm.bean.PrivateKeyCertificate;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.stored.StoredConfigXmlSerializer;
+import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.error.PwmInternalException;
+import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.java.StringUtil;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmSecurityKey;
+import password.pwm.util.secure.X509CertInfo;
 import password.pwm.util.secure.X509Utils;
 
 import java.io.Serializable;
@@ -61,26 +64,27 @@ public class PrivateKeyValue extends AbstractValue
             @Override
             public PrivateKeyValue fromXmlElement( final PwmSetting pwmSetting, final XmlElement settingElement, final PwmSecurityKey key )
             {
-                if ( settingElement != null && settingElement.getChild( StoredConfigXmlSerializer.StoredConfigXmlConstants.XML_ELEMENT_VALUE  ).isPresent() )
+                if ( settingElement != null && settingElement.getChild( StoredConfigXmlConstants.XML_ELEMENT_VALUE  ).isPresent() )
                 {
 
-                    final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlSerializer.StoredConfigXmlConstants.XML_ELEMENT_VALUE );
+                    final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlConstants.XML_ELEMENT_VALUE );
                     if ( valueElement.isPresent() )
                     {
                         final List<X509Certificate> certificates = new ArrayList<>();
                         for ( final XmlElement certificateElement : valueElement.get().getChildren( ELEMENT_NAME_CERTIFICATE ) )
                         {
-                            try
+                            certificateElement.getText().ifPresent( ( b64Text ) ->
                             {
-                                final String b64Text = certificateElement.getText();
-                                final X509Certificate cert = X509Utils.certificateFromBase64( b64Text );
-                                certificates.add( cert );
-                            }
-                            catch ( final Exception e )
-                            {
-                                LOGGER.error( () -> "error reading certificate: " + e.getMessage(), e );
-                            }
-
+                                try
+                                {
+                                    final X509Certificate cert = X509Utils.certificateFromBase64( b64Text );
+                                    certificates.add( cert );
+                                }
+                                catch ( final Exception e )
+                                {
+                                    LOGGER.error( () -> "error reading certificate: " + e.getMessage(), e );
+                                }
+                            } );
                         }
 
 
@@ -90,12 +94,18 @@ public class PrivateKeyValue extends AbstractValue
                             final Optional<XmlElement> keyElement = valueElement.get().getChild( ELEMENT_NAME_KEY );
                             if ( keyElement.isPresent() )
                             {
-                                final String encryptedText = keyElement.get().getText();
-                                final Optional<String> decryptedText = StoredValueEncoder.decode( encryptedText, StoredValueEncoder.Mode.CONFIG_PW, key );
-                                if ( decryptedText.isPresent() )
+                                final Optional<String> encryptedText = keyElement.get().getText();
+                                if ( encryptedText.isPresent() )
                                 {
-                                    final byte[] privateKeyBytes = StringUtil.base64Decode( decryptedText.get() );
-                                    privateKey = KeyFactory.getInstance( "RSA" ).generatePrivate( new PKCS8EncodedKeySpec( privateKeyBytes ) );
+                                    final Optional<String> decryptedText = StoredValueEncoder.decode(
+                                            encryptedText.get(),
+                                            StoredValueEncoder.Mode.CONFIG_PW, key );
+
+                                    if ( decryptedText.isPresent() )
+                                    {
+                                        final byte[] privateKeyBytes = StringUtil.base64Decode( decryptedText.get() );
+                                        privateKey = KeyFactory.getInstance( "RSA" ).generatePrivate( new PKCS8EncodedKeySpec( privateKeyBytes ) );
+                                    }
                                 }
                             }
                             else
@@ -110,8 +120,15 @@ public class PrivateKeyValue extends AbstractValue
 
                         if ( !certificates.isEmpty() && privateKey != null )
                         {
-                            final PrivateKeyCertificate privateKeyCertificate = new PrivateKeyCertificate( certificates, privateKey );
-                            return new PrivateKeyValue( privateKeyCertificate );
+                            try
+                            {
+                                final PrivateKeyCertificate privateKeyCertificate = new PrivateKeyCertificate( certificates, privateKey );
+                                return new PrivateKeyValue( privateKeyCertificate );
+                            }
+                            catch ( final PwmUnrecoverableException e )
+                            {
+                                LOGGER.error( () -> "error reading privateKey for setting: '" + pwmSetting.getKey() + "': " + e.getMessage(), e );
+                            }
                         }
                     }
                 }
@@ -158,7 +175,7 @@ public class PrivateKeyValue extends AbstractValue
     @Override
     public List<XmlElement> toXmlValues( final String valueElementName, final XmlOutputProcessData xmlOutputProcessData )
     {
-        final XmlElement valueElement = XmlFactory.getFactory().newElement( StoredConfigXmlSerializer.StoredConfigXmlConstants.XML_ELEMENT_VALUE );
+        final XmlElement valueElement = XmlChai.getFactory().newElement( StoredConfigXmlConstants.XML_ELEMENT_VALUE );
         if ( privateKeyCertificate != null )
         {
             try
@@ -166,26 +183,26 @@ public class PrivateKeyValue extends AbstractValue
                 {
                     for ( final X509Certificate certificate : privateKeyCertificate.getCertificates() )
                     {
-                        final XmlElement certificateElement = XmlFactory.getFactory().newElement( ELEMENT_NAME_CERTIFICATE );
-                        certificateElement.addText( X509Utils.certificateToBase64( certificate ) );
-                        valueElement.addContent( certificateElement );
+                        final XmlElement certificateElement = XmlChai.getFactory().newElement( ELEMENT_NAME_CERTIFICATE );
+                        certificateElement.setText( X509Utils.certificateToBase64( certificate ) );
+                        valueElement.attachElement( certificateElement );
                     }
                 }
                 {
-                    final XmlElement keyElement = XmlFactory.getFactory().newElement( ELEMENT_NAME_KEY );
+                    final XmlElement keyElement = XmlChai.getFactory().newElement( ELEMENT_NAME_KEY );
                     final String b64EncodedKey = privateKeyCertificate.getPrivateKey();
                     final String encryptedKey = StoredValueEncoder.encode(
                             b64EncodedKey,
                             xmlOutputProcessData.getStoredValueEncoderMode(),
                             xmlOutputProcessData.getPwmSecurityKey() );
 
-                    keyElement.addText( encryptedKey );
-                    valueElement.addContent( keyElement );
+                    keyElement.setText( encryptedKey );
+                    valueElement.attachElement( keyElement );
                 }
             }
             catch ( final Exception e )
             {
-                throw new RuntimeException( "missing required AES and SHA1 libraries, or other crypto fault: " + e.getMessage() );
+                throw new PwmInternalException( "missing required AES and SHA1 libraries, or other crypto fault: " + e.getMessage() );
             }
         }
         return Collections.singletonList( valueElement );
@@ -196,8 +213,8 @@ public class PrivateKeyValue extends AbstractValue
     {
         if ( privateKeyCertificate != null )
         {
-            return "PrivateKeyCertificate: key=" + JsonUtil.serializeMap( X509Utils.makeDebugInfoMap( privateKeyCertificate.getKey() ) )
-                    + ", certificates=" + JsonUtil.serializeCollection( X509Utils.makeDebugInfoMap( privateKeyCertificate.getCertificates() ) );
+            return "PrivateKeyCertificate: key=" + JsonFactory.get().serializeMap( X509CertInfo.makeDebugInfoMap( privateKeyCertificate.getKey() ) )
+                    + ", certificates=" + JsonFactory.get().serializeCollection( X509CertInfo.makeDebugInfoMap( privateKeyCertificate.getCertificates() ) );
         }
         return "";
     }
@@ -215,7 +232,7 @@ public class PrivateKeyValue extends AbstractValue
                 }
                 : null;
         final Map<String, Object> returnMap = new LinkedHashMap<>();
-        returnMap.put( "certificates", X509Utils.makeDebugInfoMap( privateKeyCertificate.getCertificates(), flags ) );
+        returnMap.put( "certificates", X509CertInfo.makeDebugInfoMap( privateKeyCertificate.getCertificates(), flags ) );
         final Map<String, Object> privateKeyInfo = new LinkedHashMap<>();
         privateKeyInfo.put( "algorithm", privateKeyCertificate.getKey().getAlgorithm() );
         privateKeyInfo.put( "format", privateKeyCertificate.getKey().getFormat() );

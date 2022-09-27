@@ -25,7 +25,7 @@ import org.apache.commons.net.ftp.FTPFile;
 import org.apache.commons.net.ftp.FTPSClient;
 import password.pwm.PwmConstants;
 import password.pwm.bean.TelemetryPublishBean;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StringUtil;
 
 import java.io.ByteArrayInputStream;
@@ -126,7 +126,7 @@ class FtpDataIngestor
                     byteArrayOutputStream.write( buffer, 0, len );
                 }
                 final String resultsStr = byteArrayOutputStream.toString( PwmConstants.DEFAULT_CHARSET.name() );
-                final TelemetryPublishBean bean = JsonUtil.deserialize( resultsStr, TelemetryPublishBean.class );
+                final TelemetryPublishBean bean = JsonFactory.get().deserialize( resultsStr, TelemetryPublishBean.class );
                 storage.store( bean );
             }
         }
@@ -142,7 +142,7 @@ class FtpDataIngestor
     {
         final String pathname = settings.getSetting( Settings.Setting.ftpReadPath );
         final FTPFile[] files = ftpClient.listFiles( pathname );
-        final List<String> returnFiles = new ArrayList<>();
+        final List<String> returnFiles = new ArrayList<>( files.length );
         for ( final FTPFile ftpFile : files )
         {
             final String name = ftpFile.getName();
@@ -173,7 +173,7 @@ class FtpDataIngestor
 
         ftpClient.connect( settings.getSetting( Settings.Setting.ftpSite ) );
         LOGGER.info( "ftp connect complete" );
-        if ( !StringUtil.isEmpty( settings.getSetting( Settings.Setting.ftpUser ) ) && !StringUtil.isEmpty( settings.getSetting( Settings.Setting.ftpPassword ) ) )
+        if ( StringUtil.notEmpty( settings.getSetting( Settings.Setting.ftpUser ) ) && StringUtil.notEmpty( settings.getSetting( Settings.Setting.ftpPassword ) ) )
         {
             final boolean loggedInSuccess = ftpClient.login( settings.getSetting( Settings.Setting.ftpUser ), settings.getSetting( Settings.Setting.ftpPassword ) );
             LOGGER.info( "ftp login complete, success=" + loggedInSuccess );

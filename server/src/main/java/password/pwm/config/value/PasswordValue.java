@@ -21,19 +21,20 @@
 package password.pwm.config.value;
 
 
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlElement;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.stored.StoredConfigXmlSerializer;
+import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
+import password.pwm.error.PwmInternalException;
 import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.PasswordData;
-import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.LazySupplier;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmSecurityKey;
 
 import java.io.Serializable;
@@ -67,7 +68,7 @@ public class PasswordValue implements StoredValue
             @Override
             public PasswordValue fromJson( final String value )
             {
-                final String strValue = JsonUtil.deserialize( value, String.class );
+                final String strValue = JsonFactory.get().deserialize( value, String.class );
                 if ( strValue != null && !strValue.isEmpty() )
                 {
                     try
@@ -91,32 +92,29 @@ public class PasswordValue implements StoredValue
             )
                     throws PwmOperationalException, PwmUnrecoverableException
             {
-                final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlSerializer.StoredConfigXmlConstants.XML_ELEMENT_VALUE );
+                final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlConstants.XML_ELEMENT_VALUE );
                 if ( valueElement.isPresent() )
                 {
-                    final String rawValue = valueElement.get().getText();
+                    final Optional<String> rawValue = valueElement.get().getText();
 
-                    final PasswordValue newPasswordValue = new PasswordValue();
-                    if ( rawValue == null || rawValue.isEmpty() )
+                    if ( rawValue.isEmpty() )
                     {
-                        return newPasswordValue;
+                        return new PasswordValue();
                     }
 
-                    final boolean plainTextSetting;
-                    {
-                        final String plainTextAttributeStr = valueElement.get().getAttributeValue( "plaintext" );
-                        plainTextSetting = plainTextAttributeStr != null && Boolean.parseBoolean( plainTextAttributeStr );
-                    }
+                    final boolean plainTextSetting = valueElement.get().getAttribute( "plaintext" )
+                            .map( Boolean::parseBoolean )
+                            .orElse( false );
 
                     if ( plainTextSetting )
                     {
-                        return new PasswordValue( new PasswordData( rawValue ) );
+                        return new PasswordValue( new PasswordData( rawValue.get() ) );
                     }
                     else
                     {
                         try
                         {
-                            final Optional<String> encodedValue = StoredValueEncoder.decode( rawValue, StoredValueEncoder.Mode.CONFIG_PW, key );
+                            final Optional<String> encodedValue = StoredValueEncoder.decode( rawValue.get(), StoredValueEncoder.Mode.CONFIG_PW, key );
                             if ( encodedValue.isPresent() )
                             {
                                 return new PasswordValue( new PasswordData( encodedValue.get() ) );
@@ -162,10 +160,10 @@ public class PasswordValue implements StoredValue
     {
         if ( value == null )
         {
-            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
             return Collections.singletonList( valueElement );
         }
-        final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
+        final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
         try
         {
             final String encodedValue = StoredValueEncoder.encode(
@@ -173,11 +171,11 @@ public class PasswordValue implements StoredValue
                     xmlOutputProcessData.getStoredValueEncoderMode(),
                     xmlOutputProcessData.getPwmSecurityKey() );
 
-            valueElement.addText( encodedValue );
+            valueElement.setText( encodedValue );
         }
         catch ( final Exception e )
         {
-            throw new RuntimeException( "missing required AES and SHA1 libraries, or other crypto fault: " + e.getMessage() );
+            throw new PwmInternalException( "missing required AES and SHA1 libraries, or other crypto fault: " + e.getMessage() );
         }
         return Collections.singletonList( valueElement );
     }

@@ -22,7 +22,6 @@ package password.pwm.util.password;
 
 import com.novell.ldapchai.ChaiPasswordRule;
 import com.novell.ldapchai.util.DefaultChaiPasswordPolicy;
-import com.novell.ldapchai.util.StringHelper;
 import password.pwm.config.option.ADPolicyComplexity;
 import password.pwm.config.profile.PwmPasswordPolicy;
 import password.pwm.config.profile.PwmPasswordRule;
@@ -71,7 +70,7 @@ public class PasswordRuleReaderHelper
         else
         {
             // Strip off any thresholds from attribute (specified as: "attributeName:N", where N is a numeric value).
-            final List<String> strippedDisallowedAttributes = new ArrayList<String>();
+            final List<String> strippedDisallowedAttributes = new ArrayList<>();
 
             if ( disallowedAttributes != null )
             {
@@ -124,8 +123,8 @@ public class PasswordRuleReaderHelper
         }
 
         final String value = passwordPolicy.getPolicyMap().get( rule.getKey() );
-        final int defaultValue = StringHelper.convertStrToInt( rule.getDefaultValue(), 0 );
-        return StringHelper.convertStrToInt( value, defaultValue );
+        final int defaultValue = StringUtil.convertStrToInt( rule.getDefaultValue(), 0 );
+        return StringUtil.convertStrToInt( value, defaultValue );
     }
 
     public boolean readBooleanValue( final PwmPasswordRule rule )
@@ -136,7 +135,7 @@ public class PasswordRuleReaderHelper
         }
 
         final String value = passwordPolicy.getPolicyMap().get( rule.getKey() );
-        return StringHelper.convertStrToBoolean( value );
+        return StringUtil.convertStrToBoolean( value );
     }
 
     private List<Pattern> readRegExSetting( final PwmPasswordRule rule, final MacroRequest macroRequest )
@@ -154,12 +153,12 @@ public class PasswordRuleReaderHelper
         }
 
         final String separator = ( rule == PwmPasswordRule.RegExMatch || rule == PwmPasswordRule.RegExNoMatch ) ? ";;;" : "\n";
-        final List<String> values = new ArrayList<>( StringHelper.tokenizeString( input, separator ) );
+        final List<String> values = new ArrayList<>( StringUtil.tokenizeString( input, separator ) );
         final List<Pattern> patterns = new ArrayList<>();
 
         for ( final String value : values )
         {
-            if ( !StringUtil.isEmpty( value ) )
+            if ( StringUtil.notEmpty( value ) )
             {
                 String valueToCompile = value;
 
@@ -183,12 +182,6 @@ public class PasswordRuleReaderHelper
         }
 
         return patterns;
-    }
-
-    public String getChangeMessage( )
-    {
-        final String changeMessage = passwordPolicy.getValue( PwmPasswordRule.ChangeMessage );
-        return changeMessage == null ? "" : changeMessage;
     }
 
     public ADPolicyComplexity getADComplexityLevel( )

@@ -20,8 +20,7 @@
 
 package password.pwm.svc.telemetry;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
+import lombok.Value;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPReply;
@@ -33,8 +32,9 @@ import password.pwm.bean.TelemetryPublishBean;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.java.MiscUtil;
+import password.pwm.util.json.JsonProvider;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
@@ -50,12 +50,14 @@ public class FtpTelemetrySender implements TelemetrySender
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( FtpTelemetrySender.class );
 
+    private SessionLabel sessionLabel;
     private Settings settings;
 
     @Override
-    public void init( final PwmApplication pwmApplication, final String initString )
+    public void init( final PwmApplication pwmApplication, final SessionLabel sessionLabel, final String initString )
     {
-        settings = JsonUtil.deserialize( initString, Settings.class );
+        this.sessionLabel = sessionLabel;
+        settings = JsonFactory.get().deserialize( initString, Settings.class );
     }
 
     @Override
@@ -78,7 +80,7 @@ public class FtpTelemetrySender implements TelemetrySender
                 break;
 
             default:
-                JavaHelper.unhandledSwitchStatement( settings.getFtpMode() );
+                MiscUtil.unhandledSwitchStatement( settings.getFtpMode() );
                 throw new UnsupportedOperationException();
         }
 
@@ -86,7 +88,7 @@ public class FtpTelemetrySender implements TelemetrySender
         // connect
         try
         {
-            LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "establishing " + settings.getFtpMode() + " connection to " + settings.getHost() );
+            LOGGER.trace( sessionLabel, () -> "establishing " + settings.getFtpMode() + " connection to " + settings.getHost() );
             ftpClient.connect( settings.getHost() );
 
             final int reply = ftpClient.getReplyCode();
@@ -97,7 +99,7 @@ public class FtpTelemetrySender implements TelemetrySender
                 throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_TELEMETRY_SEND_ERROR, msg ) );
             }
 
-            LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "connected to " + settings.getHost() );
+            LOGGER.trace( sessionLabel, () -> "connected to " + settings.getHost() );
         }
         catch ( final IOException e )
         {
@@ -140,7 +142,7 @@ public class FtpTelemetrySender implements TelemetrySender
                 throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_TELEMETRY_SEND_ERROR, msg ) );
             }
 
-            LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "authenticated to " + settings.getHost() + " as " + settings.getUsername() );
+            LOGGER.trace( sessionLabel, () -> "authenticated to " + settings.getHost() + " as " + settings.getUsername() );
         }
         catch ( final IOException e )
         {
@@ -157,7 +159,7 @@ public class FtpTelemetrySender implements TelemetrySender
             final byte[] fileBytes = dataToJsonZipFile( telemetryPublishBean );
             final ByteArrayInputStream fileStream = new ByteArrayInputStream( fileBytes );
 
-            LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "preparing to transfer " + fileBytes.length + " bytes to file path " + filePath );
+            LOGGER.trace( sessionLabel, () -> "preparing to transfer " + fileBytes.length + " bytes to file path " + filePath );
 
             final Instant startTime = Instant.now();
             ftpClient.storeFile( filePath, fileStream );
@@ -170,7 +172,7 @@ public class FtpTelemetrySender implements TelemetrySender
                 throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_TELEMETRY_SEND_ERROR, msg ) );
             }
 
-            LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "completed transfer of " + fileBytes.length + " in ", () -> TimeDuration.fromCurrent( startTime ) );
+            LOGGER.trace( sessionLabel, () -> "completed transfer of " + fileBytes.length + " in ", () -> TimeDuration.fromCurrent( startTime ) );
         }
         catch ( final IOException e )
         {
@@ -187,17 +189,16 @@ public class FtpTelemetrySender implements TelemetrySender
             try
             {
                 ftpClient.disconnect();
-                LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "disconnected" );
+                LOGGER.trace( sessionLabel, () -> "disconnected" );
             }
             catch ( final IOException e )
             {
-                LOGGER.trace( SessionLabel.TELEMETRY_SESSION_LABEL, () -> "error while disconnecting ftp client: " + e.getMessage() );
+                LOGGER.trace( sessionLabel, () -> "error while disconnecting ftp client: " + e.getMessage() );
             }
         }
     }
 
-    @Getter
-    @AllArgsConstructor
+    @Value
     private static class Settings implements Serializable
     {
         private FtpMode ftpMode;
@@ -215,7 +216,7 @@ public class FtpTelemetrySender implements TelemetrySender
 
     private static byte[] dataToJsonZipFile( final TelemetryPublishBean telemetryPublishBean ) throws IOException
     {
-        final String jsonData = JsonUtil.serialize( telemetryPublishBean, JsonUtil.Flag.PrettyPrint );
+        final String jsonData = JsonFactory.get().serialize( telemetryPublishBean, JsonProvider.Flag.PrettyPrint );
         final ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         final ZipOutputStream zipOutputStream = new ZipOutputStream( byteArrayOutputStream );
         final ZipEntry e = new ZipEntry( telemetryPublishBean.getId() + ".json" );

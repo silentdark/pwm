@@ -20,41 +20,63 @@
 
 package password.pwm.config.value;
 
-import com.google.gson.reflect.TypeToken;
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlElement;
+import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
+import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
 import password.pwm.config.value.data.ChallengeItemConfiguration;
+import password.pwm.util.i18n.LocaleComparators;
 import password.pwm.util.i18n.LocaleHelper;
-import password.pwm.util.java.JsonUtil;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.java.CollectionUtil;
+import password.pwm.util.java.StringUtil;
+import password.pwm.util.json.JsonFactory;
+import password.pwm.util.json.JsonProvider;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmSecurityKey;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.SortedMap;
 import java.util.TreeMap;
 
 public class ChallengeValue extends AbstractValue implements StoredValue
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( ChallengeValue.class );
 
+    private static final Comparator<String> COMPARATOR = LocaleComparators.stringLocaleComparator( PwmConstants.DEFAULT_LOCALE, LocaleComparators.Flag.DefaultFirst );
+
     //locale str as key.
     private final Map<String, List<ChallengeItemConfiguration>> values;
 
     ChallengeValue( final Map<String, List<ChallengeItemConfiguration>> values )
     {
-        this.values = values == null ? Collections.emptyMap() : Collections.unmodifiableMap( values );
+        if ( CollectionUtil.isEmpty( values ) )
+        {
+            this.values = Collections.emptyMap();
+        }
+        else
+        {
+            final SortedMap<String, List<ChallengeItemConfiguration>> tempMap = new TreeMap<>( COMPARATOR );
+            for ( final Map.Entry<String, List<ChallengeItemConfiguration>> entry : CollectionUtil.stripNulls( values ).entrySet() )
+            {
+                tempMap.put( entry.getKey(), List.copyOf( entry.getValue() ) );
+            }
+            this.values = Collections.unmodifiableMap( tempMap );
+        }
     }
 
     public static StoredValueFactory factory( )
     {
         return new StoredValueFactory()
         {
-
             @Override
             public ChallengeValue fromJson( final String input )
             {
@@ -64,14 +86,28 @@ public class ChallengeValue extends AbstractValue implements StoredValue
                 }
                 else
                 {
-                    Map<String, List<ChallengeItemConfiguration>> srcMap = JsonUtil.deserialize( input,
-                            new TypeToken<Map<String, List<ChallengeItemConfiguration>>>()
+                    final JsonProvider jsonProvider = JsonFactory.get();
+                    final Map<String, List<ChallengeItemConfiguration>> returnValues = new HashMap<>();
+
+                    final Map<String, List> deserializeMap = jsonProvider.deserializeMap( input, String.class, List.class );
+                    for ( final Map.Entry<String, List> entry : deserializeMap.entrySet() )
+                    {
+                        if ( entry.getKey() != null && entry.getValue() != null )
+                        {
+                            final List<ChallengeItemConfiguration> newArrayList = new ArrayList<>();
+                            for ( final Object value : entry.getValue() )
                             {
+                                if ( value != null )
+                                {
+                                    final String jsonValue = jsonProvider.serialize( value );
+                                    final ChallengeItemConfiguration challengeItemConfiguration = jsonProvider.deserialize( jsonValue, ChallengeItemConfiguration.class );
+                                    newArrayList.add( challengeItemConfiguration );
+                                }
                             }
-                    );
-                    srcMap = srcMap == null ? Collections.emptyMap() : new TreeMap<>(
-                            srcMap );
-                    return new ChallengeValue( Collections.unmodifiableMap( srcMap ) );
+                            returnValues.put( entry.getKey(), List.copyOf( newArrayList ) );
+                        }
+                    }
+                    return new ChallengeValue( Collections.unmodifiableMap( returnValues ) );
                 }
             }
 
@@ -82,31 +118,30 @@ public class ChallengeValue extends AbstractValue implements StoredValue
                     final PwmSecurityKey input
             )
             {
-                final List<XmlElement> valueElements = settingElement.getChildren( "value" );
+                final List<XmlElement> valueElements = settingElement.getChildren( StoredConfigXmlConstants.XML_ELEMENT_VALUE );
                 final Map<String, List<ChallengeItemConfiguration>> values = new TreeMap<>();
-                final boolean oldStyle = "LOCALIZED_STRING_ARRAY".equals( settingElement.getAttributeValue( "syntax" ) );
+                final boolean oldStyle = "LOCALIZED_STRING_ARRAY".equals( settingElement.getAttribute( StoredConfigXmlConstants.XML_ATTRIBUTE_SYNTAX ).orElse( "" ) );
                 for ( final XmlElement loopValueElement : valueElements )
                 {
-                    final String localeString = loopValueElement.getAttributeValue(
-                            "locale" ) == null ? "" : loopValueElement.getAttributeValue( "locale" );
-                    final String value = loopValueElement.getText();
-                    if ( !values.containsKey( localeString ) )
+                    final String localeString = loopValueElement.getAttribute( "locale" ).orElse( "" );
+                    loopValueElement.getText().ifPresent( value ->
                     {
-                        values.put( localeString, new ArrayList<ChallengeItemConfiguration>() );
-                    }
-                    final ChallengeItemConfiguration challengeItemBean;
-                    if ( oldStyle )
-                    {
-                        challengeItemBean = parseOldVersionString( value );
-                    }
-                    else
-                    {
-                        challengeItemBean = JsonUtil.deserialize( value, ChallengeItemConfiguration.class );
-                    }
-                    if ( challengeItemBean != null )
-                    {
-                        values.get( localeString ).add( challengeItemBean );
-                    }
+                        final ChallengeItemConfiguration challengeItemBean;
+                        if ( oldStyle )
+                        {
+                            challengeItemBean = parseOldVersionString( value ).orElse( null );
+                        }
+                        else
+                        {
+                            challengeItemBean = JsonFactory.get().deserialize( value, ChallengeItemConfiguration.class );
+                        }
+                        if ( challengeItemBean != null )
+                        {
+                            values.computeIfAbsent( localeString, ( s ) -> new ArrayList<>() )
+                                    .add( challengeItemBean );
+                        }
+                    } );
+
                 }
                 return new ChallengeValue( values );
             }
@@ -124,8 +159,8 @@ public class ChallengeValue extends AbstractValue implements StoredValue
             {
                 if ( value != null )
                 {
-                    final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
-                    valueElement.addText( JsonUtil.serialize( value ) );
+                    final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+                    valueElement.setText( JsonFactory.get().serialize( value ) );
                     if ( locale != null && locale.length() > 0 )
                     {
                         valueElement.setAttribute( "locale", locale );
@@ -140,7 +175,7 @@ public class ChallengeValue extends AbstractValue implements StoredValue
     @Override
     public Map<String, List<ChallengeItemConfiguration>> toNativeObject( )
     {
-        return Collections.unmodifiableMap( values );
+        return values;
     }
 
     @Override
@@ -188,13 +223,13 @@ public class ChallengeValue extends AbstractValue implements StoredValue
         return Collections.emptyList();
     }
 
-    private static ChallengeItemConfiguration parseOldVersionString(
+    private static Optional<ChallengeItemConfiguration> parseOldVersionString(
             final String inputString
     )
     {
-        if ( inputString == null || inputString.length() < 1 )
+        if ( StringUtil.isEmpty( inputString ) )
         {
-            return null;
+            return Optional.empty();
         }
 
         int minLength = 2;
@@ -236,12 +271,12 @@ public class ChallengeValue extends AbstractValue implements StoredValue
             adminDefined = false;
         }
 
-        return ChallengeItemConfiguration.builder()
+        return Optional.of( ChallengeItemConfiguration.builder()
                 .text( challengeText )
                 .minLength( minLength )
                 .maxLength( maxLength )
                 .adminDefined( adminDefined )
-                .build();
+                .build() );
     }
 
     @Override
@@ -256,7 +291,7 @@ public class ChallengeValue extends AbstractValue implements StoredValue
         {
             final String localeKey = entry.getKey();
             final List<ChallengeItemConfiguration> challengeItems = entry.getValue();
-            sb.append( "Locale: " ).append( LocaleHelper.debugLabel( LocaleHelper.parseLocaleString( localeKey ) ) ).append( "\n" );
+            sb.append( "Locale: " ).append( LocaleHelper.debugLabel( LocaleHelper.parseLocaleString( localeKey ) ) ).append( '\n' );
             for ( final ChallengeItemConfiguration challengeItemBean : challengeItems )
             {
                 sb.append( " ChallengeItem: [AdminDefined: " ).append( challengeItemBean.isAdminDefined() );
@@ -265,7 +300,7 @@ public class ChallengeValue extends AbstractValue implements StoredValue
                 sb.append( " MaxQuestionCharsInAnswer:" ).append( challengeItemBean.getMaxQuestionCharsInAnswer() );
                 sb.append( " EnforceWordlist:" ).append( challengeItemBean.isEnforceWordlist() );
                 sb.append( "]\n" );
-                sb.append( "  Text:" ).append( challengeItemBean.getText() ).append( "\n" );
+                sb.append( "  Text:" ).append( challengeItemBean.getText() ).append( '\n' );
             }
         }
         return sb.toString();

@@ -30,9 +30,10 @@
 <%@ page import="password.pwm.svc.token.TokenPayload" %>
 <%@ page import="password.pwm.util.java.JavaHelper" %>
 <%@ page import="java.util.Iterator" %>
-<%@ page import="password.pwm.util.java.JsonUtil" %>
+<%@ page import="password.pwm.util.json.JsonFactory" %>
 <%@ page import="password.pwm.util.java.StringUtil" %>
 <%@ page import="password.pwm.bean.TokenDestinationItem" %>
+<%@ page import="password.pwm.util.java.MiscUtil" %>
 
 <!DOCTYPE html>
 <%@ page language="java" session="true" isThreadSafe="true"
@@ -68,7 +69,7 @@
             {
                 try
                 {
-                    tokenPayload = tokenlookup_pwmRequest.getPwmApplication().getTokenService().retrieveTokenData(tokenlookup_pwmRequest.getLabel(), tokenKey);
+                    tokenPayload = tokenlookup_pwmRequest.getPwmDomain().getTokenService().retrieveTokenData(tokenlookup_pwmRequest.getLabel(), tokenKey);
                 } catch ( PwmOperationalException e )
                 {
                     tokenExpired = e.getError() == PwmError.ERROR_TOKEN_EXPIRED;
@@ -111,7 +112,7 @@
                     Issue Date
                 </td>
                 <td>
-                    <span class="timestamp"><%= JavaHelper.toIsoDate(tokenPayload.getIssueTime()) %></span>
+                    <span class="timestamp"><%= StringUtil.toIsoDate(tokenPayload.getIssueTime()) %></span>
                 </td>
             </tr>
             <tr>
@@ -119,7 +120,7 @@
                     Expiration Date
                 </td>
                 <td>
-                    <span class="timestamp"><%= JavaHelper.toIsoDate(tokenPayload.getExpiration()) %></span>
+                    <span class="timestamp"><%= StringUtil.toIsoDate(tokenPayload.getExpiration()) %></span>
                 </td>
             </tr>
             <tr>

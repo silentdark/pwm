@@ -27,11 +27,12 @@ import com.novell.ldapchai.exception.ChaiUnavailableException;
 import com.novell.ldapchai.provider.ChaiProvider;
 import com.novell.ldapchai.provider.SearchScope;
 import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
 import password.pwm.bean.PasswordStatus;
 import password.pwm.bean.ResponseInfoBean;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
-import password.pwm.config.Configuration;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.option.ADPolicyComplexity;
 import password.pwm.config.option.ForceSetupPolicy;
@@ -50,23 +51,24 @@ import password.pwm.error.PwmDataValidationException;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.svc.PwmService;
+import password.pwm.svc.cr.CrService;
+import password.pwm.svc.otp.OTPUserRecord;
+import password.pwm.svc.otp.OtpService;
 import password.pwm.svc.pwnotify.PwNotifyUserStatus;
 import password.pwm.util.PasswordData;
 import password.pwm.util.form.FormUtility;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.CachingProxyWrapper;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.operations.CrService;
-import password.pwm.util.operations.OtpService;
-import password.pwm.util.operations.otp.OTPUserRecord;
 import password.pwm.util.password.PasswordUtility;
 import password.pwm.util.password.PwmPasswordRuleValidator;
 
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -86,7 +88,7 @@ public class UserInfoReader implements UserInfo
 
     private final ChaiUser chaiUser;
     private final SessionLabel sessionLabel;
-    private final PwmApplication pwmApplication;
+    private final PwmDomain pwmDomain;
 
     /**
      * A reference to this object, but with memorized (cached) method implementations.  In most cases references to 'this'
@@ -106,7 +108,7 @@ public class UserInfoReader implements UserInfo
     {
         this.userIdentity = userIdentity;
         this.currentPassword = currentPassword;
-        this.pwmApplication = pwmApplication;
+        this.pwmDomain = pwmApplication.domains().get( userIdentity.getDomainID() );
         this.locale = locale;
         this.sessionLabel = sessionLabel;
 
@@ -124,7 +126,8 @@ public class UserInfoReader implements UserInfo
     )
             throws ChaiUnavailableException, PwmUnrecoverableException
     {
-        LdapOperationsHelper.addConfiguredUserObjectClass( sessionLabel, userIdentity, pwmApplication );
+        final PwmDomain pwmDomain = pwmApplication.domains().get( userIdentity.getDomainID() );
+        LdapOperationsHelper.addConfiguredUserObjectClass( sessionLabel, userIdentity, pwmDomain );
 
         final UserInfoReader userInfo = new UserInfoReader( userIdentity, currentPassword, sessionLabel, locale, pwmApplication, chaiProvider );
         final UserInfo selfCachedReference = CachingProxyWrapper.create( UserInfo.class, userInfo );
@@ -143,7 +146,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public Map<String, String> getCachedAttributeValues( ) throws PwmUnrecoverableException
     {
-        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmApplication.getConfig() );
+        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmDomain.getPwmApplication().getConfig() );
         final List<String> cachedAttributeNames = ldapProfile.readSettingAsStringArray( PwmSetting.CACHED_USER_ATTRIBUTES );
         if ( cachedAttributeNames != null && !cachedAttributeNames.isEmpty() )
         {
@@ -175,7 +178,7 @@ public class UserInfoReader implements UserInfo
     public ChallengeProfile getChallengeProfile( ) throws PwmUnrecoverableException
     {
         final PwmPasswordPolicy pwmPasswordPolicy = selfCachedReference.getPasswordPolicy();
-        final CrService crService = pwmApplication.getCrService();
+        final CrService crService = pwmDomain.getCrService();
         return crService.readUserChallengeProfile(
                 sessionLabel,
                 getUserIdentity(),
@@ -188,7 +191,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public PwmPasswordPolicy getPasswordPolicy( ) throws PwmUnrecoverableException
     {
-        return PasswordUtility.readPasswordPolicyForUser( pwmApplication, sessionLabel, getUserIdentity(), chaiUser, locale );
+        return PasswordUtility.readPasswordPolicyForUser( pwmDomain, sessionLabel, getUserIdentity(), chaiUser );
     }
 
     @Override
@@ -206,7 +209,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public String getUsername( ) throws PwmUnrecoverableException
     {
-        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmApplication.getConfig() );
+        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmDomain.getPwmApplication().getConfig() );
         final String uIDattr = ldapProfile.getUsernameAttribute();
         return readStringAttribute( uIDattr );
     }
@@ -228,7 +231,7 @@ public class UserInfoReader implements UserInfo
             {
                 try
                 {
-                    final PwmPasswordRuleValidator passwordRuleValidator = new PwmPasswordRuleValidator( pwmApplication, passwordPolicy );
+                    final PwmPasswordRuleValidator passwordRuleValidator = PwmPasswordRuleValidator.create( sessionLabel, pwmDomain, passwordPolicy );
                     passwordRuleValidator.testPassword( currentPassword, null, selfCachedReference, chaiUser );
                 }
                 catch ( final PwmDataValidationException | PwmUnrecoverableException e )
@@ -274,7 +277,7 @@ public class UserInfoReader implements UserInfo
         {
             final TimeDuration expirationInterval = TimeDuration.fromCurrent( ldapPasswordExpirationTime );
             LOGGER.trace( sessionLabel, () -> "read password expiration time: "
-                    + JavaHelper.toIsoDate( ldapPasswordExpirationTime )
+                    + StringUtil.toIsoDate( ldapPasswordExpirationTime )
                     + ", " + expirationInterval.asCompactString() + " from now"
             );
             final TimeDuration diff = TimeDuration.fromCurrent( ldapPasswordExpirationTime );
@@ -406,14 +409,14 @@ public class UserInfoReader implements UserInfo
     @Override
     public boolean isRequiresResponseConfig( ) throws PwmUnrecoverableException
     {
-        final CrService crService = pwmApplication.getCrService();
+        final CrService crService = pwmDomain.getCrService();
         try
         {
             return crService.checkIfResponseConfigNeeded(
-                    pwmApplication,
+                    pwmDomain,
                     sessionLabel,
                     getUserIdentity(),
-                    selfCachedReference.getChallengeProfile().getChallengeSet(),
+                    selfCachedReference.getChallengeProfile().getChallengeSet().orElse( null ),
                     selfCachedReference.getResponseInfoBean() );
         }
         catch ( final ChaiUnavailableException e )
@@ -431,7 +434,7 @@ public class UserInfoReader implements UserInfo
         final Map<ProfileDefinition, String> profileIDs = selfCachedReference.getProfileIDs();
         if ( profileIDs.containsKey( ProfileDefinition.UpdateAttributes ) )
         {
-            setupOtpProfile = pwmApplication.getConfig().getSetupOTPProfiles().get( profileIDs.get( ProfileDefinition.SetupOTPProfile ) );
+            setupOtpProfile = pwmDomain.getConfig().getSetupOTPProfiles().get( profileIDs.get( ProfileDefinition.SetupOTPProfile ) );
         }
 
         if ( setupOtpProfile == null )
@@ -440,7 +443,7 @@ public class UserInfoReader implements UserInfo
             return false;
         }
 
-        if ( !setupOtpProfile.readSettingAsBoolean( PwmSetting.OTP_ALLOW_SETUP ) )
+        if ( !pwmDomain.getConfig().readSettingAsBoolean( PwmSetting.OTP_ALLOW_SETUP ) )
         {
             LOGGER.trace( sessionLabel, () -> "checkOtp: OTP allow setup is not enabled" );
             return false;
@@ -471,9 +474,9 @@ public class UserInfoReader implements UserInfo
     @Override
     public boolean isRequiresUpdateProfile( ) throws PwmUnrecoverableException
     {
-        final Configuration configuration = pwmApplication.getConfig();
+        final DomainConfig domainConfig = pwmDomain.getConfig();
 
-        if ( !pwmApplication.getConfig().readSettingAsBoolean( PwmSetting.UPDATE_PROFILE_ENABLE ) )
+        if ( !pwmDomain.getConfig().readSettingAsBoolean( PwmSetting.UPDATE_PROFILE_ENABLE ) )
         {
             LOGGER.debug( sessionLabel, () -> "checkProfiles: " + userIdentity.toString() + " profile module is not enabled" );
             return false;
@@ -483,7 +486,7 @@ public class UserInfoReader implements UserInfo
         final Map<ProfileDefinition, String> profileIDs = selfCachedReference.getProfileIDs();
         if ( profileIDs.containsKey( ProfileDefinition.UpdateAttributes ) )
         {
-            updateProfileProfile = configuration.getUpdateAttributesProfile().get( profileIDs.get( ProfileDefinition.UpdateAttributes ) );
+            updateProfileProfile = domainConfig.getUpdateAttributesProfile().get( profileIDs.get( ProfileDefinition.UpdateAttributes ) );
         }
 
         if ( updateProfileProfile == null )
@@ -510,7 +513,7 @@ public class UserInfoReader implements UserInfo
                     FormUtility.Flag.ReturnEmptyValues
             );
             final Map<FormConfiguration, String> singleValueMap = FormUtility.multiValueMapToSingleValue( valueMap );
-            FormUtility.validateFormValues( configuration, singleValueMap, locale );
+            FormUtility.validateFormValues( domainConfig, singleValueMap, locale );
             LOGGER.debug( sessionLabel, () -> "checkProfile: " + userIdentity + " has value for attributes, update profile will not be required" );
             return false;
         }
@@ -521,7 +524,7 @@ public class UserInfoReader implements UserInfo
         }
         catch ( final PwmUnrecoverableException e )
         {
-            e.printStackTrace();
+            LOGGER.debug( sessionLabel, () -> "unexpected error checking user attribute profile status: " + e.getMessage() );
         }
 
         return false;
@@ -532,7 +535,7 @@ public class UserInfoReader implements UserInfo
     {
         try
         {
-            return PasswordUtility.determinePwdLastModified( pwmApplication, sessionLabel, userIdentity );
+            return PasswordUtility.determinePwdLastModified( pwmDomain, sessionLabel, userIdentity );
         }
         catch ( final ChaiUnavailableException e )
         {
@@ -543,7 +546,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public String getUserEmailAddress( ) throws PwmUnrecoverableException
     {
-        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmApplication.getConfig() );
+        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmDomain.getConfig().getAppConfig() );
         final String ldapEmailAttribute = ldapProfile.readSettingAsString( PwmSetting.EMAIL_USER_MAIL_ATTRIBUTE );
         return readStringAttribute( ldapEmailAttribute );
     }
@@ -551,7 +554,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public String getUserEmailAddress2( ) throws PwmUnrecoverableException
     {
-        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmApplication.getConfig() );
+        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmDomain.getConfig().getAppConfig() );
         final String ldapEmailAttribute = ldapProfile.readSettingAsString( PwmSetting.EMAIL_USER_MAIL_ATTRIBUTE_2 );
         return readStringAttribute( ldapEmailAttribute );
     }
@@ -559,7 +562,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public String getUserEmailAddress3( ) throws PwmUnrecoverableException
     {
-        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmApplication.getConfig() );
+        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmDomain.getConfig().getAppConfig() );
         final String ldapEmailAttribute = ldapProfile.readSettingAsString( PwmSetting.EMAIL_USER_MAIL_ATTRIBUTE_3 );
         return readStringAttribute( ldapEmailAttribute );
     }
@@ -567,7 +570,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public String getUserSmsNumber( ) throws PwmUnrecoverableException
     {
-        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmApplication.getConfig() );
+        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmDomain.getConfig().getAppConfig() );
         final String ldapSmsAttribute = ldapProfile.readSettingAsString( PwmSetting.SMS_USER_PHONE_ATTRIBUTE );
         return readStringAttribute( ldapSmsAttribute );
     }
@@ -575,7 +578,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public String getUserSmsNumber2( ) throws PwmUnrecoverableException
     {
-        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmApplication.getConfig() );
+        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmDomain.getConfig().getAppConfig() );
         final String ldapSmsAttribute = ldapProfile.readSettingAsString( PwmSetting.SMS_USER_PHONE_ATTRIBUTE_2 );
         return readStringAttribute( ldapSmsAttribute );
     }
@@ -583,7 +586,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public String getUserSmsNumber3( ) throws PwmUnrecoverableException
     {
-        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmApplication.getConfig() );
+        final LdapProfile ldapProfile = getUserIdentity().getLdapProfile( pwmDomain.getConfig().getAppConfig() );
         final String ldapSmsAttribute = ldapProfile.readSettingAsString( PwmSetting.SMS_USER_PHONE_ATTRIBUTE_3 );
         return readStringAttribute( ldapSmsAttribute );
     }
@@ -591,16 +594,16 @@ public class UserInfoReader implements UserInfo
     @Override
     public String getUserGuid( ) throws PwmUnrecoverableException
     {
-        return LdapOperationsHelper.readLdapGuidValue( pwmApplication, sessionLabel, userIdentity, false );
+        return LdapOperationsHelper.readLdapGuidValue( pwmDomain, sessionLabel, userIdentity, false );
     }
 
     @Override
     public ResponseInfoBean getResponseInfoBean( ) throws PwmUnrecoverableException
     {
-        final CrService crService = pwmApplication.getCrService();
+        final CrService crService = pwmDomain.getCrService();
         try
         {
-            return crService.readUserResponseInfo( sessionLabel, getUserIdentity(), chaiUser );
+            return crService.readUserResponseInfo( sessionLabel, getUserIdentity(), chaiUser ).orElse( null );
         }
         catch ( final ChaiUnavailableException e )
         {
@@ -611,7 +614,7 @@ public class UserInfoReader implements UserInfo
     @Override
     public OTPUserRecord getOtpUserRecord( ) throws PwmUnrecoverableException
     {
-        final OtpService otpService = pwmApplication.getOtpService();
+        final OtpService otpService = pwmDomain.getOtpService();
         if ( otpService != null && otpService.status() == PwmService.STATUS.OPEN )
         {
             try
@@ -647,20 +650,20 @@ public class UserInfoReader implements UserInfo
     @Override
     public Map<ProfileDefinition, String> getProfileIDs( ) throws PwmUnrecoverableException
     {
-        final Map<ProfileDefinition, String> returnMap = new HashMap<>();
+        final Map<ProfileDefinition, String> returnMap = new EnumMap<>( ProfileDefinition.class );
         for ( final ProfileDefinition profileDefinition : ProfileDefinition.values() )
         {
             if ( profileDefinition.isAuthenticated() )
             {
-                final Optional<String> profileID = ProfileUtility.discoverProfileIDForUser( pwmApplication, sessionLabel, userIdentity, profileDefinition );
+                final Optional<String> profileID = ProfileUtility.discoverProfileIDForUser( pwmDomain, sessionLabel, userIdentity, profileDefinition );
                 if ( profileID.isPresent() )
                 {
                     returnMap.put( profileDefinition, profileID.get() );
-                    LOGGER.debug( sessionLabel, () -> "assigned " + profileDefinition.toString() + " profileID \"" + profileID.get() + "\" to " + userIdentity.toDisplayString() );
+                    LOGGER.debug( sessionLabel, () -> "assigned " + profileDefinition + " profileID \"" + profileID.get() + "\" to " + userIdentity.toDisplayString() );
                 }
                 else
                 {
-                    LOGGER.debug( sessionLabel, () -> profileDefinition.toString() + " has no matching profiles for user " + userIdentity.toDisplayString() );
+                    LOGGER.debug( sessionLabel, () -> profileDefinition + " has no matching profiles for user " + userIdentity.toDisplayString() );
                 }
             }
         }
@@ -827,7 +830,7 @@ public class UserInfoReader implements UserInfo
         }
 
         // build result data from cache
-        final Map<String, List<String>> returnMap = new HashMap<>();
+        final Map<String, List<String>> returnMap = new HashMap<>( attributes.size() );
         for ( final String attribute : attributes )
         {
             final List<String> cachedValue = cacheMap.get( attribute );
@@ -868,9 +871,9 @@ public class UserInfoReader implements UserInfo
     public Instant getPasswordExpirationNoticeSendTime()
             throws PwmUnrecoverableException
     {
-        if ( pwmApplication.getPwNotifyService().status() == PwmService.STATUS.OPEN )
+        if ( pwmDomain.getPwNotifyService().status() == PwmService.STATUS.OPEN )
         {
-            final Optional<PwNotifyUserStatus> optionalState = pwmApplication.getPwNotifyService().readUserNotificationState( userIdentity, sessionLabel );
+            final Optional<PwNotifyUserStatus> optionalState = pwmDomain.getPwNotifyService().readUserNotificationState( userIdentity, sessionLabel );
             if ( optionalState.isPresent() )
             {
                 return optionalState.get().getExpireTime();
@@ -888,15 +891,15 @@ public class UserInfoReader implements UserInfo
     private Optional<ChangePasswordProfile> readChangePasswordProfile()
             throws PwmUnrecoverableException
     {
-        final Configuration configuration = pwmApplication.getConfig();
+        final DomainConfig domainConfig = pwmDomain.getConfig();
 
-        if ( !pwmApplication.getConfig().readSettingAsBoolean( PwmSetting.CHANGE_PASSWORD_ENABLE ) )
+        if ( !pwmDomain.getConfig().readSettingAsBoolean( PwmSetting.CHANGE_PASSWORD_ENABLE ) )
         {
             return Optional.empty();
         }
 
         final Map<ProfileDefinition, String> profileIDs = selfCachedReference.getProfileIDs();
         final String profileID = profileIDs.get( ProfileDefinition.ChangePassword );
-        return Optional.ofNullable( configuration.getChangePasswordProfile().get( profileID ) );
+        return Optional.ofNullable( domainConfig.getChangePasswordProfile().get( profileID ) );
     }
 }

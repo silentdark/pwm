@@ -20,17 +20,16 @@
 
 package password.pwm.svc.report;
 
-import com.novell.ldapchai.exception.ChaiOperationException;
-import com.novell.ldapchai.exception.ChaiUnavailableException;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.apache.commons.csv.CSVPrinter;
 import password.pwm.PwmApplication;
-import password.pwm.config.Configuration;
-import password.pwm.error.PwmOperationalException;
-import password.pwm.error.PwmUnrecoverableException;
+import password.pwm.config.SettingReader;
 import password.pwm.i18n.Display;
+import password.pwm.i18n.PwmDisplayBundle;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.ClosableIterator;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.MiscUtil;
+import password.pwm.util.java.StringUtil;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -54,7 +53,7 @@ public class ReportCsvUtility
             throws IOException
     {
         final List<ReportSummaryData.PresentationRow> outputList = reportService.getSummaryData().asPresentableCollection( pwmApplication.getConfig(), locale );
-        final CSVPrinter csvPrinter = JavaHelper.makeCsvPrinter( outputStream );
+        final CSVPrinter csvPrinter = MiscUtil.makeCsvPrinter( outputStream );
 
         for ( final ReportSummaryData.PresentationRow presentationRow : outputList )
         {
@@ -69,22 +68,24 @@ public class ReportCsvUtility
     }
 
     public void outputToCsv( final OutputStream outputStream, final boolean includeHeader, final Locale locale )
-            throws IOException, ChaiUnavailableException, ChaiOperationException, PwmUnrecoverableException, PwmOperationalException
+            throws IOException
     {
-        final Configuration config = pwmApplication.getConfig();
+        final SettingReader config = pwmApplication.getConfig();
 
         outputToCsv( outputStream, includeHeader, locale, config );
     }
 
-    public void outputToCsv( final OutputStream outputStream, final boolean includeHeader, final Locale locale, final Configuration config )
-            throws IOException, ChaiUnavailableException, ChaiOperationException, PwmUnrecoverableException, PwmOperationalException
+    @SuppressFBWarnings( "PSC_PRESIZE_COLLECTIONS" )
+    public void outputToCsv( final OutputStream outputStream, final boolean includeHeader, final Locale locale, final SettingReader config )
+            throws IOException
     {
-        final CSVPrinter csvPrinter = JavaHelper.makeCsvPrinter( outputStream );
-        final Class localeClass = password.pwm.i18n.Admin.class;
+        final CSVPrinter csvPrinter = MiscUtil.makeCsvPrinter( outputStream );
+        final Class<? extends PwmDisplayBundle> localeClass = password.pwm.i18n.Admin.class;
         if ( includeHeader )
         {
             final List<String> headerRow = new ArrayList<>();
 
+            headerRow.add( LocaleHelper.getLocalizedMessage( locale, "Field_Report_DomainID", config, localeClass ) );
             headerRow.add( LocaleHelper.getLocalizedMessage( locale, "Field_Report_Username", config, localeClass ) );
             headerRow.add( LocaleHelper.getLocalizedMessage( locale, "Field_Report_UserDN", config, localeClass ) );
             headerRow.add( LocaleHelper.getLocalizedMessage( locale, "Field_Report_LDAP_Profile", config, localeClass ) );
@@ -112,31 +113,23 @@ public class ReportCsvUtility
             csvPrinter.printRecord( headerRow );
         }
 
-        ClosableIterator<UserCacheRecord> cacheBeanIterator = null;
-        try
+        try ( ClosableIterator<UserReportRecord> cacheBeanIterator = iterator() )
         {
-            cacheBeanIterator = iterator();
             while ( cacheBeanIterator.hasNext() )
             {
-                final UserCacheRecord userCacheRecord = cacheBeanIterator.next();
-                outputRecordRow( config, locale, userCacheRecord, csvPrinter );
-            }
-        }
-        finally
-        {
-            if ( cacheBeanIterator != null )
-            {
-                cacheBeanIterator.close();
+                final UserReportRecord userReportRecord = cacheBeanIterator.next();
+                outputRecordRow( config, locale, userReportRecord, csvPrinter );
             }
         }
 
         csvPrinter.flush();
     }
 
+    @SuppressFBWarnings( {"CE_CLASS_ENVY", "PSC_PRESIZE_COLLECTIONS"} )
     private void outputRecordRow(
-            final Configuration config,
+            final SettingReader config,
             final Locale locale,
-            final UserCacheRecord userCacheRecord,
+            final UserReportRecord userReportRecord,
             final CSVPrinter csvPrinter
     )
             throws IOException
@@ -145,49 +138,50 @@ public class ReportCsvUtility
         final String falseField = Display.getLocalizedMessage( locale, Display.Value_False, config );
         final String naField = Display.getLocalizedMessage( locale, Display.Value_NotApplicable, config );
         final List<String> csvRow = new ArrayList<>();
-        csvRow.add( userCacheRecord.getUsername() );
-        csvRow.add( userCacheRecord.getUserDN() );
-        csvRow.add( userCacheRecord.getLdapProfile() );
-        csvRow.add( userCacheRecord.getEmail() );
-        csvRow.add( userCacheRecord.getUserGUID() );
-        csvRow.add( userCacheRecord.getAccountExpirationTime() == null
+        csvRow.add( userReportRecord.getDomainID().stringValue() );
+        csvRow.add( userReportRecord.getUsername() );
+        csvRow.add( userReportRecord.getUserDN() );
+        csvRow.add( userReportRecord.getLdapProfile() );
+        csvRow.add( userReportRecord.getEmail() );
+        csvRow.add( userReportRecord.getUserGUID() );
+        csvRow.add( userReportRecord.getAccountExpirationTime() == null
                 ? naField
-                : JavaHelper.toIsoDate( userCacheRecord.getAccountExpirationTime() ) );
-        csvRow.add( userCacheRecord.getPasswordExpirationTime() == null
+                : StringUtil.toIsoDate( userReportRecord.getAccountExpirationTime() ) );
+        csvRow.add( userReportRecord.getPasswordExpirationTime() == null
                 ? naField
-                : JavaHelper.toIsoDate( userCacheRecord.getPasswordExpirationTime() ) );
-        csvRow.add( userCacheRecord.getPasswordChangeTime() == null
+                : StringUtil.toIsoDate( userReportRecord.getPasswordExpirationTime() ) );
+        csvRow.add( userReportRecord.getPasswordChangeTime() == null
                 ? naField
-                : JavaHelper.toIsoDate( userCacheRecord.getPasswordChangeTime() ) );
-        csvRow.add( userCacheRecord.getResponseSetTime() == null
+                : StringUtil.toIsoDate( userReportRecord.getPasswordChangeTime() ) );
+        csvRow.add( userReportRecord.getResponseSetTime() == null
                 ? naField
-                : JavaHelper.toIsoDate( userCacheRecord.getResponseSetTime() ) );
-        csvRow.add( userCacheRecord.getLastLoginTime() == null
+                : StringUtil.toIsoDate( userReportRecord.getResponseSetTime() ) );
+        csvRow.add( userReportRecord.getLastLoginTime() == null
                 ? naField
-                : JavaHelper.toIsoDate( userCacheRecord.getLastLoginTime() ) );
-        csvRow.add( userCacheRecord.isHasResponses() ? trueField : falseField );
-        csvRow.add( userCacheRecord.isHasHelpdeskResponses() ? trueField : falseField );
-        csvRow.add( userCacheRecord.getResponseStorageMethod() == null
+                : StringUtil.toIsoDate( userReportRecord.getLastLoginTime() ) );
+        csvRow.add( userReportRecord.isHasResponses() ? trueField : falseField );
+        csvRow.add( userReportRecord.isHasHelpdeskResponses() ? trueField : falseField );
+        csvRow.add( userReportRecord.getResponseStorageMethod() == null
                 ? naField
-                : userCacheRecord.getResponseStorageMethod().toString() );
-        csvRow.add( userCacheRecord.getResponseFormatType() == null
+                : userReportRecord.getResponseStorageMethod().toString() );
+        csvRow.add( userReportRecord.getResponseFormatType() == null
                 ? naField
-                : userCacheRecord.getResponseFormatType().toString() );
-        csvRow.add( userCacheRecord.getPasswordStatus().isExpired() ? trueField : falseField );
-        csvRow.add( userCacheRecord.getPasswordStatus().isPreExpired() ? trueField : falseField );
-        csvRow.add( userCacheRecord.getPasswordStatus().isViolatesPolicy() ? trueField : falseField );
-        csvRow.add( userCacheRecord.getPasswordStatus().isWarnPeriod() ? trueField : falseField );
-        csvRow.add( userCacheRecord.isRequiresPasswordUpdate() ? trueField : falseField );
-        csvRow.add( userCacheRecord.isRequiresResponseUpdate() ? trueField : falseField );
-        csvRow.add( userCacheRecord.isRequiresProfileUpdate() ? trueField : falseField );
-        csvRow.add( userCacheRecord.getCacheTimestamp() == null
+                : userReportRecord.getResponseFormatType().toString() );
+        csvRow.add( userReportRecord.getPasswordStatus().isExpired() ? trueField : falseField );
+        csvRow.add( userReportRecord.getPasswordStatus().isPreExpired() ? trueField : falseField );
+        csvRow.add( userReportRecord.getPasswordStatus().isViolatesPolicy() ? trueField : falseField );
+        csvRow.add( userReportRecord.getPasswordStatus().isWarnPeriod() ? trueField : falseField );
+        csvRow.add( userReportRecord.isRequiresPasswordUpdate() ? trueField : falseField );
+        csvRow.add( userReportRecord.isRequiresResponseUpdate() ? trueField : falseField );
+        csvRow.add( userReportRecord.isRequiresProfileUpdate() ? trueField : falseField );
+        csvRow.add( userReportRecord.getCacheTimestamp() == null
                 ? naField
-                : JavaHelper.toIsoDate( userCacheRecord.getCacheTimestamp() ) );
+                : StringUtil.toIsoDate( userReportRecord.getCacheTimestamp() ) );
 
         csvPrinter.printRecord( csvRow );
     }
 
-    public ClosableIterator<UserCacheRecord> iterator( )
+    public ClosableIterator<UserReportRecord> iterator( )
     {
         return reportService.iterator();
     }

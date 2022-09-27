@@ -37,8 +37,9 @@ import password.pwm.http.PwmHttpRequestWrapper;
 import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.UserInfoFactory;
 import password.pwm.svc.stats.Statistic;
+import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.util.PasswordData;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
@@ -131,9 +132,6 @@ public class RestCheckPasswordServer extends RestServlet
 
         final JsonInput jsonInput;
         {
-
-
-
             final JsonInput jsonBody = RestUtility.deserializeJsonBody( restRequest, JsonInput.class, RestUtility.Flag.AllowNullReturn );
 
             jsonInput = new JsonInput(
@@ -141,18 +139,18 @@ public class RestCheckPasswordServer extends RestServlet
                             jsonBody == null ? null : jsonBody.getPassword1(),
                             restRequest.readParameterAsString( FIELD_PASSWORD_1 ),
                             FIELD_PASSWORD_1
-                    ),
+                    ).orElse( null ),
                     RestUtility.readValueFromJsonAndParam(
                             jsonBody == null ? null : jsonBody.getPassword2(),
                             restRequest.readParameterAsString( FIELD_PASSWORD_2 ),
                             FIELD_PASSWORD_2
-                    ),
+                    ).orElse( null ),
                     RestUtility.readValueFromJsonAndParam(
                             jsonBody == null ? null : jsonBody.getUsername(),
                             restRequest.readParameterAsString( FIELD_USERNAME ),
                             FIELD_USERNAME,
                             RestUtility.ReadValueFlag.optional
-                    )
+                    ).orElse( null )
             );
         }
 
@@ -194,11 +192,10 @@ public class RestCheckPasswordServer extends RestServlet
                     userInfo
             );
 
-            restRequest.getPwmApplication().getStatisticsManager().incrementValue( Statistic.REST_CHECKPASSWORD );
+            StatisticsClient.incrementStat( restRequest.getPwmApplication(), Statistic.REST_CHECKPASSWORD );
 
             final PasswordUtility.PasswordCheckInfo passwordCheckInfo = PasswordUtility.checkEnteredPassword(
-                    restRequest.getPwmApplication(),
-                    restRequest.getLocale(),
+                    restRequest.getPwmRestRequest(),
                     targetUserIdentity.getChaiUser(),
                     checkRequest.getUserInfo(),
                     null,
@@ -207,9 +204,10 @@ public class RestCheckPasswordServer extends RestServlet
             );
 
             final JsonOutput jsonOutput = JsonOutput.fromPasswordCheckInfo( passwordCheckInfo );
-            final RestResultBean restResultBean = RestResultBean.withData( jsonOutput );
+            final RestResultBean restResultBean = RestResultBean.withData( jsonOutput, JsonOutput.class );
             final TimeDuration timeDuration = TimeDuration.fromCurrent( startTime );
-            LOGGER.trace( restRequest.getSessionLabel(), () -> "REST /checkpassword response (" + timeDuration.asCompactString() + "): " + JsonUtil.serialize( jsonOutput ) );
+            LOGGER.trace( restRequest.getSessionLabel(), () -> "REST /checkpassword response ("
+                    + timeDuration.asCompactString() + "): " + JsonFactory.get().serialize( jsonOutput ) );
             return restResultBean;
         }
         catch ( final PwmException e )
@@ -221,7 +219,7 @@ public class RestCheckPasswordServer extends RestServlet
         {
             final String errorMessage = "unexpected error executing web service: " + e.getMessage();
             final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_INTERNAL, errorMessage );
-            LOGGER.error( restRequest.getSessionLabel(), () -> errorInformation.toDebugStr(), e );
+            LOGGER.error( restRequest.getSessionLabel(), errorInformation::toDebugStr, e );
             return RestResultBean.fromError( restRequest, errorInformation );
         }
     }

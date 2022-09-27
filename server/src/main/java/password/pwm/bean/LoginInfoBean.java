@@ -28,7 +28,7 @@ import password.pwm.ldap.auth.AuthenticationType;
 import password.pwm.ldap.auth.PwmAuthenticationSource;
 import password.pwm.util.BasicAuthInfo;
 import password.pwm.util.PasswordData;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -46,7 +46,6 @@ import java.util.Set;
 @Data
 public class LoginInfoBean implements Serializable
 {
-
     public enum LoginFlag
     {
         skipOtp,
@@ -118,8 +117,8 @@ public class LoginInfoBean implements Serializable
 
     public String toDebugString( ) throws PwmUnrecoverableException
     {
-        final LoginInfoBean debugLoginCookieBean = JsonUtil.cloneUsingJson( this, LoginInfoBean.class );
+        final LoginInfoBean debugLoginCookieBean = JsonFactory.get().cloneUsingJson( this, LoginInfoBean.class );
         debugLoginCookieBean.setUserCurrentPassword( new PasswordData( PwmConstants.LOG_REMOVED_VALUE_REPLACEMENT ) );
-        return JsonUtil.serialize( debugLoginCookieBean );
+        return JsonFactory.get().serialize( debugLoginCookieBean );
     }
 }

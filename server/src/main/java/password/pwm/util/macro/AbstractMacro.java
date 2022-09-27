@@ -21,8 +21,8 @@
 package password.pwm.util.macro;
 
 import password.pwm.PwmConstants;
-import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.PwmDateFormat;
+import password.pwm.util.java.StringUtil;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -52,10 +52,8 @@ public abstract class AbstractMacro implements Macro
 
     static String unescapeParamValue( final String input )
     {
-        String result = input;
-        result = result.replace( "/:", ":" );
-        result = result.replace( "/@", "@" );
-        return result;
+        return input.replace( "/:", ":" )
+                .replace( "/@", "@" );
     }
 
     static List<String> splitMacroParameters( final String input, final List<String> ignoreValueList )
@@ -137,7 +135,7 @@ public abstract class AbstractMacro implements Macro
             }
         }
 
-        return JavaHelper.toIsoDate( timestamp );
+        return StringUtil.toIsoDate( timestamp );
     }
 
     @Override

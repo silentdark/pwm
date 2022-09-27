@@ -20,22 +20,27 @@
 
 package password.pwm.util.cli.commands;
 
+import password.pwm.bean.DomainID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingCategory;
-import password.pwm.config.stored.ConfigurationReader;
+import password.pwm.config.stored.ConfigurationFileManager;
+import password.pwm.config.stored.StoredConfigKey;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.stored.StoredConfigurationModifier;
+import password.pwm.error.PwmOperationalException;
+import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.cli.CliParameters;
 
 import java.io.File;
+import java.io.IOException;
 
 public class ConfigResetHttpsCommand
         extends AbstractCliCommand
 {
     @Override
     public void doCommand( )
-            throws Exception
+            throws IOException, PwmUnrecoverableException, PwmOperationalException
     {
         final File configurationFile = cliEnvironment.getConfigurationFile();
         if ( configurationFile == null || !configurationFile.exists() )
@@ -49,18 +54,18 @@ public class ConfigResetHttpsCommand
             return;
         }
 
-        final ConfigurationReader configurationReader = new ConfigurationReader( cliEnvironment.getConfigurationFile() );
-        final StoredConfiguration storedConfiguration = configurationReader.getStoredConfiguration();
+        final ConfigurationFileManager configurationFileManager = new ConfigurationFileManager( cliEnvironment.getConfigurationFile() );
+        final StoredConfiguration storedConfiguration = configurationFileManager.getStoredConfiguration();
 
         final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( storedConfiguration );
         for ( final PwmSetting setting : PwmSettingCategory.HTTPS_SERVER.getSettings() )
         {
-            modifier.resetSetting( setting, null, null );
+            final StoredConfigKey key = StoredConfigKey.forSetting( setting, null, DomainID.systemId() );
+            modifier.resetSetting( key, null );
         }
-        configurationReader.saveConfiguration( modifier.newStoredConfiguration(), cliEnvironment.getPwmApplication(), SessionLabel.CLI_SESSION_LABEL );
+        configurationFileManager.saveConfiguration( modifier.newStoredConfiguration(), cliEnvironment.getPwmApplication(), SessionLabel.CLI_SESSION_LABEL );
         out( "success" );
     }
-
 
     @Override
     public CliParameters getCliParameters( )

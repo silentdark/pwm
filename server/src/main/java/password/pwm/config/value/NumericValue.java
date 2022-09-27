@@ -20,13 +20,13 @@
 
 package password.pwm.config.value;
 
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlElement;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingProperty;
-import password.pwm.config.stored.StoredConfigXmlSerializer;
+import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
-import password.pwm.util.java.JsonUtil;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmSecurityKey;
 
 import java.util.Collections;
@@ -49,22 +49,23 @@ public class NumericValue extends AbstractValue implements StoredValue
             @Override
             public NumericValue fromJson( final String value )
             {
-                return new NumericValue( JsonUtil.deserialize( value, Long.class ) );
+                return new NumericValue( JsonFactory.get().deserialize( value, Long.class ) );
             }
 
             @Override
             public NumericValue fromXmlElement( final PwmSetting pwmSetting, final XmlElement settingElement, final PwmSecurityKey input )
             {
-                final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlSerializer.StoredConfigXmlConstants.XML_ELEMENT_VALUE );
+                final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlConstants.XML_ELEMENT_VALUE );
                 if ( valueElement.isPresent() )
                 {
-                    final String value = valueElement.get().getText();
-                    return new NumericValue( normalizeValue( pwmSetting, Long.parseLong( value ) ) );
+                    final Optional<String> value = valueElement.get().getText();
+                    if ( value.isPresent() )
+                    {
+                        return new NumericValue( normalizeValue( pwmSetting, Long.parseLong( value.get() ) ) );
+                    }
                 }
-                else
-                {
-                    return new NumericValue( 0 );
-                }
+
+                return new NumericValue( 0 );
             }
         };
     }
@@ -90,8 +91,8 @@ public class NumericValue extends AbstractValue implements StoredValue
     @Override
     public List<XmlElement> toXmlValues( final String valueElementName, final XmlOutputProcessData xmlOutputProcessData )
     {
-        final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
-        valueElement.addText( Long.toString( value ) );
+        final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+        valueElement.setText( Long.toString( value ) );
         return Collections.singletonList( valueElement );
     }
 

@@ -22,10 +22,13 @@ package password.pwm.svc.shorturl;
 
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
-import password.pwm.config.Configuration;
+import password.pwm.bean.DomainID;
+import password.pwm.config.AppConfig;
 import password.pwm.config.PwmSetting;
+import password.pwm.error.PwmException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthRecord;
+import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
 import password.pwm.util.logging.PwmLogger;
 
@@ -40,24 +43,21 @@ import java.util.regex.PatternSyntaxException;
 /**
  * @author Menno Pieters
  */
-public class UrlShortenerService implements PwmService
+public class UrlShortenerService extends AbstractPwmService implements PwmService
 {
-
     private static final PwmLogger LOGGER = PwmLogger.forClass( UrlShortenerService.class );
 
-    private PwmApplication pwmApplication;
     private BasicUrlShortener theShortener = null;
-    private STATUS status = STATUS.CLOSED;
 
     public UrlShortenerService( )
     {
     }
 
     @Override
-    public void init( final PwmApplication pwmApplication ) throws PwmUnrecoverableException
+    public STATUS postAbstractInit( final PwmApplication pwmApplication, final DomainID domainID )
+            throws PwmException
     {
-        this.pwmApplication = pwmApplication;
-        final Configuration config = this.pwmApplication.getConfig();
+        final AppConfig config = pwmApplication.getConfig();
         final String classNameString = config.readSettingAsString( PwmSetting.URL_SHORTENER_CLASS );
         if ( classNameString != null && classNameString.length() > 0 )
         {
@@ -78,39 +78,26 @@ public class UrlShortenerService implements PwmService
             try
             {
                 final Class<?> theClass = Class.forName( classNameString );
-                theShortener = ( BasicUrlShortener ) theClass.newInstance();
+                theShortener = ( BasicUrlShortener ) theClass.getDeclaredConstructor().newInstance();
                 theShortener.setConfiguration( sConfig );
             }
-            catch ( final java.lang.IllegalAccessException e )
+            catch ( final Exception e )
             {
-                LOGGER.error( () ->  "illegal access to class " + classNameString + ": " + e.toString() );
-            }
-            catch ( final java.lang.InstantiationException e )
-            {
-                LOGGER.error( () -> "cannot instantiate class " + classNameString + ": " + e.toString() );
-            }
-            catch ( final java.lang.ClassNotFoundException e )
-            {
-                LOGGER.error( () -> "class " + classNameString + " not found: " + e.getMessage() );
+                LOGGER.error( () -> "error loading url shortener class " + classNameString + ": " + e.getMessage() );
             }
         }
-        status = PwmService.STATUS.OPEN;
+
+        return STATUS.OPEN;
     }
 
     @Override
-    public STATUS status( )
+    public void shutdownImpl( )
     {
-        return status;
+        setStatus( PwmService.STATUS.CLOSED );
     }
 
     @Override
-    public void close( )
-    {
-        status = PwmService.STATUS.CLOSED;
-    }
-
-    @Override
-    public List<HealthRecord> healthCheck( )
+    public List<HealthRecord> serviceHealthCheck( )
     {
         return Collections.emptyList();
     }
@@ -119,20 +106,20 @@ public class UrlShortenerService implements PwmService
     {
         if ( theShortener != null )
         {
-            return theShortener.shorten( text, pwmApplication );
+            return theShortener.shorten( text, getPwmApplication() );
         }
         return text;
     }
 
     public String shortenUrlInText( final String text ) throws PwmUnrecoverableException
     {
-        final String urlRegex = pwmApplication.getConfig().readAppProperty( AppProperty.URL_SHORTNER_URL_REGEX );
+        final String urlRegex = getPwmApplication().getConfig().readAppProperty( AppProperty.URL_SHORTNER_URL_REGEX );
         try
         {
             final Pattern p = Pattern.compile( urlRegex );
             final Matcher m = p.matcher( text );
             final StringBuilder result = new StringBuilder();
-            Boolean found = m.find();
+            boolean found = m.find();
             if ( found )
             {
                 int start = 0;

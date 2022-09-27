@@ -25,7 +25,6 @@
 
 <%@ page import="password.pwm.http.servlet.configguide.ConfigGuideForm" %>
 <%@ page import="password.pwm.http.tag.value.PwmValue" %>
-<%@ page import="com.novell.ldapchai.util.StringHelper" %>
 <%@ page import="password.pwm.util.java.StringUtil" %>
 <%@ page import="password.pwm.util.java.JavaHelper" %>
 
@@ -48,7 +47,7 @@
                 End User License Agreement
             </div>
             <div class="setting_body">
-                <div id="agreementText" class="eulaText"><%=JavaHelper.readEulaText(ContextManager.getContextManager(session),PwmConstants.RESOURCE_FILE_EULA_TXT)%></div>
+                <div id="agreementText" class="eulaText"><%=ContextManager.readEulaText(ContextManager.getContextManager(session),PwmConstants.RESOURCE_FILE_EULA_TXT)%></div>
             </div>
 
             <br/><br/>

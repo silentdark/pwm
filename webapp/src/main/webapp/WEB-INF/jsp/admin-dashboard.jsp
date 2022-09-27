@@ -39,12 +39,15 @@
 <%@ page import="password.pwm.http.servlet.admin.AppDashboardData" %>
 <%@ page import="password.pwm.http.PwmRequestAttribute" %>
 <%@ page import="password.pwm.http.bean.DisplayElement" %>
+<%@ page import="password.pwm.PwmDomain" %>
+<%@ page import="password.pwm.util.java.CollectionUtil" %>
+<%@ page import="password.pwm.util.java.MiscUtil" %>
 <!DOCTYPE html>
 <%@ page language="java" session="true" isThreadSafe="true" contentType="text/html" %>
 <%@ taglib uri="pwm" prefix="pwm" %>
 <% final AppDashboardData appDashboardData = (AppDashboardData)JspUtility.getAttribute(pageContext, PwmRequestAttribute.AppDashboardData); %>
 <% final PwmRequest dashboard_pwmRequest = JspUtility.getPwmRequest(pageContext); %>
-<% final PwmApplication dashboard_pwmApplication = dashboard_pwmRequest.getPwmApplication(); %>
+<% final PwmDomain dashboard_pwmDomain = dashboard_pwmRequest.getPwmDomain(); %>
 <% final Locale locale = JspUtility.locale(request); %>
 <html lang="<pwm:value name="<%=PwmValue.localeCode%>"/>" dir="<pwm:value name="<%=PwmValue.localeDir%>"/>">
 <% final String PageName = JspUtility.localizedString(pageContext,"Title_Dashboard",Admin.class);%>
@@ -105,7 +108,8 @@
                         </td>
                     </tr>
                     <% for (final EpsStatistic loopEpsType : EpsStatistic.values()) { %>
-                    <% if ((loopEpsType != EpsStatistic.DB_READS && loopEpsType != EpsStatistic.DB_WRITES) || dashboard_pwmApplication.getConfig().hasDbConfigured()) { %>
+                    <% if ((loopEpsType != EpsStatistic.DB_READS && loopEpsType != EpsStatistic.DB_WRITES) || dashboard_pwmDomain
+                            .getConfig().getAppConfig().hasDbConfigured()) { %>
                     <tr>
                         <td class="key">
                             <%= loopEpsType.getLabel(locale) %> / Minute
@@ -202,12 +206,13 @@
                             <td class="key">
                                 Last LDAP Unavailable Time
                             </td>
-                            <% final Collection<LdapProfile> ldapProfiles = dashboard_pwmApplication.getConfig().getLdapProfiles().values(); %>
+                            <% final Collection<LdapProfile> ldapProfiles = dashboard_pwmDomain.getConfig().getLdapProfiles().values(); %>
                             <td>
                                 <% if (ldapProfiles.size() < 2) { %>
-                                <% final Instant lastError = dashboard_pwmApplication.getLdapConnectionService().getLastLdapFailureTime(ldapProfiles.iterator().next()); %>
+                                <% final Instant lastError = dashboard_pwmDomain
+                                        .getLdapConnectionService().getLastLdapFailureTime(ldapProfiles.iterator().next()); %>
                                 <span class="timestamp">
-                                <%= lastError == null ? JspUtility.getMessage(pageContext, Display.Value_NotApplicable) :JavaHelper.toIsoDate(lastError) %>
+                                <%= lastError == null ? JspUtility.getMessage(pageContext, Display.Value_NotApplicable) : StringUtil.toIsoDate(lastError) %>
                                 </span>
                                 <% } else { %>
                                 <table class="nomargin">
@@ -215,8 +220,8 @@
                                     <tr>
                                         <td><%=ldapProfile.getDisplayName(locale)%></td>
                                         <td class="timestamp">
-                                            <% final Instant lastError = dashboard_pwmApplication.getLdapConnectionService().getLastLdapFailureTime(ldapProfile); %>
-                                            <%= lastError == null ? JspUtility.getMessage(pageContext, Display.Value_NotApplicable) :JavaHelper.toIsoDate(lastError) %>
+                                            <% final Instant lastError = dashboard_pwmDomain.getLdapConnectionService().getLastLdapFailureTime(ldapProfile); %>
+                                            <%= lastError == null ? JspUtility.getMessage(pageContext, Display.Value_NotApplicable) : StringUtil.toIsoDate(lastError) %>
                                         </td>
                                     </tr>
                                     <% } %>
@@ -259,7 +264,12 @@
                 <div style="max-height: 600px; overflow: auto;">
                     <table class="nomargin">
                         <tr>
-                            <th style="font-weight:bold;">
+                            <pwm:if test="<%=PwmIfTest.multiDomain%>">
+                            <td style="font-weight:bold;">
+                                Domain
+                            </td>
+                            </pwm:if>
+                            <td style="font-weight:bold;">
                                 Service
                             </td>
                             <td style="font-weight:bold;">
@@ -273,10 +283,15 @@
                             </td>
                         </tr>
                         <% for (final AppDashboardData.ServiceData loopService : appDashboardData.getServices()) { %>
-                        <tr id="serviceName-<%=loopService.getName()%>">
+                        <tr id="serviceName-<%=loopService.getGuid()%>">
+                            <pwm:if test="<%=PwmIfTest.multiDomain%>">
+                                <td>
+                                    <%= loopService.getDomainID() %>
+                                </td>
+                            </pwm:if>
                             <td>
                                 <%= loopService.getName() %>
-                                <% if (!JavaHelper.isEmpty(loopService.getDebugData())) { %>
+                                <% if (!CollectionUtil.isEmpty(loopService.getDebugData())) { %>
                                 &nbsp;
                                 <div class="btn-icon pwm-icon pwm-icon-list-alt"></div>
                                 <% } %>
@@ -291,10 +306,10 @@
                                 <% } %>
                             </td>
                             <td>
-                                <% if (!JavaHelper.isEmpty(loopService.getHealth())) { %>
+                                <% if (!CollectionUtil.isEmpty(loopService.getHealth())) { %>
                                 <% for (final HealthRecord loopRecord : loopService.getHealth()) { %>
-                                <%= loopRecord.getTopic(locale, dashboard_pwmApplication.getConfig()) %> - <%= loopRecord.getStatus().toString() %> - <%= loopRecord.getDetail(locale,
-                                    dashboard_pwmApplication.getConfig()) %>
+                                <%= loopRecord.getTopic(locale, dashboard_pwmDomain.getConfig()) %> - <%= loopRecord.getStatus().toString() %> - <%= loopRecord.getDetail(locale,
+                                    dashboard_pwmDomain.getConfig()) %>
                                 <br/>
                                 <% } %>
                                 <% } else { %>
@@ -320,7 +335,7 @@
                 </div>
                 <br/>
                 <div style="max-height: 400px; overflow: auto;">
-                    <% if (!JavaHelper.isEmpty(appDashboardData.getLocalDbSizes())) { %>
+                    <% if (!CollectionUtil.isEmpty(appDashboardData.getLocalDbSizes())) { %>
                     <table class="nomargin">
                         <tr>
                             <td class="key">
@@ -359,7 +374,7 @@
                     <% } %>
                 </table>
                 <br/>
-                <% if (!JavaHelper.isEmpty(appDashboardData.getThreads())) { %>
+                <% if (!CollectionUtil.isEmpty(appDashboardData.getThreads())) { %>
                 <div style="max-height: 400px; overflow: auto;">
                     <table class="nomargin">
                         <tr>
@@ -407,7 +422,7 @@
             <input name="tabs" type="radio" id="tab-7" class="input"/>
             <label for="tab-7" class="label">Nodes</label>
             <div id="Status" class="tab-content-pane" title="Nodes">
-                <% if (!JavaHelper.isEmpty(appDashboardData.getNodeData())) { %>
+                <% if (!CollectionUtil.isEmpty(appDashboardData.getNodeData())) { %>
                 <div style="max-height: 400px; overflow: auto;">
                     <table class="nomargin">
                         <tr>
@@ -517,8 +532,8 @@
                     }})
             });
             <% for (final AppDashboardData.ServiceData loopService : appDashboardData.getServices()) { %>
-            <% if (!JavaHelper.isEmpty(loopService.getDebugData())) { %>
-            PWM_MAIN.addEventHandler('serviceName-<%=loopService.getName()%>','click',function(){
+            <% if (!CollectionUtil.isEmpty(loopService.getDebugData())) { %>
+            PWM_MAIN.addEventHandler('serviceName-<%=loopService.getGuid()%>','click',function(){
                 var tableText = '<table>';
                 <% for (final Map.Entry<String,String> entry : loopService.getDebugData().entrySet()) { %>
                 tableText += '<tr><td><%=StringUtil.escapeJS(entry.getKey())%></td>'

@@ -22,7 +22,7 @@ package password.pwm.http.bean;
 
 import password.pwm.config.option.SessionBeanMode;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.operations.otp.OTPUserRecord;
+import password.pwm.svc.otp.OTPUserRecord;
 
 import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
@@ -94,7 +94,7 @@ public class SetupOtpBean extends PwmSessionBean
             catch ( final NoSuchAlgorithmException | NoSuchProviderException ex )
             {
                 random = new SecureRandom();
-                LOGGER.error( () -> ex.getMessage(), ex );
+                LOGGER.error( ex::getMessage, ex );
             }
             random.setSeed( ( new Date() ).getTime() );
             challenge = random.nextLong() % ( 1_000_000 );
@@ -138,9 +138,9 @@ public class SetupOtpBean extends PwmSessionBean
     }
 
     @Override
-    public Type getType( )
+    public BeanType getBeanType( )
     {
-        return Type.AUTHENTICATED;
+        return BeanType.AUTHENTICATED;
     }
 
     @Override

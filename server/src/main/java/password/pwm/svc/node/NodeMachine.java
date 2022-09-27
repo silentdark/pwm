@@ -21,30 +21,27 @@
 package password.pwm.svc.node;
 
 import password.pwm.PwmApplication;
+import password.pwm.config.stored.StoredConfigurationUtil;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.PwmScheduler;
-import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
 
 class NodeMachine
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( NodeMachine.class );
 
     private final PwmApplication pwmApplication;
-    private final ExecutorService executorService;
     private final NodeDataServiceProvider clusterDataServiceProvider;
 
     private ErrorInformation lastError;
@@ -56,6 +53,7 @@ class NodeMachine
 
     NodeMachine(
             final PwmApplication pwmApplication,
+            final ScheduledExecutorService executorService,
             final NodeDataServiceProvider clusterDataServiceProvider,
             final NodeServiceSettings nodeServiceSettings
     )
@@ -64,21 +62,18 @@ class NodeMachine
         this.clusterDataServiceProvider = clusterDataServiceProvider;
         this.settings = nodeServiceSettings;
 
-        this.executorService = PwmScheduler.makeBackgroundExecutor( pwmApplication, NodeMachine.class );
-
         pwmApplication.getPwmScheduler().scheduleFixedRateJob( new HeartbeatProcess(), executorService, settings.getHeartbeatInterval(), settings.getHeartbeatInterval() );
     }
 
     public void close( )
     {
-        JavaHelper.closeAndWaitExecutor( executorService, TimeDuration.SECOND );
     }
 
 
     public List<NodeInfo> nodes( ) throws PwmUnrecoverableException
     {
         final Map<String, NodeInfo> returnObj = new TreeMap<>();
-        final String configHash = pwmApplication.getConfig().configurationHash( pwmApplication.getSecureService() );
+        final String configHash = StoredConfigurationUtil.valueHash( pwmApplication.getConfig().getStoredConfiguration() );
         for ( final StoredNodeData storedNodeData : knownNodes.values() )
         {
             final boolean configMatch = configHash.equals( storedNodeData.getConfigHash() );
@@ -105,7 +100,7 @@ class NodeMachine
             returnObj.put( nodeInfo.getInstanceID(), nodeInfo );
         }
 
-        return Collections.unmodifiableList( new ArrayList<>( returnObj.values() ) );
+        return List.copyOf( returnObj.values() );
     }
 
 

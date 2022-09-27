@@ -20,7 +20,7 @@
 
 package password.pwm.svc.token;
 
-import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
 import password.pwm.bean.SessionLabel;
 import password.pwm.error.PwmException;
 import password.pwm.error.PwmOperationalException;
@@ -28,7 +28,7 @@ import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.svc.PwmService;
 import password.pwm.util.DataStore;
 import password.pwm.util.java.ClosableIterator;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
@@ -43,15 +43,15 @@ public class DataStoreTokenMachine implements TokenMachine
 
     private final DataStore dataStore;
 
-    private final PwmApplication pwmApplication;
+    private final PwmDomain pwmDomain;
 
     DataStoreTokenMachine(
-            final PwmApplication pwmApplication,
+            final PwmDomain pwmDomain,
             final TokenService tokenService,
             final DataStore dataStore
     )
     {
-        this.pwmApplication = pwmApplication;
+        this.pwmDomain = pwmDomain;
         this.tokenService = tokenService;
         this.dataStore = dataStore;
     }
@@ -59,7 +59,7 @@ public class DataStoreTokenMachine implements TokenMachine
     @Override
     public TokenKey keyFromKey( final String key ) throws PwmUnrecoverableException
     {
-        return StoredTokenKey.fromKeyValue( pwmApplication, key );
+        return StoredTokenKey.fromKeyValue( pwmDomain, key );
     }
 
     @Override
@@ -117,12 +117,12 @@ public class DataStoreTokenMachine implements TokenMachine
         final Instant issueDate = theToken.getIssueTime();
         if ( issueDate == null )
         {
-            LOGGER.error( () -> "retrieved token has no issueDate, marking as purgable: " + JsonUtil.serialize( theToken ) );
+            LOGGER.error( () -> "retrieved token has no issueDate, marking as purgable: " + JsonFactory.get().serialize( theToken ) );
             return true;
         }
         if ( theToken.getExpiration() == null )
         {
-            LOGGER.error( () -> "retrieved token has no expiration, marking as purgable: " + JsonUtil.serialize( theToken ) );
+            LOGGER.error( () -> "retrieved token has no expiration, marking as purgable: " + JsonFactory.get().serialize( theToken ) );
             return true;
         }
         return theToken.getExpiration().isBefore( Instant.now() );
@@ -143,27 +143,27 @@ public class DataStoreTokenMachine implements TokenMachine
             throws PwmOperationalException, PwmUnrecoverableException
     {
         final String storedHash = tokenKey.getStoredHash();
-        final String storedRawValue = dataStore.get( storedHash );
+        final Optional<String> storedRawValue = dataStore.get( storedHash );
 
-        if ( storedRawValue != null && storedRawValue.length() > 0 )
+        if ( storedRawValue.isPresent() )
         {
             final TokenPayload tokenPayload;
             try
             {
-                tokenPayload = tokenService.fromEncryptedString( storedRawValue );
+                tokenPayload = tokenService.fromEncryptedString( storedRawValue.get() );
             }
             catch ( final PwmException e )
             {
                 LOGGER.trace( sessionLabel, () -> "error while trying to decrypted stored token payload for key '" + storedHash
                         + "', will purge record, error: " + e.getMessage() );
-                dataStore.remove( storedHash );
+                removeToken( tokenKey );
                 return Optional.empty();
             }
 
             if ( testIfTokenNeedsPurging( tokenPayload ) )
             {
                 LOGGER.trace( sessionLabel, () -> "stored token key '" + storedHash + "', has an outdated issue/expire date and will be purged" );
-                dataStore.remove( storedHash );
+                removeToken( tokenKey );
             }
             else
             {
@@ -186,6 +186,7 @@ public class DataStoreTokenMachine implements TokenMachine
     public void removeToken( final TokenKey tokenKey )
             throws PwmOperationalException, PwmUnrecoverableException
     {
+        tokenService.getStats().increment( TokenService.StatsKey.tokensRemoved );
         final String storedHash = tokenKey.getStoredHash();
         dataStore.remove( storedHash );
     }

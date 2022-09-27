@@ -20,36 +20,32 @@
 
 package password.pwm.config.value;
 
-import password.pwm.PwmConstants;
 import password.pwm.bean.EmailItemBean;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingSyntax;
 import password.pwm.config.value.data.ActionConfiguration;
+import password.pwm.config.value.data.ChallengeItemConfiguration;
 import password.pwm.config.value.data.FormConfiguration;
 import password.pwm.config.value.data.NamedSecretData;
 import password.pwm.config.value.data.RemoteWebServiceConfiguration;
 import password.pwm.config.value.data.UserPermission;
 import password.pwm.util.PasswordData;
 import password.pwm.util.i18n.LocaleHelper;
+import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.StringUtil;
-import password.pwm.util.logging.PwmLogger;
 
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 public final class ValueTypeConverter
 {
-    private static final PwmLogger LOGGER = PwmLogger.forClass(  ValueTypeConverter.class );
-
     private ValueTypeConverter()
     {
     }
@@ -74,13 +70,10 @@ public final class ValueTypeConverter
 
     public static String valueToString( final StoredValue value )
     {
-        if ( value == null )
-        {
-            return null;
-        }
+        Objects.requireNonNull( value );
         if ( ( !( value instanceof StringValue ) ) && ( !( value instanceof BooleanValue ) ) )
         {
-            throw new IllegalArgumentException( "setting value is not readable as string" );
+            throw new IllegalArgumentException( "setting value is type '" + value.getClass().getSimpleName() + "' not readable as string" );
         }
         final Object nativeObject = value.toNativeObject();
         if ( nativeObject == null )
@@ -148,7 +141,7 @@ public final class ValueTypeConverter
     {
         if ( PwmSettingSyntax.ACTION != setting.getSyntax() )
         {
-            throw new IllegalArgumentException( "may not read ACTION value for setting: " + setting.toString() );
+            throw new IllegalArgumentException( "may not read ACTION value for setting: " + setting );
         }
 
         return ( List<ActionConfiguration> ) storedValue.toNativeObject();
@@ -158,7 +151,7 @@ public final class ValueTypeConverter
     {
         if ( PwmSettingSyntax.X509CERT != setting.getSyntax() )
         {
-            throw new IllegalArgumentException( "may not read X509CERT value for setting: " + setting.toString() );
+            throw new IllegalArgumentException( "may not read X509CERT value for setting: " + setting );
         }
 
         return ( (X509CertificateValue) storedValue ).asX509Certificates();
@@ -168,7 +161,7 @@ public final class ValueTypeConverter
     {
         if ( value == null )
         {
-            return null;
+            return Collections.emptyList();
         }
 
         if ( value instanceof CustomLinkValue )
@@ -192,23 +185,13 @@ public final class ValueTypeConverter
         }
 
         final List<String> results = new ArrayList<>( ( List<String> ) value.toNativeObject() );
-        for ( final Iterator iter = results.iterator(); iter.hasNext(); )
-        {
-            final Object loopString = iter.next();
-            if ( loopString == null || loopString.toString().length() < 1 )
-            {
-                iter.remove();
-            }
-        }
-        return results;
+        results.removeIf( StringUtil::isEmpty );
+        return List.copyOf( results );
     }
 
     public static List<UserPermission> valueToUserPermissions( final StoredValue value )
     {
-        if ( value == null )
-        {
-            return Collections.emptyList();
-        }
+        Objects.requireNonNull( value );
 
         if ( !( value instanceof UserPermissionValue ) )
         {
@@ -216,15 +199,20 @@ public final class ValueTypeConverter
         }
 
         final List<UserPermission> results = new ArrayList<>( ( List<UserPermission> ) value.toNativeObject() );
-        for ( final Iterator iter = results.iterator(); iter.hasNext(); )
+        results.removeIf( Objects::isNull );
+        return List.copyOf( results );
+    }
+
+    public static Map<String, List<ChallengeItemConfiguration>> valueToChallengeItems( final StoredValue value )
+    {
+        Objects.requireNonNull( value );
+
+        if ( !( value instanceof ChallengeValue ) )
         {
-            final Object loopString = iter.next();
-            if ( loopString == null || loopString.toString().length() < 1 )
-            {
-                iter.remove();
-            }
+            throw new IllegalArgumentException( "setting value is not readable as challenge items" );
         }
-        return results;
+
+        return ( Map<String, List<ChallengeItemConfiguration>> ) value.toNativeObject();
     }
 
     public static boolean valueToBoolean( final StoredValue value )
@@ -245,12 +233,11 @@ public final class ValueTypeConverter
         }
 
         final Map<String, String> availableValues = ( Map<String, String> ) value.toNativeObject();
-        final Map<Locale, String> availableLocaleMap = new LinkedHashMap<>();
-        for ( final Map.Entry<String, String> entry : availableValues.entrySet() )
-        {
-            final String localeStr = entry.getKey();
-            availableLocaleMap.put( LocaleHelper.parseLocaleString( localeStr ), entry.getValue() );
-        }
+        final Map<Locale, String> availableLocaleMap = Collections.unmodifiableMap( availableValues.entrySet().stream()
+                .collect( CollectionUtil.collectorToLinkedMap(
+                    entry -> LocaleHelper.parseLocaleString( entry.getKey() ),
+                        Map.Entry::getValue ) ) );
+
         final Locale matchedLocale = LocaleHelper.localeResolver( locale, availableLocaleMap.keySet() );
 
         return availableLocaleMap.get( matchedLocale );
@@ -263,12 +250,12 @@ public final class ValueTypeConverter
             throw new IllegalArgumentException( "may not read LOCALIZED_STRING_ARRAY value" );
         }
         final Map<String, List<String>> storedValues = ( Map<String, List<String>> ) value.toNativeObject();
-        final Map<Locale, List<String>> availableLocaleMap = new LinkedHashMap<>();
-        for ( final Map.Entry<String, List<String>> entry : storedValues.entrySet() )
-        {
-            final String localeStr = entry.getKey();
-            availableLocaleMap.put( LocaleHelper.parseLocaleString( localeStr ), entry.getValue() );
-        }
+
+        final Map<Locale, List<String>> availableLocaleMap = Collections.unmodifiableMap( storedValues.entrySet().stream()
+                .collect( CollectionUtil.collectorToLinkedMap(
+                        entry -> LocaleHelper.parseLocaleString( entry.getKey() ),
+                        Map.Entry::getValue ) ) );
+
         final Locale matchedLocale = LocaleHelper.localeResolver( locale, availableLocaleMap.keySet() );
 
         return availableLocaleMap.get( matchedLocale );
@@ -278,7 +265,7 @@ public final class ValueTypeConverter
     {
         if ( PwmSettingSyntax.SELECT != setting.getSyntax() )
         {
-            throw new IllegalArgumentException( "may not read SELECT enum value for setting: " + setting.toString() );
+            throw new IllegalArgumentException( "may not read SELECT enum value for setting: " + setting );
         }
 
         final String strValue = ( String ) value.toNativeObject();
@@ -289,25 +276,21 @@ public final class ValueTypeConverter
     {
         if ( PwmSettingSyntax.EMAIL != setting.getSyntax() )
         {
-            throw new IllegalArgumentException( "may not read EMAIL value for setting: " + setting.toString() );
+            throw new IllegalArgumentException( "may not read EMAIL value for setting: " + setting );
         }
 
         final Map<String, EmailItemBean> storedValues =  ( Map<String, EmailItemBean> ) storedValue.toNativeObject();
-        final Map<Locale, EmailItemBean> availableLocaleMap = new LinkedHashMap<>();
-        for ( final Map.Entry<String, EmailItemBean> entry : storedValues.entrySet() )
-        {
-            final String localeStr = entry.getKey();
-            availableLocaleMap.put( LocaleHelper.parseLocaleString( localeStr ), entry.getValue() );
-        }
 
-        return Collections.unmodifiableMap( availableLocaleMap );
+        return Collections.unmodifiableMap( storedValues.entrySet().stream().collect( CollectionUtil.collectorToLinkedMap(
+                entry -> LocaleHelper.parseLocaleString( entry.getKey() ),
+                Map.Entry::getValue ) ) );
     }
 
     public static Map<FileValue.FileInformation, FileValue.FileContent> valueToFile( final PwmSetting setting, final StoredValue storedValue )
     {
         if ( PwmSettingSyntax.FILE != setting.getSyntax() )
         {
-            throw new IllegalArgumentException( "may not read file value for setting: " + setting.toString() );
+            throw new IllegalArgumentException( "may not read file value for setting: " + setting );
         }
 
         if ( !( storedValue instanceof FileValue ) )
@@ -322,33 +305,10 @@ public final class ValueTypeConverter
     {
         if ( PwmSettingSyntax.OPTIONLIST != setting.getSyntax() )
         {
-            throw new IllegalArgumentException( "may not read optionlist value for setting: " + setting.toString() );
+            throw new IllegalArgumentException( "may not read optionlist value for setting: " + setting );
         }
 
         final Set<String> strValues = ( Set<String> ) value.toNativeObject();
-        return JavaHelper.readEnumSetFromStringCollection( enumClass, strValues );
-    }
-
-    public static List<String> valueToProfileID( final PwmSetting profileSetting, final StoredValue storedValue )
-    {
-        if ( PwmSettingSyntax.PROFILE != profileSetting.getSyntax() )
-        {
-            throw new IllegalArgumentException( "may not read profile value for setting: " + profileSetting.toString() );
-        }
-
-        final List<String> profiles = ValueTypeConverter.valueToStringArray( storedValue );
-
-        final List<String> returnSet = profiles
-                .stream()
-                .distinct()
-                .filter( ( profile ) -> !StringUtil.isEmpty( profile ) )
-                .collect( Collectors.toCollection( ArrayList::new ) );
-
-        if ( returnSet.isEmpty() )
-        {
-            returnSet.add( PwmConstants.PROFILE_ID_DEFAULT );
-        }
-
-        return Collections.unmodifiableList( returnSet );
+        return CollectionUtil.readEnumSetFromStringCollection( enumClass, strValues );
     }
 }

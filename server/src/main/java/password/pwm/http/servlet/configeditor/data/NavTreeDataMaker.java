@@ -20,21 +20,26 @@
 
 package password.pwm.http.servlet.configeditor.data;
 
-import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
-import password.pwm.PwmEnvironment;
-import password.pwm.config.Configuration;
+import password.pwm.bean.DomainID;
+import password.pwm.config.AppConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingCategory;
+import password.pwm.config.PwmSettingFlag;
+import password.pwm.config.PwmSettingScope;
+import password.pwm.config.PwmSettingSyntax;
+import password.pwm.config.stored.ConfigSearchMachine;
+import password.pwm.config.stored.StoredConfigKey;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.stored.StoredConfigurationUtil;
 import password.pwm.config.value.StoredValue;
+import password.pwm.http.servlet.configeditor.DomainManageMode;
 import password.pwm.i18n.Config;
 import password.pwm.i18n.PwmLocaleBundle;
 import password.pwm.util.i18n.LocaleHelper;
-import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
 import java.time.Instant;
@@ -43,7 +48,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.ResourceBundle;
+import java.util.stream.Collectors;
 
 /**
  * Utility class for generating {@link NavTreeItem}s suitable for display in the
@@ -54,8 +61,11 @@ public class NavTreeDataMaker
     private static final PwmLogger LOGGER = PwmLogger.forClass( NavTreeDataMaker.class );
     private static final String ROOT_NODE_ID = "ROOT";
 
+    private static final String DISPLAY_TEXT_ID = "DISPLAY_TEXT";
+    private static final String DISPLAY_TEXT_NAME = "Display Text";
+
     public static List<NavTreeItem> makeNavTreeItems(
-            final PwmApplication pwmApplication,
+            final DomainID domainID,
             final StoredConfiguration storedConfiguration,
             final NavTreeSettings navTreeSettings
     )
@@ -67,16 +77,16 @@ public class NavTreeDataMaker
         navigationData.add( makeRootNode() );
 
         // add setting nodes
-        navigationData.addAll( makeSettingNavItems( pwmApplication, storedConfiguration, navTreeSettings ) );
+        navigationData.addAll( makeCategoryNavItems( domainID, storedConfiguration, navTreeSettings ) );
 
         // add display text nodes
-        navigationData.addAll( makeDisplayTextNavItems( pwmApplication, storedConfiguration, navTreeSettings ) );
+        navigationData.addAll( makeDisplayTextNavItems( domainID, storedConfiguration, navTreeSettings ) );
 
         NavTreeDataMaker.moveNavItemToTopOfList( PwmSettingCategory.NOTES.toString(), navigationData );
         NavTreeDataMaker.moveNavItemToTopOfList( PwmSettingCategory.TEMPLATES.toString(), navigationData );
         LOGGER.trace( () -> "generated " + navigationData.size()
-                + " navTreeItems for display menu with settings"
-                + JsonUtil.serialize( navTreeSettings ),
+                        + " navTreeItems for display menu with settings"
+                        + JsonFactory.get().serialize( navTreeSettings ),
                 () -> TimeDuration.fromCurrent( startTime ) );
         return Collections.unmodifiableList( navigationData );
     }
@@ -90,7 +100,20 @@ public class NavTreeDataMaker
     }
 
     private static List<NavTreeItem> makeDisplayTextNavItems(
-            final PwmApplication pwmApplication,
+            final DomainID domainId,
+            final StoredConfiguration storedConfiguration,
+            final NavTreeSettings navTreeSettings
+    )
+    {
+        final DomainID domainID = navTreeSettings.getDomainManageMode() == DomainManageMode.domain
+                ? domainId
+                : DomainID.systemId();
+
+        return makeDisplayTextNavItemsForDomain( domainID, storedConfiguration, navTreeSettings );
+    }
+
+    private static List<NavTreeItem> makeDisplayTextNavItemsForDomain(
+            final DomainID domainID,
             final StoredConfiguration storedConfiguration,
             final NavTreeSettings navTreeSettings
     )
@@ -108,7 +131,7 @@ public class NavTreeDataMaker
                 if ( !localeBundle.isAdminOnly() )
                 {
                     final List<String> modifiedKeys = modifiedSettingsOnly
-                            ? new ArrayList<>( NavTreeDataMaker.determineModifiedDisplayKeysSettings( localeBundle, pwmApplication.getConfig(), storedConfiguration ) )
+                            ? new ArrayList<>( NavTreeDataMaker.determineModifiedDisplayKeysSettings( domainID, localeBundle, storedConfiguration ) )
                             : Collections.emptyList();
 
                     if ( !modifiedSettingsOnly || !modifiedKeys.isEmpty() )
@@ -121,7 +144,7 @@ public class NavTreeDataMaker
                         final NavTreeItem categoryInfo = NavTreeItem.builder()
                                 .id( localeBundle.toString() )
                                 .name( localeBundle.getTheClass().getSimpleName() )
-                                .parent( "DISPLAY_TEXT" )
+                                .parent( DISPLAY_TEXT_ID )
                                 .type ( NavTreeItem.NavItemType.displayText )
                                 .keys( outputKeys )
                                 .build();
@@ -135,8 +158,8 @@ public class NavTreeDataMaker
         if ( includeDisplayText )
         {
             final NavTreeItem categoryInfo = NavTreeItem.builder()
-                    .id( "DISPLAY_TEXT" )
-                    .name( "Display Text" )
+                    .id( DISPLAY_TEXT_ID )
+                    .name( DISPLAY_TEXT_NAME )
                     .type( NavTreeItem.NavItemType.navigation )
                     .parent( ROOT_NODE_ID )
                     .build();
@@ -148,22 +171,23 @@ public class NavTreeDataMaker
 
 
     private static List<String> determineModifiedDisplayKeysSettings(
+            final DomainID domainID,
             final PwmLocaleBundle bundle,
-            final Configuration config,
             final StoredConfiguration storedConfiguration
     )
     {
+        final List<Locale> knownLocales = Collections.unmodifiableList( new AppConfig( storedConfiguration ).getKnownLocales() );
         final List<String> modifiedKeys = new ArrayList<>();
         for ( final String key : bundle.getDisplayKeys() )
         {
-            final Map<String, String> storedBundle = storedConfiguration.readLocaleBundleMap( bundle, key );
+            final Map<String, String> storedBundle = storedConfiguration.readLocaleBundleMap( bundle, key, domainID );
             if ( !storedBundle.isEmpty() )
             {
-                for ( final Locale locale : config.getKnownLocales() )
+                for ( final Locale locale : knownLocales )
                 {
                     final ResourceBundle defaultBundle = ResourceBundle.getBundle( bundle.getTheClass().getName(), locale );
                     final String localeKeyString = PwmConstants.DEFAULT_LOCALE.toString().equals( locale.toString() ) ? "" : locale.toString();
-                    if ( storedBundle.containsKey( localeKeyString ) )
+
                     {
                         final String value = storedBundle.get( localeKeyString );
                         if ( value != null && !value.equals( defaultBundle.getString( key ) ) )
@@ -180,79 +204,86 @@ public class NavTreeDataMaker
     /**
      * Produces a collection of {@code NavTreeItem}.
      */
-    private static List<NavTreeItem> makeSettingNavItems(
-            final PwmApplication pwmApplication,
+    private static List<NavTreeItem> makeCategoryNavItems(
+            final DomainID domainId,
+            final StoredConfiguration storedConfiguration,
+            final NavTreeSettings navTreeSettings
+    )
+    {
+        return PwmSettingCategory.sortedValues().stream()
+                .filter( loopCategory -> categoryMatcher( domainId, loopCategory, null, storedConfiguration, navTreeSettings ) )
+                .flatMap( loopCategory -> navTreeItemsForCategory( loopCategory, domainId, storedConfiguration, navTreeSettings ).stream() )
+                .collect( Collectors.toUnmodifiableList() );
+
+    }
+
+    private static List<NavTreeItem> navTreeItemsForCategory(
+            final PwmSettingCategory loopCategory,
+            final DomainID domainId,
             final StoredConfiguration storedConfiguration,
             final NavTreeSettings navTreeSettings
     )
     {
         final Locale locale = navTreeSettings.getLocale();
-        final List<NavTreeItem> navigationData = new ArrayList<>();
 
-        for ( final PwmSettingCategory loopCategory : PwmSettingCategory.sortedValues() )
+        if ( !loopCategory.hasProfiles() )
         {
-            if ( !loopCategory.hasProfiles() )
-            {
-                // regular category, so output a standard nav tree item
-                if ( categoryMatcher( pwmApplication, loopCategory, null, storedConfiguration, navTreeSettings ) )
-                {
-                    navigationData.add( navTreeItemForCategory( loopCategory, locale, null ) );
-                }
-            }
-            else
-            {
-                final List<String> profiles = StoredConfigurationUtil.profilesForCategory( loopCategory, storedConfiguration );
-
-                if ( loopCategory.isTopLevelProfile() )
-                {
-                    // edit profile option
-                    navigationData.add( navTreeItemForCategory( loopCategory, locale, null ) );
-
-                    {
-                        final String editItemName = LocaleHelper.getLocalizedMessage( locale, Config.Label_ProfileListEditMenuItem, null );
-                        final PwmSetting profileSetting = loopCategory.getProfileSetting().orElseThrow( IllegalStateException::new );
-
-                        final NavTreeItem profileEditorInfo = NavTreeItem.builder()
-                                .id( loopCategory.getKey() + "-EDITOR" )
-                                .name( editItemName )
-                                .type(  NavTreeItem.NavItemType.profileDefinition )
-                                .profileSetting( profileSetting.getKey() )
-                                .parent( loopCategory.getKey() )
-                                .build();
-                        navigationData.add( profileEditorInfo );
-                    }
-
-                    for ( final String profileId : profiles )
-                    {
-                        final NavTreeItem.NavItemType type = !loopCategory.hasChildren()
-                                ? NavTreeItem.NavItemType.category
-                                : NavTreeItem.NavItemType.navigation;
-
-                        final NavTreeItem profileInfo = navTreeItemForCategory( loopCategory, locale, profileId ).toBuilder()
-                                .name(  profileId.isEmpty() ? "Default" : profileId )
-                                .id( "profile-" + loopCategory.getKey() + "-" + profileId )
-                                .parent( loopCategory.getKey() )
-                                .type( type )
-                                .build();
-
-                        navigationData.add( profileInfo );
-                    }
-                }
-                else
-                {
-                    for ( final String profileId : profiles )
-                    {
-                        if ( categoryMatcher( pwmApplication, loopCategory, profileId, storedConfiguration, navTreeSettings ) )
-                        {
-                            navigationData.add( navTreeItemForCategory( loopCategory, locale, profileId ) );
-                        }
-                    }
-                }
-            }
+            // regular category, so output a standard nav tree item
+            return List.of( navTreeItemForCategory( loopCategory, locale, null ) );
         }
 
-        return navigationData;
+        final List<String> profiles = StoredConfigurationUtil.profilesForCategory( domainId, loopCategory, storedConfiguration );
+        if ( loopCategory.isTopLevelProfile() )
+        {
+            final List<NavTreeItem> navigationData = new ArrayList<>( profiles.size() );
+
+            // edit profile option
+            navigationData.add( navTreeItemForCategory( loopCategory, locale, null ) );
+
+            {
+                final String editItemName = LocaleHelper.getLocalizedMessage( locale, Config.Label_ProfileListEditMenuItem, null );
+                final PwmSetting profileSetting = loopCategory.getProfileSetting().orElseThrow( IllegalStateException::new );
+
+                final NavTreeItem profileEditorInfo = NavTreeItem.builder()
+                        .id( loopCategory.getKey() + "-EDITOR" )
+                        .name( editItemName )
+                        .type( NavTreeItem.NavItemType.profileDefinition )
+                        .profileSetting( profileSetting.getKey() )
+                        .parent( loopCategory.getKey() )
+                        .build();
+                navigationData.add( profileEditorInfo );
+            }
+
+            for ( final String profileId : profiles )
+            {
+                final NavTreeItem.NavItemType type = !loopCategory.hasChildren()
+                        ? NavTreeItem.NavItemType.category
+                        : NavTreeItem.NavItemType.navigation;
+
+                final NavTreeItem profileInfo = navTreeItemForCategory( loopCategory, locale, profileId ).toBuilder()
+                        .name( profileId.isEmpty() ? "Default" : profileId )
+                        .id( "profile-" + loopCategory.getKey() + "-" + profileId )
+                        .parent( loopCategory.getKey() )
+                        .type( type )
+                        .build();
+
+                navigationData.add( profileInfo );
+            }
+
+            return Collections.unmodifiableList( navigationData );
+        }
+
+        final List<NavTreeItem> navigationData = new ArrayList<>();
+        for ( final String profileId : profiles )
+        {
+            if ( categoryMatcher( domainId, loopCategory, profileId, storedConfiguration, navTreeSettings ) )
+            {
+                navigationData.add( navTreeItemForCategory( loopCategory, locale, profileId ) );
+            }
+        }
+        return Collections.unmodifiableList( navigationData );
     }
+
 
     private static NavTreeItem navTreeItemForCategory(
             final PwmSettingCategory category,
@@ -280,21 +311,16 @@ public class NavTreeDataMaker
     }
 
     private static boolean categoryMatcher(
-            final PwmApplication pwmApplication,
+            final DomainID domainID,
             final PwmSettingCategory category,
             final String profile,
             final StoredConfiguration storedConfiguration,
             final NavTreeSettings navTreeSettings
     )
     {
-        if ( category.isHidden() )
-        {
-            return false;
-        }
-
         if ( category == PwmSettingCategory.HTTPS_SERVER )
         {
-            if ( !pwmApplication.getPwmEnvironment().getFlags().contains( PwmEnvironment.ApplicationFlag.ManageHttps ) )
+            if ( !navTreeSettings.isMangeHttps() )
             {
                 return false;
             }
@@ -302,7 +328,7 @@ public class NavTreeDataMaker
 
         for ( final PwmSettingCategory childCategory : category.getChildren() )
         {
-            if ( categoryMatcher( pwmApplication, childCategory, profile, storedConfiguration, navTreeSettings ) )
+            if ( categoryMatcher( domainID, childCategory, profile, storedConfiguration, navTreeSettings ) )
             {
                 return true;
             }
@@ -310,7 +336,7 @@ public class NavTreeDataMaker
 
         for ( final PwmSetting setting : category.getSettings() )
         {
-            if ( settingMatcher( storedConfiguration, setting, profile, navTreeSettings ) )
+            if ( settingMatcher( domainID, storedConfiguration, setting, profile, navTreeSettings ) )
             {
                 return true;
             }
@@ -319,28 +345,52 @@ public class NavTreeDataMaker
         return false;
     }
 
-    private static boolean settingMatcher(
+    static boolean settingMatcher(
+            final DomainID domainID,
             final StoredConfiguration storedConfiguration,
             final PwmSetting setting,
             final String profileID,
             final NavTreeSettings navTreeSettings
     )
     {
-        if ( setting.isHidden() )
+        final StoredConfigKey storedConfigKey = StoredConfigKey.forSetting( setting, profileID, domainID );
+
+        if ( setting.getSyntax() == PwmSettingSyntax.PROFILE && !setting.isHidden() && setting.getCategory().getParent().isHidden() )
+        {
+            return true;
+        }
+
+        final boolean valueIsDefault = StoredConfigurationUtil.isDefaultValue( storedConfiguration, storedConfigKey );
+        if ( setting.isHidden() && !valueIsDefault && setting.getSyntax() != PwmSettingSyntax.PROFILE )
         {
             return false;
         }
 
-        if ( navTreeSettings.isModifiedSettingsOnly() )
+        final PwmSettingCategory settingCategory = setting.getCategory();
+        if ( navTreeSettings.getDomainManageMode() == DomainManageMode.system
+                && settingCategory.getScope() != PwmSettingScope.SYSTEM )
         {
-            if ( storedConfiguration.isDefaultValue( setting, profileID ) )
-            {
-                return false;
-            }
+            return false;
+        }
+        else if ( navTreeSettings.getDomainManageMode() == DomainManageMode.domain
+                && settingCategory.getScope() != PwmSettingScope.DOMAIN )
+        {
+            return false;
+        }
+
+        if ( navTreeSettings.isModifiedSettingsOnly() && valueIsDefault )
+        {
+            return false;
         }
 
         final int level = navTreeSettings.getLevel();
         if ( setting.getLevel() > level )
+        {
+            return false;
+        }
+
+        if ( setting.getFlags().contains( PwmSettingFlag.MultiDomain )
+                && ( !( new AppConfig( storedConfiguration ).isMultiDomain() ) ) )
         {
             return false;
         }
@@ -351,10 +401,10 @@ public class NavTreeDataMaker
         }
         else
         {
-            final StoredValue storedValue = storedConfiguration.readSetting( setting, profileID );
+            final StoredValue storedValue = storedConfiguration.readStoredValue( storedConfigKey ).orElseThrow();
             for ( final String term : StringUtil.whitespaceSplit( navTreeSettings.getFilterText() ) )
             {
-                if ( StoredConfigurationUtil.matchSetting( storedConfiguration, setting, storedValue, term, PwmConstants.DEFAULT_LOCALE ) )
+                if ( ConfigSearchMachine.matchSetting( storedConfiguration, setting, storedValue, term, PwmConstants.DEFAULT_LOCALE ) )
                 {
                     return true;
                 }
@@ -366,22 +416,15 @@ public class NavTreeDataMaker
 
     private static void moveNavItemToTopOfList( final String categoryID, final List<NavTreeItem> navigationData )
     {
+        // put templates on top
+        final Optional<NavTreeItem> templateEntry = navigationData.stream()
+                .filter( entry -> categoryID.equals( entry.getId() ) )
+                .findFirst();
+
+        if ( templateEntry.isPresent() )
         {
-            // put templates on top
-            NavTreeItem templateEntry = null;
-            for ( final NavTreeItem entry : navigationData )
-            {
-                if ( categoryID.equals( entry.getId() ) )
-                {
-                    templateEntry = entry;
-                }
-            }
-            if ( templateEntry != null )
-            {
-                navigationData.remove( templateEntry );
-                navigationData.add( 0, templateEntry );
-            }
+            navigationData.remove( templateEntry.get() );
+            navigationData.add( 0, templateEntry.get() );
         }
     }
-
 }

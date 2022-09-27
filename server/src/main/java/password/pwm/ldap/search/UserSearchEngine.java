@@ -27,9 +27,11 @@ import com.novell.ldapchai.provider.ChaiProvider;
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
+import password.pwm.PwmDomain;
+import password.pwm.bean.DomainID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
-import password.pwm.config.Configuration;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.option.DuplicateMode;
 import password.pwm.config.profile.LdapProfile;
@@ -40,15 +42,17 @@ import password.pwm.error.PwmException;
 import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthRecord;
+import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
 import password.pwm.util.PwmScheduler;
 import password.pwm.util.java.AtomicLoopIntIncrementer;
+import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.ConditionalTaskExecutor;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StatisticCounterBundle;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogLevel;
 import password.pwm.util.logging.PwmLogger;
 
@@ -65,16 +69,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 
-public class UserSearchEngine implements PwmService
+public class UserSearchEngine extends AbstractPwmService implements PwmService
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( UserSearchEngine.class );
 
@@ -91,13 +92,13 @@ public class UserSearchEngine implements PwmService
         backgroundJobTimeoutCounter,
     }
 
-    private PwmApplication pwmApplication;
+    private PwmDomain pwmDomain;
 
     private ThreadPoolExecutor executor;
 
-    private final ConditionalTaskExecutor debugOutputTask = new ConditionalTaskExecutor(
+    private final ConditionalTaskExecutor debugOutputTask = ConditionalTaskExecutor.forPeriodicTask(
             this::periodicDebugOutput,
-            new ConditionalTaskExecutor.TimeDurationPredicate( 1, TimeDuration.Unit.MINUTES )
+            TimeDuration.of( 1, TimeDuration.Unit.MINUTES ).asDuration()
     );
 
     public UserSearchEngine( )
@@ -105,21 +106,24 @@ public class UserSearchEngine implements PwmService
     }
 
     @Override
-    public STATUS status( )
+    protected Set<PwmApplication.Condition> openConditions()
     {
+        return Collections.emptySet();
+    }
+
+    @Override
+    public STATUS postAbstractInit( final PwmApplication pwmApplication, final DomainID domainID )
+            throws PwmException
+    {
+        this.pwmDomain = pwmApplication.domains().get( domainID );
+        this.executor = createExecutor( pwmDomain );
+        this.periodicDebugOutput();
+
         return STATUS.OPEN;
     }
 
     @Override
-    public void init( final PwmApplication pwmApplication ) throws PwmException
-    {
-        this.pwmApplication = pwmApplication;
-        this.executor = createExecutor( pwmApplication );
-        this.periodicDebugOutput();
-    }
-
-    @Override
-    public void close( )
+    public void shutdownImpl( )
     {
         if ( executor != null )
         {
@@ -129,7 +133,7 @@ public class UserSearchEngine implements PwmService
     }
 
     @Override
-    public List<HealthRecord> healthCheck( )
+    public List<HealthRecord> serviceHealthCheck( )
     {
         return Collections.emptyList();
     }
@@ -153,7 +157,7 @@ public class UserSearchEngine implements PwmService
             UserIdentity inputIdentity = null;
             try
             {
-                inputIdentity = UserIdentity.fromKey( username, pwmApplication );
+                inputIdentity = UserIdentity.fromKey( sessionLabel, username, pwmDomain.getPwmApplication() );
             }
             catch ( final PwmException e )
             {
@@ -164,12 +168,12 @@ public class UserSearchEngine implements PwmService
             {
                 try
                 {
-                    final ChaiUser theUser = pwmApplication.getProxiedChaiUser( inputIdentity );
+                    final ChaiUser theUser = pwmDomain.getProxiedChaiUser( sessionLabel, inputIdentity );
                     if ( theUser.exists() )
                     {
                         final String canonicalDN;
                         canonicalDN = theUser.readCanonicalDN();
-                        return UserIdentity.createUserIdentity( canonicalDN, inputIdentity.getLdapProfileID() );
+                        return UserIdentity.create( canonicalDN, inputIdentity.getLdapProfileID(), pwmDomain.getDomainID() );
                     }
                 }
                 catch ( final ChaiOperationException e )
@@ -223,7 +227,7 @@ public class UserSearchEngine implements PwmService
             throws PwmUnrecoverableException, PwmOperationalException
     {
         final Instant startTime = Instant.now();
-        final DuplicateMode dupeMode = pwmApplication.getConfig().readSettingAsEnum( PwmSetting.LDAP_DUPLICATE_MODE, DuplicateMode.class );
+        final DuplicateMode dupeMode = pwmDomain.getConfig().readSettingAsEnum( PwmSetting.LDAP_DUPLICATE_MODE, DuplicateMode.class );
         final int searchCount = ( dupeMode == DuplicateMode.FIRST_ALL ) ? 1 : 2;
         final Map<UserIdentity, Map<String, String>> searchResults = performMultiUserSearch( searchConfiguration, searchCount, Collections.emptyList(), sessionLabel );
         final List<UserIdentity> results = searchResults == null ? Collections.emptyList() : new ArrayList<>( searchResults.keySet() );
@@ -285,7 +289,7 @@ public class UserSearchEngine implements PwmService
                 sessionLabel
         );
         final boolean resultsExceeded = searchResults.size() > maxResults;
-        final Map<UserIdentity, Map<String, String>> returnData = new LinkedHashMap<>();
+        final Map<UserIdentity, Map<String, String>> returnData = new LinkedHashMap<>( Math.min( maxResults, searchResults.size() ) );
         for ( final Map.Entry<UserIdentity, Map<String, String>> entry : searchResults.entrySet() )
         {
             final UserIdentity loopUser = entry.getKey();
@@ -309,9 +313,9 @@ public class UserSearchEngine implements PwmService
         final Collection<LdapProfile> ldapProfiles;
         if ( searchConfiguration.getLdapProfile() != null && !searchConfiguration.getLdapProfile().isEmpty() )
         {
-            if ( pwmApplication.getConfig().getLdapProfiles().containsKey( searchConfiguration.getLdapProfile() ) )
+            if ( pwmDomain.getConfig().getLdapProfiles().containsKey( searchConfiguration.getLdapProfile() ) )
             {
-                ldapProfiles = Collections.singletonList( pwmApplication.getConfig().getLdapProfiles().get( searchConfiguration.getLdapProfile() ) );
+                ldapProfiles = Collections.singletonList( pwmDomain.getConfig().getLdapProfiles().get( searchConfiguration.getLdapProfile() ) );
             }
             else
             {
@@ -322,16 +326,16 @@ public class UserSearchEngine implements PwmService
         }
         else
         {
-            ldapProfiles = pwmApplication.getConfig().getLdapProfiles().values();
+            ldapProfiles = pwmDomain.getConfig().getLdapProfiles().values();
         }
 
-        final boolean ignoreUnreachableProfiles = pwmApplication.getConfig().readSettingAsBoolean( PwmSetting.LDAP_IGNORE_UNREACHABLE_PROFILES );
+        final boolean ignoreUnreachableProfiles = pwmDomain.getConfig().readSettingAsBoolean( PwmSetting.LDAP_IGNORE_UNREACHABLE_PROFILES );
 
         final List<String> errors = new ArrayList<>();
 
         counters.increment( SearchStatistic.searchCounter );
         final int searchID = searchIdCounter.next();
-        final long profileRetryDelayMS = Long.parseLong( pwmApplication.getConfig().readAppProperty( AppProperty.LDAP_PROFILE_RETRY_DELAY ) );
+        final long profileRetryDelayMS = Long.parseLong( pwmDomain.getConfig().readAppProperty( AppProperty.LDAP_PROFILE_RETRY_DELAY ) );
         final AtomicLoopIntIncrementer jobIncrementer = AtomicLoopIntIncrementer.builder().build();
 
         final List<UserSearchJob> searchJobs = new ArrayList<>();
@@ -339,7 +343,7 @@ public class UserSearchEngine implements PwmService
         for ( final LdapProfile ldapProfile : ldapProfiles )
         {
             boolean skipProfile = false;
-            final Instant lastLdapFailure = pwmApplication.getLdapConnectionService().getLastLdapFailureTime( ldapProfile );
+            final Instant lastLdapFailure = pwmDomain.getLdapConnectionService().getLastLdapFailureTime( ldapProfile );
 
             if ( ldapProfiles.size() > 1 && lastLdapFailure != null && TimeDuration.fromCurrent( lastLdapFailure ).isShorterThan( profileRetryDelayMS ) )
             {
@@ -365,13 +369,13 @@ public class UserSearchEngine implements PwmService
                 {
                     if ( e.getError() == PwmError.ERROR_DIRECTORY_UNAVAILABLE )
                     {
-                        pwmApplication.getLdapConnectionService().setLastLdapFailure( ldapProfile, e.getErrorInformation() );
+                        pwmDomain.getLdapConnectionService().setLastLdapFailure( ldapProfile, e.getErrorInformation() );
                         if ( ignoreUnreachableProfiles )
                         {
                             errors.add( e.getErrorInformation().getDetailedErrorMsg() );
                             if ( errors.size() >= ldapProfiles.size() )
                             {
-                                final String errorMsg = "all ldap profiles are unreachable; errors: " + JsonUtil.serializeCollection( errors );
+                                final String errorMsg = "all ldap profiles are unreachable; errors: " + JsonFactory.get().serializeCollection( errors );
                                 throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_DIRECTORY_UNAVAILABLE, errorMsg ) );
                             }
                         }
@@ -385,8 +389,7 @@ public class UserSearchEngine implements PwmService
         }
 
         final Map<UserIdentity, Map<String, String>> resultsMap = new LinkedHashMap<>( executeSearchJobs( searchJobs ) );
-        final Map<UserIdentity, Map<String, String>> returnMap = trimOrderedMap( resultsMap, maxResults );
-        return Collections.unmodifiableMap( returnMap );
+        return trimOrderedMap( resultsMap, maxResults );
     }
 
 
@@ -423,13 +426,13 @@ public class UserSearchEngine implements PwmService
             {
                 for ( final String searchContext : searchContexts )
                 {
-                    validateSpecifiedContext( ldapProfile, searchContext );
+                    validateSpecifiedContext( sessionLabel, ldapProfile, searchContext );
                 }
             }
         }
         else
         {
-            searchContexts = ldapProfile.getRootContexts( pwmApplication );
+            searchContexts = ldapProfile.getRootContexts( sessionLabel, pwmDomain );
         }
 
         final long timeLimitMS = searchConfiguration.getSearchTimeout() != null
@@ -437,10 +440,10 @@ public class UserSearchEngine implements PwmService
                 : ( ldapProfile.readSettingAsLong( PwmSetting.LDAP_SEARCH_TIMEOUT ) * 1000 );
 
         final ChaiProvider chaiProvider = searchConfiguration.getChaiProvider() == null
-                ? pwmApplication.getProxyChaiProvider( ldapProfile.getIdentifier() )
+                ? pwmDomain.getProxyChaiProvider( sessionLabel, ldapProfile.getIdentifier() )
                 : searchConfiguration.getChaiProvider();
 
-        final List<UserSearchJob> returnMap = new ArrayList<>();
+        final List<UserSearchJob> returnMap = new ArrayList<>( searchContexts.size() );
         for ( final String loopContext : searchContexts )
         {
             final UserSearchJobParameters userSearchJobParameters = UserSearchJobParameters.builder()
@@ -457,7 +460,7 @@ public class UserSearchEngine implements PwmService
                     .searchScope( searchConfiguration.getSearchScope() )
                     .ignoreOperationalErrors( searchConfiguration.isIgnoreOperationalErrors() )
                     .build();
-            final UserSearchJob userSearchJob = new UserSearchJob( pwmApplication, this, userSearchJobParameters );
+            final UserSearchJob userSearchJob = new UserSearchJob( pwmDomain, this, userSearchJobParameters );
             returnMap.add( userSearchJob );
         }
 
@@ -481,11 +484,11 @@ public class UserSearchEngine implements PwmService
                 multiSearchFilter.append( "(&" );
                 for ( final String queryPart : searchConfiguration.getUsername().split( " " ) )
                 {
-                    multiSearchFilter.append( "(" );
+                    multiSearchFilter.append( '(' );
                     multiSearchFilter.append( inputSearchFilter.replace( PwmConstants.VALUE_REPLACEMENT_USERNAME, queryPart ) );
-                    multiSearchFilter.append( ")" );
+                    multiSearchFilter.append( ')' );
                 }
-                multiSearchFilter.append( ")" );
+                multiSearchFilter.append( ')' );
                 searchFilter = multiSearchFilter.toString();
             }
             else
@@ -496,7 +499,7 @@ public class UserSearchEngine implements PwmService
         else if ( searchConfiguration.getGroupDN() != null )
         {
             final String groupAttr = ldapProfile.readSettingAsString( PwmSetting.LDAP_USER_GROUP_ATTRIBUTE );
-            searchFilter = "(" + groupAttr + "=" + searchConfiguration.getGroupDN() + ")";
+            searchFilter = '(' + groupAttr + '=' + searchConfiguration.getGroupDN() + ')';
         }
         else if ( searchConfiguration.getFormValues() != null )
         {
@@ -510,17 +513,17 @@ public class UserSearchEngine implements PwmService
     }
 
 
-    private void validateSpecifiedContext( final LdapProfile profile, final String context )
+    private void validateSpecifiedContext( final SessionLabel sessionLabel, final LdapProfile profile, final String context )
             throws PwmOperationalException, PwmUnrecoverableException
     {
         Objects.requireNonNull( profile, "ldapProfile can not be null for ldap search context validation" );
         Objects.requireNonNull( context, "context can not be null for ldap search context validation" );
 
-        final String canonicalContext = profile.readCanonicalDN( pwmApplication, context );
+        final String canonicalContext = profile.readCanonicalDN( sessionLabel, pwmDomain, context );
 
         {
-            final Map<String, String> selectableContexts = profile.getSelectableContexts( pwmApplication );
-            if ( !JavaHelper.isEmpty( selectableContexts ) && selectableContexts.containsKey( canonicalContext ) )
+            final Map<String, String> selectableContexts = profile.getSelectableContexts( sessionLabel, pwmDomain );
+            if ( !CollectionUtil.isEmpty( selectableContexts ) && selectableContexts.containsKey( canonicalContext ) )
             {
                 // config pre-validates selectable contexts so this should be permitted
                 return;
@@ -528,8 +531,8 @@ public class UserSearchEngine implements PwmService
         }
 
         {
-            final List<String> rootContexts = profile.getRootContexts( pwmApplication );
-            if ( !JavaHelper.isEmpty( rootContexts ) )
+            final List<String> rootContexts = profile.getRootContexts( sessionLabel, pwmDomain );
+            if ( !CollectionUtil.isEmpty( rootContexts ) )
             {
                 for ( final String rootContext : rootContexts )
                 {
@@ -559,8 +562,8 @@ public class UserSearchEngine implements PwmService
         }
 
         //if supplied user name starts with username attr assume its the full dn and skip the search
-        final Set<String> namingAttributes = new HashSet<>();
-        for ( final LdapProfile ldapProfile : pwmApplication.getConfig().getLdapProfiles().values() )
+        final Set<String> namingAttributes = new HashSet<>( pwmDomain.getConfig().getLdapProfiles().size() );
+        for ( final LdapProfile ldapProfile : pwmDomain.getConfig().getLdapProfiles().values() )
         {
             final String usernameAttribute = ldapProfile.readSettingAsString( PwmSetting.LDAP_NAMING_ATTRIBUTE );
             if ( input.toLowerCase().startsWith( usernameAttribute.toLowerCase() + "=" ) )
@@ -610,7 +613,7 @@ public class UserSearchEngine implements PwmService
         }
 
         final UserIdentity userIdentity = results.keySet().iterator().next();
-        validateSpecifiedContext( userIdentity.getLdapProfile( pwmApplication.getConfig() ), userIdentity.getUserDN() );
+        validateSpecifiedContext( sessionLabel, userIdentity.getLdapProfile( pwmDomain.getPwmApplication().getConfig() ), userIdentity.getUserDN() );
         return userIdentity;
     }
 
@@ -619,7 +622,7 @@ public class UserSearchEngine implements PwmService
     )
             throws PwmUnrecoverableException
     {
-        if ( JavaHelper.isEmpty( userSearchJobs ) )
+        if ( CollectionUtil.isEmpty( userSearchJobs ) )
         {
             return Collections.emptyMap();
         }
@@ -721,6 +724,7 @@ public class UserSearchEngine implements PwmService
                     final Throwable t = e.getCause();
                     final ErrorInformation errorInformation;
                     final String errorMsg = "unexpected error during ldap search ("
+                            + "domain=" + pwmDomain.getDomainID() + " "
                             + "profile=" + jobInfo.getUserSearchJobParameters().getLdapProfile().getIdentifier() + ")"
                             + ", error: " + ( t instanceof PwmException ? t.getMessage() : JavaHelper.readHostileExceptionMessage( t ) );
                     if ( t instanceof PwmException )
@@ -761,12 +765,12 @@ public class UserSearchEngine implements PwmService
 
     private void periodicDebugOutput( )
     {
-        LOGGER.debug( () -> "periodic debug status: " + StringUtil.mapToString( debugProperties() ) );
+        LOGGER.trace( () -> "periodic debug status: " + StringUtil.mapToString( debugProperties() ) );
     }
 
     void log( final PwmLogLevel level, final SessionLabel sessionLabel, final int searchID, final int jobID, final String message )
     {
-        final String idMsg = logIdString( searchID, jobID );
+        final String idMsg = "domain=" + pwmDomain.getDomainID() + " " + logIdString( searchID, jobID );
         LOGGER.log( level, sessionLabel, () -> idMsg + " " + message );
     }
 
@@ -780,11 +784,11 @@ public class UserSearchEngine implements PwmService
         return idMsg;
     }
 
-    private static ThreadPoolExecutor createExecutor( final PwmApplication pwmApplication )
+    private ThreadPoolExecutor createExecutor( final PwmDomain pwmDomain )
     {
-        final Configuration configuration = pwmApplication.getConfig();
+        final DomainConfig domainConfig = pwmDomain.getConfig();
 
-        final boolean enabled = Boolean.parseBoolean( configuration.readAppProperty( AppProperty.LDAP_SEARCH_PARALLEL_ENABLE ) );
+        final boolean enabled = Boolean.parseBoolean( domainConfig.readAppProperty( AppProperty.LDAP_SEARCH_PARALLEL_ENABLE ) );
         if ( !enabled )
         {
             return null;
@@ -793,7 +797,7 @@ public class UserSearchEngine implements PwmService
         final int endPoints;
         {
             int counter = 0;
-            for ( final LdapProfile ldapProfile : configuration.getLdapProfiles().values() )
+            for ( final LdapProfile ldapProfile : domainConfig.getLdapProfiles().values() )
             {
                 final List<String> rootContexts = ldapProfile.readSettingAsStringArray( PwmSetting.LDAP_CONTEXTLESS_ROOT );
                 counter += rootContexts.size();
@@ -803,22 +807,14 @@ public class UserSearchEngine implements PwmService
 
         if ( endPoints > 1 )
         {
-            final int factor = Integer.parseInt( configuration.readAppProperty( AppProperty.LDAP_SEARCH_PARALLEL_FACTOR ) );
-            final int maxThreads = Integer.parseInt( configuration.readAppProperty( AppProperty.LDAP_SEARCH_PARALLEL_THREAD_MAX ) );
+            final int factor = Integer.parseInt( domainConfig.readAppProperty( AppProperty.LDAP_SEARCH_PARALLEL_FACTOR ) );
+            final int maxThreads = Integer.parseInt( domainConfig.readAppProperty( AppProperty.LDAP_SEARCH_PARALLEL_THREAD_MAX ) );
             final int threads = Math.min( maxThreads, ( endPoints ) * factor );
-            final ThreadFactory threadFactory = PwmScheduler.makePwmThreadFactory( PwmScheduler.makeThreadName( pwmApplication, UserSearchEngine.class ), true );
             final int minThreads = JavaHelper.rangeCheck( 1, 10, endPoints );
 
             LOGGER.trace( () -> "initialized with threads min=" + minThreads + " max=" + threads );
 
-            return new ThreadPoolExecutor(
-                    minThreads,
-                    threads,
-                    1,
-                    TimeUnit.MINUTES,
-                    new ArrayBlockingQueue<>( threads ),
-                    threadFactory
-            );
+            return PwmScheduler.makeMultiThreadExecutor( threads, getPwmApplication(), getSessionLabel(), UserSearchEngine.class );
         }
         return null;
     }

@@ -41,6 +41,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -100,11 +101,11 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
                     statement = connection.createStatement();
                     statement.execute( sqlString );
                     connection.commit();
-                    LOGGER.debug( () -> "created table " + db.toString() + " (" + TimeDuration.fromCurrent( startTime ).asCompactString() + ")" );
+                    LOGGER.debug( () -> "created table " + db + " (" + TimeDuration.fromCurrent( startTime ).asCompactString() + ")" );
                 }
                 catch ( final SQLException ex )
                 {
-                    LOGGER.error( () -> "error creating new table " + db.toString() + ": " + ex.getMessage() );
+                    LOGGER.error( () -> "error creating new table " + db + ": " + ex.getMessage() );
                 }
                 finally
                 {
@@ -114,11 +115,11 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
 
             {
                 final Instant startTime = Instant.now();
-                final String indexName = db.toString() + "_IDX";
+                final String indexName = db + "_IDX";
                 final StringBuilder sqlString = new StringBuilder();
                 sqlString.append( "CREATE index " ).append( indexName );
-                sqlString.append( " ON " ).append( db.toString() );
-                sqlString.append( " (" ).append( KEY_COLUMN ).append( ")" );
+                sqlString.append( " ON " ).append( db );
+                sqlString.append( " (" ).append( KEY_COLUMN ).append( ')' );
 
                 Statement statement = null;
                 try
@@ -143,7 +144,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
     private static void checkIfTableExists( final Connection connection, final LocalDB.DB db ) throws LocalDBException
     {
         final StringBuilder sb = new StringBuilder();
-        sb.append( "SELECT * FROM  " ).append( db.toString() ).append( " WHERE " + KEY_COLUMN + " = '0'" );
+        sb.append( "SELECT * FROM  " ).append( db ).append( " WHERE " + KEY_COLUMN + " = '0'" );
         Statement statement = null;
         ResultSet resultSet = null;
         try
@@ -240,11 +241,11 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
             throws LocalDBException
     {
         preCheck( false );
-        return get( db, key ) != null;
+        return get( db, key ).isPresent();
     }
 
     @Override
-    public String get( final LocalDB.DB db, final String key )
+    public Optional<String> get( final LocalDB.DB db, final String key )
             throws LocalDBException
     {
         preCheck( false );
@@ -262,7 +263,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
             resultSet = statement.executeQuery();
             if ( resultSet.next() )
             {
-                return resultSet.getString( VALUE_COLUMN );
+                return Optional.ofNullable( resultSet.getString( VALUE_COLUMN ) );
             }
         }
         catch ( final SQLException ex )
@@ -275,7 +276,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
             close( resultSet );
             lock.readLock().unlock();
         }
-        return null;
+        return Optional.empty();
     }
 
     @Override
@@ -326,7 +327,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
         PreparedStatement removeStatement = null;
 
         final String removeSqlString = "DELETE FROM " + db.toString() + " WHERE " + KEY_COLUMN + "=?";
-        final String insertSqlString = "INSERT INTO " + db.toString() + "(" + KEY_COLUMN + ", " + VALUE_COLUMN + ") VALUES(?,?)";
+        final String insertSqlString = "INSERT INTO " + db + "(" + KEY_COLUMN + ", " + VALUE_COLUMN + ") VALUES(?,?)";
 
         try
         {
@@ -436,7 +437,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
 
                 if ( !valueExists )
                 {
-                    final String insertSql = "INSERT INTO " + db.toString() + "(" + KEY_COLUMN + ", " + VALUE_COLUMN + ") VALUES(?,?)";
+                    final String insertSql = "INSERT INTO " + db + "(" + KEY_COLUMN + ", " + VALUE_COLUMN + ") VALUES(?,?)";
                     insertStatement = dbConnection.prepareStatement( insertSql );
                     insertStatement.setString( 1, key );
                     insertStatement.setString( 2, value );
@@ -485,7 +486,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
     {
         preCheck( false );
         final StringBuilder sb = new StringBuilder();
-        sb.append( "SELECT COUNT(" + KEY_COLUMN + ") FROM " ).append( db.toString() );
+        sb.append( "SELECT COUNT(" + KEY_COLUMN + ") FROM " ).append( db );
 
         PreparedStatement statement = null;
         ResultSet resultSet = null;
@@ -526,7 +527,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
         preCheck( true );
         final Instant startTime = Instant.now();
         final StringBuilder sqlText = new StringBuilder();
-        sqlText.append( "DROP TABLE " ).append( db.toString() );
+        sqlText.append( "DROP TABLE " ).append( db );
 
         PreparedStatement statement = null;
         try

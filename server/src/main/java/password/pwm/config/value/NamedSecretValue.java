@@ -20,22 +20,22 @@
 
 package password.pwm.config.value;
 
-import com.google.gson.reflect.TypeToken;
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlElement;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.stored.StoredConfigXmlSerializer;
+import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
 import password.pwm.config.value.data.NamedSecretData;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
+import password.pwm.error.PwmInternalException;
 import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.PasswordData;
-import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.LazySupplier;
 import password.pwm.util.java.StringUtil;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmBlockAlgorithm;
 import password.pwm.util.secure.PwmSecurityKey;
 import password.pwm.util.secure.SecureEngine;
@@ -80,9 +80,7 @@ public class NamedSecretValue implements StoredValue
             {
                 try
                 {
-                    final Map<String, NamedSecretData> values = JsonUtil.deserialize( value, new TypeToken<Map<String, NamedSecretData>>()
-                    {
-                    }.getType() );
+                    final Map<String, NamedSecretData> values = JsonFactory.get().deserializeMap( value, String.class, NamedSecretData.class );
                     final Map<String, NamedSecretData> linkedValues = new LinkedHashMap<>( values );
                     return new NamedSecretValue( linkedValues );
                 }
@@ -102,7 +100,7 @@ public class NamedSecretValue implements StoredValue
                     throws PwmOperationalException, PwmUnrecoverableException
             {
                 final Map<String, NamedSecretData> values = new LinkedHashMap<>();
-                final List<XmlElement> valueElements = settingElement.getChildren( StoredConfigXmlSerializer.StoredConfigXmlConstants.XML_ELEMENT_VALUE );
+                final List<XmlElement> valueElements = settingElement.getChildren( StoredConfigXmlConstants.XML_ELEMENT_VALUE );
 
                 try
                 {
@@ -112,19 +110,22 @@ public class NamedSecretValue implements StoredValue
                         final Optional<XmlElement> passwordElement = value.getChild( ELEMENT_PASSWORD );
                         if ( nameElement.isPresent() && passwordElement.isPresent() )
                         {
-                            final String name = nameElement.get().getText();
-                            final String encodedValue = passwordElement.get().getText();
-                            final PasswordData passwordData = new PasswordData( SecureEngine.decryptStringValue( encodedValue, key, PwmBlockAlgorithm.CONFIG ) );
-                            final List<XmlElement> usages = value.getChildren( ELEMENT_USAGE );
-                            final List<String> strUsages = new ArrayList<>();
-                            if ( usages != null )
+                            final Optional<String> name = nameElement.get().getText();
+                            final Optional<String> encodedValue = passwordElement.get().getText();
+                            if ( name.isPresent() && encodedValue.isPresent() )
                             {
-                                for ( final XmlElement usageElement : usages )
+                                final PasswordData passwordData = new PasswordData( SecureEngine.decryptStringValue( encodedValue.get(), key, PwmBlockAlgorithm.CONFIG ) );
+                                final List<XmlElement> usages = value.getChildren( ELEMENT_USAGE );
+                                final List<String> strUsages = new ArrayList<>();
+                                if ( usages != null )
                                 {
-                                    strUsages.add( usageElement.getText() );
+                                    for ( final XmlElement usageElement : usages )
+                                    {
+                                        usageElement.getText().ifPresent( strUsages::add );
+                                    }
                                 }
+                                values.put( name.get(), new NamedSecretData( passwordData, Collections.unmodifiableList( strUsages ) ) );
                             }
-                            values.put( name, new NamedSecretData( passwordData, Collections.unmodifiableList( strUsages ) ) );
                         }
                     }
                 }
@@ -167,7 +168,7 @@ public class NamedSecretValue implements StoredValue
     {
         if ( values == null )
         {
-            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
             return Collections.singletonList( valueElement );
         }
         final List<XmlElement> valuesElement = new ArrayList<>();
@@ -178,20 +179,20 @@ public class NamedSecretValue implements StoredValue
                 final String name = entry.getKey();
                 final PasswordData passwordData = entry.getValue().getPassword();
                 final String encodedValue = SecureEngine.encryptToString( passwordData.getStringValue(), xmlOutputProcessData.getPwmSecurityKey(), PwmBlockAlgorithm.CONFIG );
-                final XmlElement newValueElement = XmlFactory.getFactory().newElement( "value" );
-                final XmlElement nameElement = XmlFactory.getFactory().newElement( ELEMENT_NAME );
-                nameElement.addText( name );
-                final XmlElement encodedValueElement = XmlFactory.getFactory().newElement( ELEMENT_PASSWORD );
-                encodedValueElement.addText( encodedValue );
+                final XmlElement newValueElement = XmlChai.getFactory().newElement( "value" );
+                final XmlElement nameElement = XmlChai.getFactory().newElement( ELEMENT_NAME );
+                nameElement.setText( name );
+                final XmlElement encodedValueElement = XmlChai.getFactory().newElement( ELEMENT_PASSWORD );
+                encodedValueElement.setText( encodedValue );
 
-                newValueElement.addContent( nameElement );
-                newValueElement.addContent( encodedValueElement );
+                newValueElement.attachElement( nameElement );
+                newValueElement.attachElement( encodedValueElement );
 
                 for ( final String usages : values.get( name ).getUsage() )
                 {
-                    final XmlElement usageElement = XmlFactory.getFactory().newElement( ELEMENT_USAGE );
-                    usageElement.addText( usages );
-                    newValueElement.addContent( usageElement );
+                    final XmlElement usageElement = XmlChai.getFactory().newElement( ELEMENT_USAGE );
+                    usageElement.setText( usages );
+                    newValueElement.attachElement( usageElement );
                 }
 
 
@@ -200,7 +201,7 @@ public class NamedSecretValue implements StoredValue
         }
         catch ( final Exception e )
         {
-            throw new RuntimeException( "missing required AES and SHA1 libraries, or other crypto fault: " + e.getMessage() );
+            throw new PwmInternalException( "missing required AES and SHA1 libraries, or other crypto fault: " + e.getMessage() );
         }
         return Collections.unmodifiableList( valuesElement );
     }
@@ -219,7 +220,7 @@ public class NamedSecretValue implements StoredValue
             final NamedSecretData existingData = entry.getValue();
             sb.append( "Named password '" ).append( entry.getKey() ).append( "' with usage for " );
             sb.append( StringUtil.collectionToString( existingData.getUsage(), "," ) );
-            sb.append( "\n" );
+            sb.append( '\n' );
 
         }
         return sb.toString();

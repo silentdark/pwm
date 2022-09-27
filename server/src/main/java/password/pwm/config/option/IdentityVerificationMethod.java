@@ -20,13 +20,10 @@
 
 package password.pwm.config.option;
 
-import password.pwm.config.Configuration;
+import password.pwm.config.SettingReader;
 import password.pwm.i18n.Display;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Locale;
 
 public enum IdentityVerificationMethod implements Serializable, ConfigurationOption
@@ -37,7 +34,8 @@ public enum IdentityVerificationMethod implements Serializable, ConfigurationOpt
     TOKEN( true, Display.Field_VerificationMethodToken, Display.Description_VerificationMethodToken ),
     OTP( true, Display.Field_VerificationMethodOTP, Display.Description_VerificationMethodOTP ),
     REMOTE_RESPONSES( false, Display.Field_VerificationMethodRemoteResponses, Display.Description_VerificationMethodRemoteResponses ),
-    OAUTH( true, Display.Field_VerificationMethodOAuth, Display.Description_VerificationMethodOAuth ),;
+    OAUTH( true, Display.Field_VerificationMethodOAuth, Display.Description_VerificationMethodOAuth ),
+    NAAF( false, Display.Value_Deprecated, Display.Value_Deprecated ),;
 
     private final transient boolean userSelectable;
     private final transient Display labelKey;
@@ -55,19 +53,13 @@ public enum IdentityVerificationMethod implements Serializable, ConfigurationOpt
         return userSelectable;
     }
 
-    public String getLabel( final Configuration configuration, final Locale locale )
+    public String getLabel( final SettingReader settingReader, final Locale locale )
     {
-        return Display.getLocalizedMessage( locale, this.labelKey, configuration );
+        return Display.getLocalizedMessage( locale, this.labelKey, settingReader );
     }
 
-    public String getDescription( final Configuration configuration, final Locale locale )
+    public String getDescription( final SettingReader settingReader, final Locale locale )
     {
-        return Display.getLocalizedMessage( locale, this.descriptionKey, configuration );
-    }
-
-    public static IdentityVerificationMethod[] availableValues( )
-    {
-        final List<IdentityVerificationMethod> values = new ArrayList<>( Arrays.asList( IdentityVerificationMethod.values() ) );
-        return values.toArray( new IdentityVerificationMethod[0] );
+        return Display.getLocalizedMessage( locale, this.descriptionKey, settingReader );
     }
 }

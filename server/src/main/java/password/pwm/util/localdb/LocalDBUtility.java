@@ -33,8 +33,9 @@ import password.pwm.util.TransactionSizeCalculator;
 import password.pwm.util.java.AverageTracker;
 import password.pwm.util.java.ConditionalTaskExecutor;
 import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.MiscUtil;
 import password.pwm.util.java.Percent;
-import password.pwm.util.java.PwmNumberFormat;
+import password.pwm.util.java.PwmTimeUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
@@ -49,10 +50,12 @@ import java.io.PrintStream;
 import java.io.Reader;
 import java.math.RoundingMode;
 import java.time.Instant;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.zip.GZIPInputStream;
@@ -107,16 +110,16 @@ public class LocalDBUtility
         final EventRateMeter eventRateMeter = new EventRateMeter( TimeDuration.MINUTE );
         final ConditionalTaskExecutor debugOutputter = ConditionalTaskExecutor.forPeriodicTask( () ->
                         outputExportDebugStats( totalLines, exportLineCounter.sum(), eventRateMeter, startTime, debugOutput ),
-                TimeDuration.MINUTE );
+                TimeDuration.MINUTE.asDuration() );
 
-        try ( CSVPrinter csvPrinter = JavaHelper.makeCsvPrinter( new GZIPOutputStream( outputStream, GZIP_BUFFER_SIZE ) ) )
+        try ( CSVPrinter csvPrinter = MiscUtil.makeCsvPrinter( new GZIPOutputStream( outputStream, GZIP_BUFFER_SIZE ) ) )
         {
-            csvPrinter.printComment( PwmConstants.PWM_APP_NAME + " " + PwmConstants.SERVLET_VERSION + " LocalDB export on " + JavaHelper.toIsoDate( Instant.now() ) );
+            csvPrinter.printComment( PwmConstants.PWM_APP_NAME + " " + PwmConstants.SERVLET_VERSION + " LocalDB export on " + StringUtil.toIsoDate( Instant.now() ) );
             for ( final LocalDB.DB loopDB : LocalDB.DB.values() )
             {
                 if ( loopDB.isBackup() )
                 {
-                    csvPrinter.printComment( "Export of " + loopDB.toString() );
+                    csvPrinter.printComment( "Export of " + loopDB );
                     try ( LocalDB.LocalDBIterator<Map.Entry<String, String>> localDBIterator = localDB.iterator( loopDB ) )
                     {
                         while ( localDBIterator.hasNext() )
@@ -133,14 +136,14 @@ public class LocalDBUtility
                     csvPrinter.flush();
                 }
             }
-            csvPrinter.printComment( "export completed at " + JavaHelper.toIsoDate( Instant.now() ) );
+            csvPrinter.printComment( "export completed at " + StringUtil.toIsoDate( Instant.now() ) );
         }
         catch ( final IOException e )
         {
             writeStringToOut( debugOutput, "IO error during localDB export: " + e.getMessage() );
         }
 
-        writeStringToOut( debugOutput, "export complete, exported " + exportLineCounter + " records in " + TimeDuration.fromCurrent( startTime ).asLongString() );
+        writeStringToOut( debugOutput, "export complete, exported " + exportLineCounter + " records in " + PwmTimeUtil.asLongString( TimeDuration.fromCurrent( startTime ) ) );
     }
 
     public void exportWordlist( final OutputStream outputStream, final Appendable debugOutput )
@@ -159,7 +162,7 @@ public class LocalDBUtility
         final EventRateMeter eventRateMeter = new EventRateMeter( TimeDuration.MINUTE );
         final ConditionalTaskExecutor debugOutputter = ConditionalTaskExecutor.forPeriodicTask( () ->
                         outputExportDebugStats( totalLines, exportLineCounter.sum(), eventRateMeter, startTime, debugOutput ),
-                TimeDuration.MINUTE );
+                TimeDuration.MINUTE.asDuration() );
 
         try ( ZipOutputStream zipOutputStream = new ZipOutputStream( outputStream, PwmConstants.DEFAULT_CHARSET ) )
         {
@@ -183,7 +186,7 @@ public class LocalDBUtility
             writeStringToOut( debugOutput, "IO error during localDB export: " + e.getMessage() );
         }
 
-        writeStringToOut( debugOutput, "export complete, exported " + exportLineCounter + " records in " + TimeDuration.fromCurrent( startTime ).asLongString() );
+        writeStringToOut( debugOutput, "export complete, exported " + exportLineCounter + " records in " + PwmTimeUtil.asLongString( TimeDuration.fromCurrent( startTime ) ) );
     }
 
     private void outputExportDebugStats(
@@ -194,14 +197,14 @@ public class LocalDBUtility
             final Appendable debugOutput
     )
     {
-        final Percent percentComplete = new Percent( exportLineCounter, totalLines );
+        final Percent percentComplete = Percent.of( exportLineCounter, totalLines );
         final String percentStr = percentComplete.pretty( 2 );
         final long secondsRemaining = totalLines / eventRateMeter.readEventRate().longValue();
 
-        final String msg = "export stats: recordsOut=" + PwmNumberFormat.forDefaultLocale().format( exportLineCounter )
+        final String msg = "export stats: recordsOut=" + MiscUtil.forDefaultLocale().format( exportLineCounter )
                 + ", duration=" + TimeDuration.fromCurrent( startTime ).asCompactString()
                 + ", percentComplete=" + percentStr
-                + ", recordsPerSecond=" + PwmNumberFormat.forDefaultLocale().format( eventRateMeter.readEventRate().longValue() )
+                + ", recordsPerSecond=" + MiscUtil.forDefaultLocale().format( eventRateMeter.readEventRate().longValue() )
                 + ", remainingTime=" + TimeDuration.of( secondsRemaining, TimeDuration.Unit.SECONDS ).asCompactString();
         writeStringToOut( debugOutput, msg );
     }
@@ -275,7 +278,7 @@ public class LocalDBUtility
         private long transactionCharCounter;
 
         private final Instant startTime = Instant.now();
-        final Map<LocalDB.DB, Map<String, String>> transactionMap = new HashMap<>();
+        final Map<LocalDB.DB, Map<String, String>> transactionMap = new EnumMap<>( LocalDB.DB.class );
         private final EventRateMeter eventRateMeter = new EventRateMeter( TimeDuration.MINUTE );
         private final AverageTracker charsPerTransactionAverageTracker = new AverageTracker( 50 );
         private final TransactionSizeCalculator transactionCalculator = new TransactionSizeCalculator(
@@ -304,9 +307,8 @@ public class LocalDBUtility
             }
 
             this.debugOutputWriter = ConditionalTaskExecutor.forPeriodicTask( () ->
-            {
-                writeStringToOut( debugOutput, debugStatsString() );
-            }, TimeDuration.of( 30, TimeDuration.Unit.SECONDS ) );
+                    writeStringToOut( debugOutput, debugStatsString() ),
+                    TimeDuration.of( 30, TimeDuration.Unit.SECONDS ).asDuration() );
         }
 
         void doImport( final InputStream inputStream )
@@ -432,10 +434,8 @@ public class LocalDBUtility
         long storedChars = 0;
         final long totalChars = 0;
 
-        LocalDB.LocalDBIterator<Map.Entry<String, String>> iter = null;
-        try
+        try ( LocalDB.LocalDBIterator<Map.Entry<String, String>> iter = localDB.iterator( db ) )
         {
-            iter = localDB.iterator( db );
             while ( iter.hasNext() )
             {
                 final Map.Entry<String, String> entry = iter.next();
@@ -451,20 +451,13 @@ public class LocalDBUtility
         {
             LOGGER.error( () -> "error while examining LocalDB: " + e.getMessage() );
         }
-        finally
-        {
-            if ( iter != null )
-            {
-                iter.close();
-            }
-        }
 
         final int avgValueLength = totalValues == 0 ? 0 : ( int ) ( totalChars / totalValues );
-        final Map<StatsKey, Object> returnObj = new LinkedHashMap<>();
+        final Map<StatsKey, Object> returnObj = new EnumMap<>( StatsKey.class );
         returnObj.put( StatsKey.TOTAL_VALUES, totalValues );
         returnObj.put( StatsKey.STORED_CHARS, storedChars );
         returnObj.put( StatsKey.AVG_VALUE_LENGTH, avgValueLength );
-        return returnObj;
+        return Collections.unmodifiableMap( returnObj );
     }
 
     public enum StatsKey
@@ -477,8 +470,8 @@ public class LocalDBUtility
     public boolean readImportInprogressFlag( )
             throws LocalDBException
     {
-        return IN_PROGRESS_STATUS_VALUE.equals(
-                localDB.get( LocalDB.DB.PWM_META, AppAttribute.LOCALDB_IMPORT_STATUS.getKey() ) );
+        final Optional<String> storedImportValue = localDB.get( LocalDB.DB.PWM_META, AppAttribute.LOCALDB_IMPORT_STATUS.getKey() );
+        return storedImportValue.isPresent() && IN_PROGRESS_STATUS_VALUE.equals( storedImportValue.get() );
     }
 
     static boolean hasBooleanParameter( final LocalDBProvider.Parameter parameter, final Map<LocalDBProvider.Parameter, String> parameters )

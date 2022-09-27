@@ -26,11 +26,11 @@ import com.novell.ldapchai.exception.ChaiOperationException;
 import com.novell.ldapchai.exception.ChaiUnavailableException;
 import com.novell.ldapchai.util.SearchHelper;
 import password.pwm.AppProperty;
-import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.TokenDestinationItem;
 import password.pwm.bean.UserIdentity;
-import password.pwm.config.Configuration;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.profile.LdapProfile;
 import password.pwm.config.value.data.FormConfiguration;
@@ -48,7 +48,7 @@ import password.pwm.svc.cache.CachePolicy;
 import password.pwm.svc.cache.CacheService;
 import password.pwm.util.Validator;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
 
@@ -176,7 +176,7 @@ public class FormUtility
 
     public static Map<String, String> asStringMap( final Map<FormConfiguration, String> input )
     {
-        final Map<String, String> returnObj = new LinkedHashMap<>();
+        final Map<String, String> returnObj = new LinkedHashMap<>( input.size() );
         for ( final Map.Entry<FormConfiguration, String> entry : input.entrySet() )
         {
             final FormConfiguration formConfiguration = entry.getKey();
@@ -196,7 +196,7 @@ public class FormUtility
             final Map<String, String> values
     )
     {
-        final Map<FormConfiguration, String> returnMap = new LinkedHashMap<>();
+        final Map<FormConfiguration, String> returnMap = new LinkedHashMap<>( formConfigurations.size() );
         for ( final FormConfiguration formConfiguration : formConfigurations )
         {
             final String name = formConfiguration.getName();
@@ -226,7 +226,8 @@ public class FormUtility
 
     @SuppressWarnings( "checkstyle:MethodLength" )
     public static void validateFormValueUniqueness(
-            final PwmApplication pwmApplication,
+            final SessionLabel sessionLabel,
+            final PwmDomain pwmDomain,
             final Map<FormConfiguration, String> formValues,
             final Locale locale,
             final Collection<UserIdentity> excludeDN,
@@ -250,7 +251,7 @@ public class FormUtility
                 if ( ( !itemIsHidden && !itemIsReadOnly ) || checkReadOnlyAndHidden )
                 {
                     final String value = formValues.get( formItem );
-                    if ( !StringUtil.isEmpty( value ) )
+                    if ( StringUtil.notEmpty( value ) )
                     {
                         filterClauses.put( formItem.getName(), value );
                         labelMap.put( formItem.getName(), formItem.getLabel( locale ) );
@@ -272,11 +273,11 @@ public class FormUtility
 
             // object classes;
             filter.append( "(|" );
-            for ( final String objectClass : pwmApplication.getConfig().readSettingAsStringArray( PwmSetting.DEFAULT_OBJECT_CLASSES ) )
+            for ( final String objectClass : pwmDomain.getConfig().readSettingAsStringArray( PwmSetting.DEFAULT_OBJECT_CLASSES ) )
             {
-                filter.append( "(objectClass=" ).append( objectClass ).append( ")" );
+                filter.append( "(objectClass=" ).append( objectClass ).append( ')' );
             }
-            filter.append( ")" );
+            filter.append( ')' );
 
             // attributes
             filter.append( "(|" );
@@ -284,16 +285,17 @@ public class FormUtility
             {
                 final String name = entry.getKey();
                 final String value = entry.getValue();
-                filter.append( "(" ).append( name ).append( "=" ).append( StringUtil.escapeLdapFilter( value ) ).append( ")" );
+                filter.append( '(' ).append( name ).append( '=' )
+                        .append( StringUtil.escapeLdapFilter( value ) ).append( ')' );
             }
-            filter.append( ")" );
+            filter.append( ')' );
 
-            filter.append( ")" );
+            filter.append( ')' );
         }
 
-        final CacheService cacheService = pwmApplication.getCacheService();
+        final CacheService cacheService = pwmDomain.getCacheService();
         final CacheKey cacheKey = CacheKey.newKey(
-                Validator.class, null, "attr_unique_check_" + filter.toString()
+                Validator.class, null, "attr_unique_check_" + filter
         );
         if ( allowResultCaching && cacheService != null )
         {
@@ -306,7 +308,7 @@ public class FormUtility
                 }
                 else
                 {
-                    final ErrorInformation errorInformation = JsonUtil.deserialize( cacheValue, ErrorInformation.class );
+                    final ErrorInformation errorInformation = JsonFactory.get().deserialize( cacheValue, ErrorInformation.class );
                     throw new PwmDataValidationException( errorInformation );
                 }
             }
@@ -320,12 +322,12 @@ public class FormUtility
                 .build();
 
         final int resultSearchSizeLimit = 1 + ( excludeDN == null ? 0 : excludeDN.size() );
-        final long cacheLifetimeMS = Long.parseLong( pwmApplication.getConfig().readAppProperty( AppProperty.CACHE_FORM_UNIQUE_VALUE_LIFETIME_MS ) );
+        final long cacheLifetimeMS = Long.parseLong( pwmDomain.getConfig().readAppProperty( AppProperty.CACHE_FORM_UNIQUE_VALUE_LIFETIME_MS ) );
         final CachePolicy cachePolicy = CachePolicy.makePolicyWithExpirationMS( cacheLifetimeMS );
 
         try
         {
-            final UserSearchEngine userSearchEngine = pwmApplication.getUserSearchEngine();
+            final UserSearchEngine userSearchEngine = pwmDomain.getUserSearchEngine();
             final Map<UserIdentity, Map<String, String>> results = new LinkedHashMap<>( userSearchEngine.performMultiUserSearch(
                     searchConfiguration,
                     resultSearchSizeLimit,
@@ -348,7 +350,7 @@ public class FormUtility
                 {
                     // since only one value searched, it must be that one value
                     final String attributeName = labelMap.values().iterator().next();
-                    LOGGER.trace( () -> "found duplicate value for attribute '" + attributeName + "' on entry " + userIdentity );
+                    LOGGER.trace( sessionLabel, () -> "found duplicate value for attribute '" + attributeName + "' on entry " + userIdentity );
                     final ErrorInformation error = new ErrorInformation( PwmError.ERROR_FIELD_DUPLICATE, null, new String[]
                             {
                                     attributeName,
@@ -365,19 +367,19 @@ public class FormUtility
                     final boolean compareResult;
                     try
                     {
-                        final ChaiUser theUser = pwmApplication.getProxiedChaiUser( userIdentity );
+                        final ChaiUser theUser = pwmDomain.getProxiedChaiUser( sessionLabel, userIdentity );
                         compareResult = theUser.compareStringAttribute( name, value );
                     }
                     catch ( final ChaiOperationException | ChaiUnavailableException e )
                     {
-                        final PwmError error = PwmError.forChaiError( e.getErrorCode() );
+                        final PwmError error = PwmError.forChaiError( e.getErrorCode() ).orElse( PwmError.ERROR_INTERNAL );
                         throw new PwmUnrecoverableException( error.toInfo() );
                     }
 
                     if ( compareResult )
                     {
                         final String label = labelMap.get( name );
-                        LOGGER.trace( () ->  "found duplicate value for attribute '" + label + "' on entry " + userIdentity );
+                        LOGGER.trace( sessionLabel, () ->  "found duplicate value for attribute '" + label + "' on entry " + userIdentity );
                         final ErrorInformation error = new ErrorInformation( PwmError.ERROR_FIELD_DUPLICATE, null, new String[]
                                 {
                                         label,
@@ -396,7 +398,7 @@ public class FormUtility
         {
             if ( cacheService != null )
             {
-                final String jsonPayload = JsonUtil.serialize( e.getErrorInformation() );
+                final String jsonPayload = JsonFactory.get().serialize( e.getErrorInformation() );
                 cacheService.put( cacheKey, cachePolicy, jsonPayload );
             }
             throw new PwmDataValidationException( e.getErrorInformation() );
@@ -413,13 +415,13 @@ public class FormUtility
      *
      * @param formValues - a Map containing String keys of parameter names and ParamConfigs as values
      * @param locale used for error messages
-     * @param configuration current application configuration
+     * @param domainConfig current application configuration
      *
      * @throws password.pwm.error.PwmDataValidationException - If there is a problem with any of the fields
      * @throws password.pwm.error.PwmUnrecoverableException  if an unexpected error occurs
      */
     public static void validateFormValues(
-            final Configuration configuration,
+            final DomainConfig domainConfig,
             final Map<FormConfiguration, String> formValues,
             final Locale locale
     )
@@ -429,11 +431,11 @@ public class FormUtility
         {
             final FormConfiguration formItem = entry.getKey();
             final String value = entry.getValue();
-            formItem.checkValue( configuration, value, locale );
+            formItem.checkValue( domainConfig, value, locale );
         }
     }
 
-    public static String ldapSearchFilterForForm( final PwmApplication pwmApplication, final Collection<FormConfiguration> formElements )
+    public static String ldapSearchFilterForForm( final PwmDomain pwmDomain, final Collection<FormConfiguration> formElements )
             throws PwmUnrecoverableException
     {
         if ( formElements == null || formElements.isEmpty() )
@@ -451,14 +453,14 @@ public class FormUtility
         final StringBuilder sb = new StringBuilder();
         sb.append( "(&" );
 
-        final List<String> objectClasses = pwmApplication.getConfig().readSettingAsStringArray( PwmSetting.DEFAULT_OBJECT_CLASSES );
+        final List<String> objectClasses = pwmDomain.getConfig().readSettingAsStringArray( PwmSetting.DEFAULT_OBJECT_CLASSES );
         if ( objectClasses != null && !objectClasses.isEmpty() )
         {
             if ( objectClasses.size() == 1 )
             {
                 sb.append( "(objectclass=" );
-                sb.append( objectClasses.iterator().next() );
-                sb.append( ")" );
+                sb.append( objectClasses.get( 0 ) );
+                sb.append( ')' );
             }
             else
             {
@@ -467,23 +469,23 @@ public class FormUtility
                 {
                     sb.append( "(objectclass=" );
                     sb.append( objectClassValue );
-                    sb.append( ")" );
+                    sb.append( ')' );
                 }
-                sb.append( ")" );
+                sb.append( ')' );
             }
         }
 
         for ( final FormConfiguration formConfiguration : formElements )
         {
             final String formElementName = formConfiguration.getName();
-            sb.append( "(" );
+            sb.append( '(' );
             sb.append( formElementName );
-            sb.append( "=" );
-            sb.append( "%" ).append( formElementName ).append( "%" );
-            sb.append( ")" );
+            sb.append( '=' );
+            sb.append( '%' ).append( formElementName ).append( '%' );
+            sb.append( ')' );
         }
 
-        sb.append( ")" );
+        sb.append( ')' );
         return sb.toString();
     }
 
@@ -503,7 +505,7 @@ public class FormUtility
                 final List<String> values = valueMap.get( formConfiguration );
                 if ( values != null && !values.isEmpty() )
                 {
-                    final String value = values.iterator().next();
+                    final String value = values.get( 0 );
                     formMap.put( formConfiguration, value );
                 }
             }
@@ -520,7 +522,7 @@ public class FormUtility
     {
         final boolean includeNulls = JavaHelper.enumArrayContainsValue( flags, Flag.ReturnEmptyValues );
         final List<String> formFieldNames = FormConfiguration.convertToListOfNames( formFields );
-        LOGGER.trace( sessionLabel, () -> "preparing to load form data from ldap for fields " + JsonUtil.serializeCollection( formFieldNames ) );
+        LOGGER.trace( sessionLabel, () -> "preparing to load form data from ldap for fields " + JsonFactory.get().serializeCollection( formFieldNames ) );
         final Map<String, List<String>> dataFromLdap = new LinkedHashMap<>();
         try
         {
@@ -562,26 +564,27 @@ public class FormUtility
             PwmError error = null;
             if ( e instanceof ChaiException )
             {
-                error = PwmError.forChaiError( ( ( ChaiException ) e ).getErrorCode() );
+                error = PwmError.forChaiError( ( ( ChaiException ) e ).getErrorCode() ).orElse( PwmError.ERROR_INTERNAL );
             }
-            if ( error == null || error == PwmError.ERROR_INTERNAL )
+            if ( error == PwmError.ERROR_INTERNAL )
             {
                 error = PwmError.ERROR_LDAP_DATA_ERROR;
             }
 
             final ErrorInformation errorInformation = new ErrorInformation( error, "error reading current profile values: " + e.getMessage() );
-            LOGGER.error( sessionLabel, () -> errorInformation.getDetailedErrorMsg() );
+            LOGGER.error( sessionLabel, errorInformation::getDetailedErrorMsg );
             throw new PwmUnrecoverableException( errorInformation );
         }
 
-        final Map<FormConfiguration, List<String>> returnMap = new LinkedHashMap<>();
+        final Map<FormConfiguration, List<String>> returnMap = new LinkedHashMap<>( formFields.size() );
         for ( final FormConfiguration formItem : formFields )
         {
             final String attrName = formItem.getName();
-            if ( dataFromLdap.containsKey( attrName ) )
+            final List<String> ldapValues = dataFromLdap.get( attrName );
+            if ( ldapValues != null )
             {
-                final List<String> values = new ArrayList<>();
-                for ( final String value : dataFromLdap.get( attrName ) )
+                final List<String> values = new ArrayList<>( ldapValues.size() );
+                for ( final String value : ldapValues )
                 {
                     final String parsedValue = parseInputValueToFormValue( formItem, value );
                     values.add( parsedValue );
@@ -596,13 +599,13 @@ public class FormUtility
 
     public static Map<FormConfiguration, String> multiValueMapToSingleValue( final Map<FormConfiguration, List<String>> input )
     {
-        final Map<FormConfiguration, String> returnMap = new LinkedHashMap<>();
+        final Map<FormConfiguration, String> returnMap = new LinkedHashMap<>( input.size() );
         for ( final Map.Entry<FormConfiguration, List<String>> entry : input.entrySet() )
         {
             final FormConfiguration formConfiguration = entry.getKey();
             final List<String> listValue = entry.getValue();
             final String value = listValue != null && !listValue.isEmpty()
-                    ? listValue.iterator().next()
+                    ? listValue.get( 0 )
                     : null;
             returnMap.put( formConfiguration, value );
         }
@@ -620,7 +623,7 @@ public class FormUtility
         for ( final Map.Entry<PwmSetting, TokenDestinationItem.Type> entry : settingTypeMap.entrySet() )
         {
             final String attrName = ldapProfile.readSettingAsString( entry.getKey() );
-            if ( !StringUtil.isEmpty( attrName ) )
+            if ( StringUtil.notEmpty( attrName ) )
             {
                 for ( final FormConfiguration formConfiguration : formConfigurations )
                 {
@@ -637,7 +640,7 @@ public class FormUtility
 
     public static Map<String, FormConfiguration> asFormNameMap( final List<FormConfiguration> formConfigurations )
     {
-        final Map<String, FormConfiguration> returnMap = new LinkedHashMap<>();
+        final Map<String, FormConfiguration> returnMap = new LinkedHashMap<>( formConfigurations.size() );
         for ( final FormConfiguration formConfiguration : formConfigurations )
         {
             returnMap.put( formConfiguration.getName(), formConfiguration );

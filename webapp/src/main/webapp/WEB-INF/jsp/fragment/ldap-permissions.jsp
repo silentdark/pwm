@@ -46,10 +46,10 @@
 <% final Map<String,Map<LDAPPermissionInfo.Access,List<LDAPPermissionCalculator.PermissionRecord>>> baseMap = outputData.getPermissionsByActor(actor); %>
 <% if (!baseMap.isEmpty()) { %>
 <h2>
-    <%=actor.getLabel(JspUtility.locale(request),JspUtility.getPwmRequest(pageContext).getConfig())%>
+    <%=actor.getLabel(JspUtility.locale(request),JspUtility.getPwmRequest(pageContext).getDomainConfig())%>
 </h2>
 <p>
-    <%=actor.getDescription(JspUtility.locale(request),JspUtility.getPwmRequest(pageContext).getConfig())%>
+    <%=actor.getDescription(JspUtility.locale(request),JspUtility.getPwmRequest(pageContext).getDomainConfig())%>
 </p>
 <table style="">
     <tr>
@@ -69,7 +69,7 @@
         </td>
         <td style="text-align: left">
             <%
-                final Set<String> menuLocations = new TreeSet<String>();
+                final Set<String> menuLocations = new TreeSet<>();
                 for (final LDAPPermissionCalculator.PermissionRecord record : entry.getValue().get(access)) {
                     if (record.getPwmSetting() != null) {
                         menuLocations.add(record.getPwmSetting().toMenuLocationDebug(record.getProfile(), JspUtility.locale(request)));

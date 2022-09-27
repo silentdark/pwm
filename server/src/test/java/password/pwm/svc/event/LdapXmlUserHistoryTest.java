@@ -20,14 +20,22 @@
 
 package password.pwm.svc.event;
 
+import org.jrivard.xmlchai.AccessMode;
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlDocument;
+import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import org.junit.Assert;
+import org.junit.Rule;
 import org.junit.Test;
-import password.pwm.error.PwmUnrecoverableException;
+import org.junit.rules.TemporaryFolder;
+import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
+import password.pwm.bean.DomainID;
+import password.pwm.bean.SessionLabel;
+import password.pwm.svc.userhistory.LdapXmlUserHistory;
 import password.pwm.util.SampleDataGenerator;
-import password.pwm.util.java.StringUtil;
-import password.pwm.util.java.XmlDocument;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.localdb.TestHelper;
 
 import java.time.Instant;
 import java.util.List;
@@ -36,14 +44,21 @@ import java.util.ResourceBundle;
 
 public class LdapXmlUserHistoryTest
 {
+    @Rule
+    public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
     @Test
     public void inputParserTest()
+            throws Exception
     {
+        final PwmApplication pwmApplication = TestHelper.makeTestPwmApplication( temporaryFolder.newFolder() );
+        final PwmDomain pwmDomain = pwmApplication.domains().get( DomainID.DOMAIN_ID_DEFAULT );
         final ResourceBundle bundle = ResourceBundle.getBundle( LdapXmlUserHistoryTest.class.getName() );
         final String xmlValue1 =  bundle.getString( "xmlValue1" );
         final LdapXmlUserHistory.StoredHistory storedHistory = LdapXmlUserHistory.StoredHistory.fromXml( xmlValue1 );
 
-        final List<UserAuditRecord> auditEventList = storedHistory.asAuditRecords( SampleDataGenerator.sampleUserData() );
+        final List<UserAuditRecord> auditEventList = storedHistory.asAuditRecords(
+                AuditRecordFactory.make( SessionLabel.TEST_SESSION_LABEL,  pwmDomain ), SampleDataGenerator.sampleUserData() );
         //System.out.println( JsonUtil.serializeCollection( auditEventList, JsonUtil.Flag.PrettyPrint ) );
 
         Assert.assertEquals( 20, auditEventList.size() );
@@ -70,25 +85,25 @@ public class LdapXmlUserHistoryTest
     }
 
     @Test
-    public void outputTest() throws PwmUnrecoverableException
+    public void outputTest() throws Exception
     {
         final LdapXmlUserHistory.StoredHistory storedHistory = new LdapXmlUserHistory.StoredHistory();
-        storedHistory.addEvent( LdapXmlUserHistory.StoredEvent.fromAuditRecord( UserAuditRecord.builder()
+        storedHistory.addEvent( LdapXmlUserHistory.StoredEvent.fromAuditRecord( AuditRecordData.builder()
                 .timestamp( Instant.parse( "2020-02-27T17:26:30Z" ) )
                 .eventCode( AuditEvent.CHANGE_PASSWORD )
 
                 .build() ) );
 
         final String xmlValue = storedHistory.toXml();
-        final XmlFactory xmlFactory = XmlFactory.getFactory();
+        final XmlFactory xmlFactory = XmlChai.getFactory();
 
-        final XmlDocument xmlDocument = xmlFactory.parseXml( StringUtil.stringToInputStream( xmlValue ) );
+        final XmlDocument xmlDocument = xmlFactory.parseString( xmlValue, AccessMode.IMMUTABLE );
         final Optional<XmlElement> optionalRecordElement = xmlDocument.evaluateXpathToElement( "/history/record" );
         Assert.assertTrue( optionalRecordElement.isPresent() );
         optionalRecordElement.ifPresent( xmlElement ->
         {
-            Assert.assertEquals( "EventLog_ChangePassword", xmlElement.getAttributeValue( "eventCode" ) );
-            Assert.assertEquals( "1582824390000", xmlElement.getAttributeValue( "timestamp" ) );
+            Assert.assertEquals( "EventLog_ChangePassword", xmlElement.getAttribute( "eventCode" ).orElseThrow() );
+            Assert.assertEquals( "1582824390000", xmlElement.getAttribute( "timestamp" ).orElseThrow() );
         } );
     }
 }

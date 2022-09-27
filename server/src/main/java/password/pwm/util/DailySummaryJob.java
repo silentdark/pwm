@@ -20,18 +20,24 @@
 
 package password.pwm.util;
 
+import lombok.Builder;
+import lombok.Value;
 import org.apache.commons.text.WordUtils;
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
 import password.pwm.PwmConstants;
 import password.pwm.bean.EmailItemBean;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthRecord;
 import password.pwm.i18n.Display;
 import password.pwm.svc.PwmService;
 import password.pwm.svc.report.ReportSummaryData;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.CollectionUtil;
+import password.pwm.util.java.PwmTimeUtil;
+import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
@@ -50,64 +56,90 @@ public class DailySummaryJob implements Runnable
 
     private final PwmApplication pwmApplication;
 
-    public DailySummaryJob( final PwmApplication pwmApplication )
+    public DailySummaryJob( final PwmApplication pwmDomain )
     {
-        this.pwmApplication = pwmApplication;
+        this.pwmApplication = pwmDomain;
+    }
+
+    @Value
+    @Builder
+    static class DailySummaryJobSettings
+    {
+        private final boolean reportingEnableDailyJob;
+        private final boolean dailySummaryJobsEnabled;
+        private final List<String> toAddress;
+        private final String fromAddress;
+        private final String siteUrl;
+
+        static DailySummaryJobSettings fromConfig( final DomainConfig config )
+        {
+            return DailySummaryJobSettings.builder()
+                    .dailySummaryJobsEnabled( config.getAppConfig().readSettingAsBoolean( PwmSetting.EVENTS_ALERT_DAILY_SUMMARY ) )
+                    .toAddress( config.getAppConfig().readSettingAsStringArray( PwmSetting.AUDIT_EMAIL_SYSTEM_TO ) )
+                    .fromAddress( config.getAppConfig().readAppProperty( AppProperty.AUDIT_EVENTS_EMAILFROM ) )
+                    .siteUrl( config.getAppConfig().readSettingAsString( PwmSetting.PWM_SITE_URL ) )
+                    .reportingEnableDailyJob( config.getAppConfig().readSettingAsBoolean( PwmSetting.REPORTING_ENABLE_DAILY_JOB ) )
+                    .build();
+        }
     }
 
     @Override
     public void run()
     {
-        try
+        for ( final PwmDomain pwmDomain : pwmApplication.domains().values() )
         {
-            alertDailyStats();
-        }
-        catch ( final Exception e )
-        {
-            LOGGER.error( () -> "error while generating daily alert statistics: " + e.getMessage() );
-        }
-
-
+            final DailySummaryJobSettings dailySummaryJobSettings = DailySummaryJobSettings.fromConfig( pwmDomain.getConfig() );
+            try
+            {
+                alertDailyStats( pwmDomain, dailySummaryJobSettings );
+            }
+            catch ( final Exception e )
+            {
+                LOGGER.error( () -> "error while generating daily alert statistics: " + e.getMessage() );
+            }
+    }
     }
 
-    private void alertDailyStats(
-
+    private static void alertDailyStats(
+        final PwmDomain pwmDomain,
+        final DailySummaryJobSettings settings
     )
             throws PwmUnrecoverableException
     {
-        if ( !checkIfEnabled( pwmApplication, PwmSetting.EVENTS_ALERT_DAILY_SUMMARY ) )
+        if ( !checkIfEnabled( pwmDomain, settings ) )
         {
-            LOGGER.debug( () -> "skipping daily summary alert job, setting "
+            LOGGER.trace( () -> "skipping daily summary alert job, setting "
                     + PwmSetting.EVENTS_ALERT_DAILY_SUMMARY.toMenuLocationDebug( null, PwmConstants.DEFAULT_LOCALE )
                     + " not configured" );
             return;
         }
 
-        if ( pwmApplication.getStatisticsManager().status() != PwmService.STATUS.OPEN )
+        if ( pwmDomain.getStatisticsManager().status() != PwmService.STATUS.OPEN )
         {
             LOGGER.debug( () -> "skipping daily summary alert job, statistics service is not open" );
             return;
         }
 
-        final Map<String, String> dailyStatistics = pwmApplication.getStatisticsManager().dailyStatisticsAsLabelValueMap();
+        final Map<String, String> dailyStatistics = pwmDomain.getStatisticsManager().dailyStatisticsAsLabelValueMap();
 
         final Locale locale = PwmConstants.DEFAULT_LOCALE;
 
-        for ( final String toAddress : pwmApplication.getConfig().readSettingAsStringArray( PwmSetting.AUDIT_EMAIL_SYSTEM_TO ) )
+        for ( final String toAddress : settings.getToAddress() )
         {
-            final String fromAddress = pwmApplication.getConfig().readAppProperty( AppProperty.AUDIT_EVENTS_EMAILFROM );
-            final String subject = Display.getLocalizedMessage( locale, Display.Title_Application, pwmApplication.getConfig() ) + " - Daily Summary";
+            final String fromAddress = settings.getFromAddress();
+            final String subject = Display.getLocalizedMessage( locale, Display.Title_Application, pwmDomain.getConfig() ) + " - Daily Summary";
             final StringBuilder textBody = new StringBuilder();
             final StringBuilder htmlBody = new StringBuilder();
-            makeEmailBody( pwmApplication, dailyStatistics, locale, textBody, htmlBody );
+            makeEmailBody( pwmDomain, settings, dailyStatistics, locale, textBody, htmlBody );
             final EmailItemBean emailItem = new EmailItemBean( toAddress, fromAddress, subject, textBody.toString(), htmlBody.toString() );
             LOGGER.debug( () -> "sending daily summary email to " + toAddress );
-            pwmApplication.getEmailQueue().submitEmail( emailItem, null, MacroRequest.forNonUserSpecific( pwmApplication, null ) );
+            pwmDomain.getPwmApplication().getEmailQueue().submitEmail( emailItem, null, MacroRequest.forNonUserSpecific( pwmDomain.getPwmApplication(), null ) );
         }
     }
 
     private static void makeEmailBody(
-            final PwmApplication pwmApplication,
+            final PwmDomain pwmDomain,
+            final DailySummaryJobSettings settings,
             final Map<String, String> dailyStatistics,
             final Locale locale,
             final StringBuilder textBody,
@@ -118,34 +150,33 @@ public class DailySummaryJob implements Runnable
         {
             // server info
             final Map<String, String> metadata = new LinkedHashMap<>();
-            metadata.put( "Instance ID", pwmApplication.getInstanceID() );
-            metadata.put( "Site URL", pwmApplication.getConfig().readSettingAsString( PwmSetting.PWM_SITE_URL ) );
-            metadata.put( "Timestamp", JavaHelper.toIsoDate( Instant.now() ) );
-            metadata.put( "Up Time", TimeDuration.fromCurrent( pwmApplication.getStartupTime() ).asLongString() );
+            metadata.put( "Instance ID", pwmDomain.getPwmApplication().getInstanceID() );
+            metadata.put( "Site URL", settings.getSiteUrl() );
+            metadata.put( "Timestamp", StringUtil.toIsoDate( Instant.now() ) );
+            metadata.put( "Up Time", PwmTimeUtil.asLongString( TimeDuration.fromCurrent( pwmDomain.getPwmApplication().getStartupTime() ) ) );
 
             for ( final Map.Entry<String, String> entry : metadata.entrySet() )
             {
                 final String key = entry.getKey();
                 final String value = entry.getValue();
                 htmlBody.append( key ).append( ": " ).append( value ).append( "<br/>" );
-                textBody.append( key ).append( ": " ).append( value ).append( "\n" );
+                textBody.append( key ).append( ": " ).append( value ).append( '\n' );
             }
         }
 
-        textBody.append( "\n" );
+        textBody.append( '\n' );
         htmlBody.append( "<br/>" );
-
 
         {
             // health check data
-            final Collection<HealthRecord> healthRecords = pwmApplication.getHealthMonitor().getHealthRecords();
+            final Collection<HealthRecord> healthRecords = pwmDomain.getPwmApplication().getHealthMonitor().getHealthRecords();
             textBody.append( "-- Health Check Results --\n" );
             htmlBody.append( "<h2>Health Check Results</h2>" );
 
             htmlBody.append( "<table border='1'>" );
             for ( final HealthRecord record : healthRecords )
             {
-                htmlBody.append( "<tr><td class='key'>" ).append( record.getTopic( PwmConstants.DEFAULT_LOCALE, pwmApplication.getConfig() ) ).append( "</td>" );
+                htmlBody.append( "<tr><td class='key'>" ).append( record.getTopic( PwmConstants.DEFAULT_LOCALE, pwmDomain.getConfig() ) ).append( "</td>" );
 
                 {
                     final String color;
@@ -166,7 +197,7 @@ public class DailySummaryJob implements Runnable
                     htmlBody.append( "<td bgcolor='" ).append( color ).append( "'>" ).append( record.getStatus() ).append( "</td>" );
                 }
 
-                htmlBody.append( "<td>" ).append( record.getDetail( PwmConstants.DEFAULT_LOCALE, pwmApplication.getConfig() ) ).append( "</td></tr>" );
+                htmlBody.append( "<td>" ).append( record.getDetail( PwmConstants.DEFAULT_LOCALE, pwmDomain.getConfig() ) ).append( "</td></tr>" );
             }
             htmlBody.append( "</table>" );
 
@@ -176,21 +207,21 @@ public class DailySummaryJob implements Runnable
             {
                 {
                     final String wrappedLine = wrapText( record.getStatus().getDescription( locale,
-                            pwmApplication.getConfig() ) + ": " + record.getTopic( PwmConstants.DEFAULT_LOCALE,
-                            pwmApplication.getConfig() ) + " - " + stripHtmlTags(
-                            record.getDetail( PwmConstants.DEFAULT_LOCALE, pwmApplication.getConfig() ) ), wrapLineLength );
-                    textBody.append( wrappedLine ).append( "\n" );
+                            pwmDomain.getConfig() ) + ": " + record.getTopic( PwmConstants.DEFAULT_LOCALE,
+                            pwmDomain.getConfig() ) + " - " + stripHtmlTags(
+                            record.getDetail( PwmConstants.DEFAULT_LOCALE, pwmDomain.getConfig() ) ), wrapLineLength );
+                    textBody.append( wrappedLine ).append( '\n' );
                 }
             }
         }
 
-        textBody.append( "\n" );
+        textBody.append( '\n' );
         htmlBody.append( "<br/>" );
 
-        if ( pwmApplication.getConfig().readSettingAsBoolean( PwmSetting.REPORTING_ENABLE_DAILY_JOB ) )
+        if ( settings.isReportingEnableDailyJob() )
         {
-            final List<ReportSummaryData.PresentationRow> summaryData = pwmApplication.getReportService()
-                    .getSummaryData().asPresentableCollection( pwmApplication.getConfig(), locale );
+            final List<ReportSummaryData.PresentationRow> summaryData = pwmDomain.getPwmApplication().getReportService()
+                    .getSummaryData().asPresentableCollection( pwmDomain.getPwmApplication().getConfig(), locale );
 
             textBody.append( "-- Directory Report Summary --\n" );
             for ( final ReportSummaryData.PresentationRow record : summaryData )
@@ -198,9 +229,9 @@ public class DailySummaryJob implements Runnable
                 textBody.append( record.getLabel() ).append( ": " ).append( record.getCount() );
                 if ( record.getPct() != null && !record.getPct().isEmpty() )
                 {
-                    textBody.append( " (" ).append( record.getPct() ).append( ")" );
+                    textBody.append( " (" ).append( record.getPct() ).append( ')' );
                 }
-                textBody.append( "\n" );
+                textBody.append( '\n' );
             }
 
             htmlBody.append( "<h2>Directory Report Summary</h2>" );
@@ -216,7 +247,7 @@ public class DailySummaryJob implements Runnable
             htmlBody.append( "</table>" );
         }
 
-        textBody.append( "\n" );
+        textBody.append( '\n' );
         htmlBody.append( "<br/>" );
 
         if ( dailyStatistics != null && !dailyStatistics.isEmpty() )
@@ -230,7 +261,7 @@ public class DailySummaryJob implements Runnable
             for ( final String key : sortedStats.keySet() )
             {
                 final String value = dailyStatistics.get( key );
-                textBody.append( key ).append( ": " ).append( value ).append( "\n" );
+                textBody.append( key ).append( ": " ).append( value ).append( '\n' );
                 htmlBody.append( "<tr><td class='key'>" ).append( key ).append( "</td><td>" ).append( value ).append( "</td></tr>" );
             }
             htmlBody.append( "</table>" );
@@ -240,37 +271,32 @@ public class DailySummaryJob implements Runnable
 
     }
 
-    private static boolean checkIfEnabled( final PwmApplication pwmApplication, final PwmSetting pwmSetting )
+    private static boolean checkIfEnabled( final PwmDomain pwmDomain, final DailySummaryJobSettings settings )
     {
-        if ( pwmApplication == null )
+        if ( pwmDomain == null )
         {
             return false;
         }
 
-        if ( pwmApplication.getConfig() == null )
+        if ( pwmDomain.getConfig() == null )
         {
             return false;
         }
 
-        final List<String> toAddress = pwmApplication.getConfig().readSettingAsStringArray( PwmSetting.AUDIT_EMAIL_SYSTEM_TO );
-        final String fromAddress = pwmApplication.getConfig().readAppProperty( AppProperty.AUDIT_EVENTS_EMAILFROM );
+        final List<String> toAddress = settings.getToAddress();
+        final String fromAddress = settings.getFromAddress();
 
-        if ( toAddress == null || toAddress.isEmpty() || toAddress.get( 0 ) == null || toAddress.get( 0 ).length() < 1 )
+        if ( CollectionUtil.isEmpty( toAddress ) || StringUtil.isEmpty( toAddress.get( 0 ) ) )
         {
             return false;
         }
 
-        if ( fromAddress == null || fromAddress.length() < 1 )
+        if ( StringUtil.isEmpty( fromAddress ) )
         {
             return false;
         }
 
-        if ( pwmSetting != null )
-        {
-            return pwmApplication.getConfig().readSettingAsBoolean( pwmSetting );
-        }
-
-        return true;
+        return settings.isDailySummaryJobsEnabled();
     }
 
     private static String stripHtmlTags( final String input )
@@ -280,9 +306,8 @@ public class DailySummaryJob implements Runnable
 
     private static String wrapText( final String input, final int length )
     {
-        String output = WordUtils.wrap( input, length );
-        output = output.replace( "\n", "\n   " );
-        return output;
+        final String output = WordUtils.wrap( input, length );
+        return output.replace( "\n", "\n   " );
     }
 
     private static String htmlHeader()

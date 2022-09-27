@@ -20,12 +20,13 @@
 
 package password.pwm.http.tag;
 
-import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
 import password.pwm.PwmApplicationMode;
 import password.pwm.bean.FormNonce;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.JspUtility;
 import password.pwm.http.PwmRequest;
+import password.pwm.http.PwmSession;
 import password.pwm.http.state.SessionStateService;
 import password.pwm.util.logging.PwmLogger;
 
@@ -41,25 +42,28 @@ public class PwmFormIDTag extends TagSupport
 
     private static String buildPwmFormID( final PwmRequest pwmRequest ) throws PwmUnrecoverableException
     {
-        if ( pwmRequest == null || pwmRequest.getPwmApplication() == null )
+        if ( pwmRequest == null || pwmRequest.getPwmDomain() == null )
         {
             return "";
         }
 
-        final PwmApplication pwmApplication = pwmRequest.getPwmApplication();
-        if ( pwmApplication == null )
+        final PwmDomain pwmDomain = pwmRequest.getPwmDomain();
+        if ( pwmDomain == null )
         {
             return "";
         }
-        final SessionStateService sessionStateService = pwmApplication.getSessionStateService();
+
+
+        final SessionStateService sessionStateService = pwmDomain.getSessionStateService();
         final String value = sessionStateService.getSessionStateInfo( pwmRequest );
+        final PwmSession pwmSession = pwmRequest.getPwmSession();
         final FormNonce formID = new FormNonce(
-                pwmRequest.getPwmSession().getLoginInfoBean().getGuid(),
+                pwmSession.getLoginInfoBean().getGuid(),
                 Instant.now(),
-                pwmRequest.getPwmSession().getLoginInfoBean().getReqCounter(),
+                pwmSession.getLoginInfoBean().getReqCounter(),
                 value
         );
-        return pwmRequest.getPwmApplication().getSecureService().encryptObjectToString( formID );
+        return pwmRequest.getPwmDomain().getSecureService().encryptObjectToString( formID );
     }
 
     @Override

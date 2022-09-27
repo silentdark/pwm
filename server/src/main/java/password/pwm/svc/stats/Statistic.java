@@ -20,16 +20,20 @@
 
 package password.pwm.svc.stats;
 
-import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
 import password.pwm.config.PwmSetting;
 import password.pwm.i18n.Admin;
 import password.pwm.util.i18n.LocaleHelper;
+import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.TimeDuration;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
@@ -56,6 +60,7 @@ public enum Statistic
     HTTP_REQUESTS( "HttpRequests", null ),
     HTTP_RESOURCE_REQUESTS( "HttpResourceRequests", null ),
     HTTP_SESSIONS( "HttpSessions", null ),
+    HTTP_CLIENT_REQUESTS( "HttpClientRequests", null ),
     ACTIVATED_USERS( "ActivatedUsers", null ),
     NEW_USERS( "NewUsers", new ConfigSettingDetail( PwmSetting.NEWUSER_ENABLE ) ),
     GUESTS( "Guests", new ConfigSettingDetail( PwmSetting.GUEST_ENABLE ) ),
@@ -113,6 +118,8 @@ public enum Statistic
     OBSOLETE_URL_REQUESTS( "ObsoleteUrlRequests", null ),
     SYSLOG_MESSAGES_SENT( "SyslogMessagesSent", null ),;
 
+    private static final Set<Statistic> STATISTICS_SET = Collections.unmodifiableSet( EnumSet.allOf( Statistic.class ) );
+
     private final String key;
     private final StatDetail statDetail;
 
@@ -130,13 +137,13 @@ public enum Statistic
         return key;
     }
 
-    public boolean isActive( final PwmApplication pwmApplication )
+    public boolean isActive( final PwmDomain pwmDomain )
     {
         if ( statDetail == null )
         {
             return true;
         }
-        return statDetail.isActive( pwmApplication );
+        return statDetail.isActive( pwmDomain );
     }
 
     public static SortedSet<Statistic> sortedValues( final Locale locale )
@@ -180,7 +187,12 @@ public enum Statistic
 
     interface StatDetail
     {
-        boolean isActive( PwmApplication pwmApplication );
+        boolean isActive( PwmDomain pwmDomain );
+    }
+
+    static Set<Statistic> asSet()
+    {
+        return STATISTICS_SET;
     }
 
     static class ConfigSettingDetail implements StatDetail
@@ -193,16 +205,14 @@ public enum Statistic
         }
 
         @Override
-        public boolean isActive( final PwmApplication pwmApplication )
+        public boolean isActive( final PwmDomain pwmDomain )
         {
-            return pwmApplication.getConfig().readSettingAsBoolean( pwmSetting );
+            return pwmDomain.getConfig().readSettingAsBoolean( pwmSetting );
         }
     }
 
     public static Optional<Statistic> forKey( final String key )
     {
-        return Arrays.stream( values() )
-                .filter( loopValue -> loopValue.getKey().equals( key ) )
-                .findFirst();
+        return JavaHelper.readEnumFromPredicate( Statistic.class,  loopValue -> loopValue.getKey().equals( key ) );
     }
 }

@@ -20,14 +20,14 @@
 
 package password.pwm.config.value;
 
+import org.jrivard.xmlchai.XmlChai;
+import org.jrivard.xmlchai.XmlElement;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.stored.StoredConfigXmlSerializer;
+import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
 import password.pwm.i18n.Display;
-import password.pwm.util.java.JsonUtil;
-import password.pwm.util.java.XmlElement;
-import password.pwm.util.java.XmlFactory;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmSecurityKey;
 
 import java.io.Serializable;
@@ -60,17 +60,20 @@ public class BooleanValue implements StoredValue
             @Override
             public BooleanValue fromJson( final String value )
             {
-                return BooleanValue.of( JsonUtil.deserialize( value, Boolean.class ) );
+                return BooleanValue.of( JsonFactory.get().deserialize( value, Boolean.class ) );
             }
 
             @Override
             public BooleanValue fromXmlElement( final PwmSetting pwmSetting, final XmlElement settingElement, final PwmSecurityKey input )
             {
-                final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlSerializer.StoredConfigXmlConstants.XML_ELEMENT_VALUE );
+                final Optional<XmlElement> valueElement = settingElement.getChild( StoredConfigXmlConstants.XML_ELEMENT_VALUE );
                 if ( valueElement.isPresent() )
                 {
-                    final String value = valueElement.get().getTextTrim();
-                    return BooleanValue.of( Boolean.parseBoolean( value ) );
+                    final Optional<String> value = valueElement.get().getText();
+                    if ( value.isPresent() )
+                    {
+                        return BooleanValue.of( Boolean.parseBoolean( value.get().trim() ) );
+                    }
                 }
                 return BooleanValue.of( false );
             }
@@ -87,8 +90,8 @@ public class BooleanValue implements StoredValue
     @Override
     public List<XmlElement> toXmlValues( final String valueElementName, final XmlOutputProcessData xmlOutputProcessData )
     {
-        final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
-        valueElement.addText( String.valueOf( value ) );
+        final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+        valueElement.setText( String.valueOf( value ) );
         return Collections.singletonList( valueElement );
     }
 

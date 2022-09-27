@@ -186,19 +186,20 @@ PWM_MAIN.initPage = function() {
         });
     }
 
-    for (var i = 0; i < PWM_GLOBAL['startupFunctions'].length; i++) {
-        try {
-            PWM_GLOBAL['startupFunctions'][i]();
-        } catch(e) {
-            console.error('error executing startup function: ' + e);
-        }
-    }
+    PWM_MAIN.JSLibrary.onPageLoad(function(){
+        PWM_MAIN.JSLibrary.forEachInArray(PWM_GLOBAL['startupFunctions'],function(startupFunction){
+            try {
+                startupFunction();
+            } catch(e) {
+                console.error('error executing startup function: ' + e);
+            }
+        })
+    });
 
     PWM_MAIN.TimestampHandler.initAllElements();
 
     ShowHidePasswordHandler.initAllForms();
-    var loadTime = window.performance.timing.domContentLoadedEventEnd-window.performance.timing.navigationStart;
-    PWM_MAIN.log('initPage completed [load time=' + loadTime + ']');
+    PWM_MAIN.log('initPage completed');
 };
 
 PWM_MAIN.initDisplayTabPreferences = function() {
@@ -1308,6 +1309,15 @@ PWM_MAIN.JSLibrary.removeFromArray = function(array,element) {
     }
 };
 
+PWM_MAIN.JSLibrary.getParameterByName = function(name, url = window.location.href) {
+    name = name.replace(/[\[\]]/g, '\\$&');
+    var regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)'),
+        results = regex.exec(url);
+    if (!results) return null;
+    if (!results[2]) return '';
+    return decodeURIComponent(results[2].replace(/\+/g, ' '));
+}
+
 PWM_MAIN.JSLibrary.readValueOfSelectElement = function(nodeID) {
     var element = PWM_MAIN.getObject(nodeID);
     if (element && element.options && element.selectedIndex >= 0) {
@@ -1383,6 +1393,16 @@ PWM_MAIN.JSLibrary.removeElementFromDom = function(elementID) {
     var element = PWM_MAIN.getObject(elementID);
     if (element) {
         element.parentNode.removeChild(element);
+    }
+};
+
+PWM_MAIN.JSLibrary.onPageLoad = function(callback) {
+    if (document.readyState === "complete") {
+        callback();
+    } else {
+        window.addEventListener("load",function(event) {
+            callback();
+        }, false);
     }
 };
 
@@ -2168,6 +2188,14 @@ PWM_MAIN.numberFormat = function (number) {
     }
 
     return number;
+};
+
+PWM_MAIN.loadJsFile = function(filename) {
+    var script = document.createElement("script");  // create a script DOM node
+    script.src = filename;
+    script.type = 'text/javascript'
+    document.head.appendChild(script);
+    PWM_MAIN.log("main: loaded js file: " + filename)
 };
 
 PWM_MAIN.pageLoadHandler();

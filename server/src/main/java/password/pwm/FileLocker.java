@@ -20,11 +20,11 @@
 
 package password.pwm;
 
-import password.pwm.config.Configuration;
+import password.pwm.config.AppConfig;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
@@ -93,7 +93,7 @@ class FileLocker
         try
         {
             final Properties props = new Properties();
-            props.put( "timestamp", JavaHelper.toIsoDate( Instant.now() ) );
+            props.put( "timestamp", StringUtil.toIsoDate( Instant.now() ) );
             props.put( "applicationPath", pwmEnvironment.getApplicationPath() == null ? "n/a" : pwmEnvironment.getApplicationPath().getAbsolutePath() );
             props.put( "configurationFile", pwmEnvironment.getConfigurationFile() == null ? "n/a" : pwmEnvironment.getConfigurationFile().getAbsolutePath() );
             final String comment = PwmConstants.PWM_APP_NAME + " file lock";
@@ -128,10 +128,10 @@ class FileLocker
     public void waitForFileLock( )
             throws PwmUnrecoverableException
     {
-        final Configuration configuration = pwmEnvironment.getConfig();
+        final AppConfig domainConfig = pwmEnvironment.getConfig();
         final int maxWaitSeconds = pwmEnvironment.getFlags().contains( PwmEnvironment.ApplicationFlag.CommandLineInstance )
                 ? 1
-                : Integer.parseInt( configuration.readAppProperty( AppProperty.APPLICATION_FILELOCK_WAIT_SECONDS ) );
+                : Integer.parseInt( domainConfig.readAppProperty( AppProperty.APPLICATION_FILELOCK_WAIT_SECONDS ) );
         final Instant startTime = Instant.now();
         final TimeDuration attemptInterval = TimeDuration.of( 5021, TimeDuration.Unit.MILLISECONDS );
 

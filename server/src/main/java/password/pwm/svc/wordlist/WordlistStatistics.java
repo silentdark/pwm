@@ -21,11 +21,12 @@
 package password.pwm.svc.wordlist;
 
 import lombok.Value;
-import password.pwm.util.java.MovingAverage;
-import password.pwm.util.java.TimeDuration;
+import password.pwm.util.java.StatisticAverageBundle;
+import password.pwm.util.java.StatisticCounterBundle;
 
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.LongAdder;
@@ -33,31 +34,42 @@ import java.util.concurrent.atomic.LongAdder;
 @Value
 class WordlistStatistics
 {
-    private MovingAverage wordCheckTimeMS = new MovingAverage( TimeDuration.of( 5, TimeDuration.Unit.MINUTES ) );
-    private MovingAverage chunksPerWordCheck = new MovingAverage( TimeDuration.of( 1, TimeDuration.Unit.DAYS ) );
-    private LongAdder wordChecks = new LongAdder();
-    private Map<WordType, LongAdder> wordTypeHits = new HashMap<>(  );
-    private LongAdder misses = new LongAdder();
+    private final Map<WordType, LongAdder> wordTypeHits = new EnumMap<>( WordType.class );
+    private final StatisticCounterBundle<CounterStat> counterStats = new StatisticCounterBundle<>( CounterStat.class );
+    private final StatisticAverageBundle<AverageStat> averageStats = new StatisticAverageBundle<>( AverageStat.class );
+
+    enum CounterStat
+    {
+        wordChecks,
+        wordHits,
+        wordMisses,
+        chunkChecks,
+        chunkHits,
+        chunkMisses,
+    }
+
+    enum AverageStat
+    {
+        avgWordCheckLength,
+        wordCheckTimeMS,
+        chunkCheckTimeMS,
+        chunksPerWordCheck,
+    }
 
     WordlistStatistics()
     {
-        for ( final WordType wordType : WordType.values() )
-        {
-            wordTypeHits.put( wordType, new LongAdder() );
-        }
+        EnumSet.allOf( WordType.class ).forEach( wordType -> wordTypeHits.put( wordType, new LongAdder() ) );
     }
 
     Map<String, String> asDebugMap()
     {
         final Map<String, String> outputMap = new TreeMap<>(  );
-        outputMap.put( "AvgLocalDBWordCheckTimeMS", Double.toString( wordCheckTimeMS.getAverage() ) );
-        outputMap.put( "ChunksPerCheck", Double.toString( chunksPerWordCheck.getAverage() ) );
-        outputMap.put( "LocalDBWordChecks", Long.toString( wordChecks.sum() ) );
-        outputMap.put( "Misses", Long.toString( misses.sum() ) );
         for ( final Map.Entry<WordType, LongAdder> entry : wordTypeHits.entrySet() )
         {
             outputMap.put( "Hits-" + entry.getKey().name(), Long.toString( entry.getValue().sum() ) );
         }
+        outputMap.putAll( counterStats.debugStats() );
+        outputMap.putAll( averageStats.debugStats() );
         return Collections.unmodifiableMap( outputMap );
     }
 }

@@ -23,18 +23,19 @@ package password.pwm.util.secure;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
+import password.pwm.svc.secure.SecureService;
+import password.pwm.util.java.JavaHelper;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.EnumMap;
 import java.util.Map;
 
 public class PwmSecurityKey
 {
-
     enum Type
     {
         AES,
@@ -44,7 +45,7 @@ public class PwmSecurityKey
     }
 
     private final byte[] keyData;
-    private final Map<Type, SecretKey> keyCache = new HashMap<>();
+    private final Map<Type, SecretKey> keyCache = new EnumMap<>( Type.class );
 
     public PwmSecurityKey( final byte[] keyData )
     {
@@ -56,10 +57,10 @@ public class PwmSecurityKey
         this.keyData = stringToKeyData( keyData );
     }
 
-    public String keyHash( final SecureService secureService )
+    public String keyHash( final SecureService domainSecureService )
             throws PwmUnrecoverableException
     {
-        return secureService.hash( keyData );
+        return domainSecureService.hash( keyData );
     }
 
     private byte[] stringToKeyData( final String input ) throws PwmUnrecoverableException
@@ -70,11 +71,14 @@ public class PwmSecurityKey
     SecretKey getKey( final Type keyType )
             throws PwmUnrecoverableException
     {
-        if ( !keyCache.containsKey( keyType ) )
+        final SecretKey theKey = keyCache.get( keyType );
+        if ( theKey == null )
         {
-            keyCache.put( keyType, getKeyImpl( keyType ) );
+            final SecretKey newKey = getKeyImpl( keyType );
+            keyCache.put( keyType, newKey );
+            return newKey;
         }
-        return keyCache.get( keyType );
+        return theKey;
     }
 
     private SecretKey getKeyImpl( final Type keyType )
@@ -122,4 +126,11 @@ public class PwmSecurityKey
             throw new PwmUnrecoverableException( errorInformation );
         }
     }
+
+    public PwmSecurityKey add( final PwmSecurityKey otherKey )
+    {
+        final byte[] newKeyMaterial = JavaHelper.concatByteArrays( this.keyData, otherKey.keyData );
+        return new PwmSecurityKey( newKeyMaterial );
+    }
+
 }

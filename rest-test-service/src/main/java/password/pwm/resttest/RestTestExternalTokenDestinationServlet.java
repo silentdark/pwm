@@ -22,9 +22,8 @@ package password.pwm.resttest;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import org.apache.commons.io.IOUtils;
+import password.pwm.util.java.JavaHelper;
 
-import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -32,6 +31,7 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 
 @WebServlet(
         name = "RestTestExternalTokenDestinationServlet",
@@ -42,11 +42,11 @@ public class RestTestExternalTokenDestinationServlet extends HttpServlet
 
     @Override
     protected void doPost( final HttpServletRequest req, final HttpServletResponse resp )
-            throws ServletException, IOException
+            throws IOException
     {
         System.out.println( "--External Token Destination--" );
         final InputStream inputStream = req.getInputStream();
-        final String body = IOUtils.toString( inputStream );
+        final String body = JavaHelper.copyToString( inputStream, StandardCharsets.UTF_8, Integer.MAX_VALUE ).orElseThrow();
         final JsonObject jsonObject = JsonParser.parseString( body ).getAsJsonObject();
         final String email = jsonObject.getAsJsonObject( "tokenDestination" ).get( "email" ).getAsString();
         final String sms = jsonObject.getAsJsonObject( "tokenDestination" ).get( "sms" ).getAsString();

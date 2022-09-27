@@ -26,9 +26,9 @@ import password.pwm.util.cli.CliException;
 import password.pwm.util.cli.CliParameters;
 import password.pwm.util.cli.MainClass;
 
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -59,7 +59,7 @@ public class ShellCommand extends AbstractCliCommand
 
     @Override
     void doCommand( )
-            throws Exception
+            throws IOException
     {
         boolean exitFlag = false;
 
@@ -84,6 +84,7 @@ public class ShellCommand extends AbstractCliCommand
     }
 
     final void processCommand( final String commandLine )
+            throws IOException
     {
         if ( commandLine == null )
         {
@@ -174,7 +175,7 @@ public class ShellCommand extends AbstractCliCommand
         {
             return Collections.emptyList();
         }
-        return Collections.unmodifiableList( Arrays.asList( input.trim().split( "\\s+" ) ) );
+        return List.of( input.trim().split( "\\s+" ) );
     }
 
 }

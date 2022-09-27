@@ -20,17 +20,16 @@
 
 package password.pwm.util.password;
 
-import com.google.gson.reflect.TypeToken;
 import com.novell.ldapchai.ChaiUser;
 import com.novell.ldapchai.exception.ChaiError;
 import com.novell.ldapchai.exception.ChaiPasswordPolicyException;
 import com.novell.ldapchai.exception.ChaiUnavailableException;
 import password.pwm.AppProperty;
-import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
+import password.pwm.PwmDomain;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.pub.PublicUserInfoBean;
-import password.pwm.config.Configuration;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.profile.PwmPasswordPolicy;
 import password.pwm.config.profile.PwmPasswordRule;
@@ -40,10 +39,12 @@ import password.pwm.error.PwmError;
 import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.ldap.UserInfo;
+import password.pwm.ldap.UserInfoBean;
 import password.pwm.svc.stats.Statistic;
+import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.util.PasswordData;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
 import password.pwm.ws.client.rest.RestClientHelper;
@@ -54,17 +55,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 public class PwmPasswordRuleValidator
 {
-
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmPasswordRuleValidator.class );
 
-    private final PwmApplication pwmApplication;
+    private final SessionLabel sessionLabel;
+    private final PwmDomain pwmDomain;
     private final PwmPasswordPolicy policy;
     private final Locale locale;
     private final Flag[] flags;
-
 
     public enum Flag
     {
@@ -72,29 +73,40 @@ public class PwmPasswordRuleValidator
         BypassLdapRuleCheck,
     }
 
-    public PwmPasswordRuleValidator(
-            final PwmApplication pwmApplication,
-            final PwmPasswordPolicy policy,
-            final Flag... flags
-    )
-    {
-        this.pwmApplication = pwmApplication;
-        this.policy = policy;
-        this.locale = PwmConstants.DEFAULT_LOCALE;
-        this.flags = flags;
-    }
-
-    public PwmPasswordRuleValidator(
-            final PwmApplication pwmApplication,
+    private PwmPasswordRuleValidator(
+            final SessionLabel sessionLabel,
+            final PwmDomain pwmDomain,
             final PwmPasswordPolicy policy,
             final Locale locale,
             final Flag... flags
     )
     {
-        this.pwmApplication = pwmApplication;
+        this.sessionLabel = sessionLabel;
+        this.pwmDomain = Objects.requireNonNull( pwmDomain );
         this.policy = policy;
         this.locale = locale;
         this.flags = flags;
+    }
+
+    public static PwmPasswordRuleValidator create(
+            final SessionLabel sessionLabel,
+            final PwmDomain pwmDomain,
+            final PwmPasswordPolicy policy,
+            final Flag... flags
+    )
+    {
+        return new PwmPasswordRuleValidator( sessionLabel, pwmDomain, policy, PwmConstants.DEFAULT_LOCALE, flags );
+    }
+
+    public static PwmPasswordRuleValidator create(
+            final SessionLabel sessionLabel,
+            final PwmDomain pwmDomain,
+            final PwmPasswordPolicy policy,
+            final Locale locale,
+            final Flag... flags
+    )
+    {
+        return new PwmPasswordRuleValidator( sessionLabel, pwmDomain, policy, locale, flags );
     }
 
     public boolean testPassword(
@@ -109,7 +121,7 @@ public class PwmPasswordRuleValidator
 
         if ( !errorResults.isEmpty() )
         {
-            throw new PwmDataValidationException( errorResults.iterator().next() );
+            throw new PwmDataValidationException( errorResults.get( 0 ) );
         }
 
         if ( user != null && !JavaHelper.enumArrayContainsValue( flags, Flag.BypassLdapRuleCheck ) )
@@ -121,27 +133,27 @@ public class PwmPasswordRuleValidator
             }
             catch ( final UnsupportedOperationException e )
             {
-                LOGGER.trace( () -> "Unsupported operation was thrown while validating password: " + e.toString() );
+                LOGGER.trace( () -> "Unsupported operation was thrown while validating password: " + e );
             }
             catch ( final ChaiUnavailableException e )
             {
-                pwmApplication.getStatisticsManager().incrementValue( Statistic.LDAP_UNAVAILABLE_COUNT );
-                LOGGER.warn( () -> "ChaiUnavailableException was thrown while validating password: " + e.toString() );
+                StatisticsClient.incrementStat( pwmDomain.getPwmApplication(), Statistic.LDAP_UNAVAILABLE_COUNT );
+                LOGGER.warn( () -> "ChaiUnavailableException was thrown while validating password: " + e );
                 throw e;
             }
             catch ( final ChaiPasswordPolicyException e )
             {
                 final ChaiError passwordError = e.getErrorCode();
-                final PwmError pwmError = PwmError.forChaiError( passwordError );
-                final ErrorInformation info = new ErrorInformation( pwmError == null ? PwmError.PASSWORD_UNKNOWN_VALIDATION : pwmError );
-                LOGGER.trace( () -> "ChaiPasswordPolicyException was thrown while validating password: " + e.toString() );
+                final PwmError pwmError = PwmError.forChaiError( passwordError ).orElse( PwmError.PASSWORD_UNKNOWN_VALIDATION );
+                final ErrorInformation info = new ErrorInformation( pwmError );
+                LOGGER.trace( () -> "ChaiPasswordPolicyException was thrown while validating password: " + e );
                 errorResults.add( info );
             }
         }
 
         if ( !errorResults.isEmpty() )
         {
-            throw new PwmDataValidationException( errorResults.iterator().next() );
+            throw new PwmDataValidationException( errorResults.get( 0 ) );
         }
 
         return true;
@@ -163,10 +175,10 @@ public class PwmPasswordRuleValidator
             throws PwmUnrecoverableException
     {
         final List<ErrorInformation> internalResults = internalPwmPolicyValidator( password, oldPassword, userInfo );
-        if ( pwmApplication != null )
+        if ( pwmDomain != null )
         {
             final List<ErrorInformation> externalResults = invokeExternalRuleMethods(
-                    pwmApplication.getConfig(),
+                    pwmDomain.getConfig(),
                     policy,
                     password,
                     userInfo
@@ -185,7 +197,7 @@ public class PwmPasswordRuleValidator
     {
         final String passwordString = password == null ? "" : password.getStringValue();
         final String oldPasswordString = oldPassword == null ? null : oldPassword.getStringValue();
-        return PasswordRuleChecks.extendedPolicyRuleChecker( pwmApplication, policy, passwordString, oldPasswordString, userInfo, flags );
+        return PasswordRuleChecks.extendedPolicyRuleChecker( sessionLabel, pwmDomain, policy, passwordString, oldPasswordString, userInfo, flags );
     }
 
     public List<ErrorInformation> internalPwmPolicyValidator(
@@ -195,7 +207,7 @@ public class PwmPasswordRuleValidator
     )
             throws PwmUnrecoverableException
     {
-        return PasswordRuleChecks.extendedPolicyRuleChecker( pwmApplication, policy, password, oldPassword, userInfo, flags );
+        return PasswordRuleChecks.extendedPolicyRuleChecker( sessionLabel, pwmDomain, policy, password, oldPassword, userInfo, flags );
     }
 
 
@@ -203,7 +215,7 @@ public class PwmPasswordRuleValidator
     private static final String REST_RESPONSE_KEY_ERROR_MSG = "errorMessage";
 
     public List<ErrorInformation> invokeExternalRuleMethods(
-            final Configuration config,
+            final DomainConfig config,
             final PwmPasswordPolicy pwmPasswordPolicy,
             final PasswordData password,
             final UserInfo userInfo
@@ -237,21 +249,23 @@ public class PwmPasswordRuleValidator
         }
         if ( userInfo != null )
         {
-            final MacroRequest macroRequest = MacroRequest.forUser( pwmApplication, PwmConstants.DEFAULT_LOCALE, SessionLabel.SYSTEM_LABEL, userInfo.getUserIdentity() );
-            final PublicUserInfoBean publicUserInfoBean = PublicUserInfoBean.fromUserInfoBean( userInfo, pwmApplication.getConfig(), locale, macroRequest );
+            final MacroRequest macroRequest = MacroRequest.forUser(
+                    pwmDomain.getPwmApplication(),
+                    PwmConstants.DEFAULT_LOCALE,
+                    SessionLabel.SYSTEM_LABEL,
+                    userInfo.getUserIdentity() );
+            final PublicUserInfoBean publicUserInfoBean = UserInfoBean.toPublicUserInfoBean( userInfo, pwmDomain.getConfig(), locale, macroRequest );
             sendData.put( "userInfo", publicUserInfoBean );
         }
 
-        final String jsonRequestBody = JsonUtil.serializeMap( sendData );
+        final String jsonRequestBody = JsonFactory.get().serializeMap( sendData );
         try
         {
-            final String responseBody = RestClientHelper.makeOutboundRestWSCall( pwmApplication, locale, restURL,
+            final String responseBody = RestClientHelper.makeOutboundRestWSCall( pwmDomain, locale, restURL,
                     jsonRequestBody );
-            final Map<String, Object> responseMap = JsonUtil.deserialize( responseBody,
-                    new TypeToken<Map<String, Object>>()
-                    {
-                    }
-            );
+            final Map<String, Object> responseMap = JsonFactory.get().deserializeMap( responseBody,
+                    String.class,
+                    Object.class );
             if ( responseMap.containsKey( REST_RESPONSE_KEY_ERROR ) && Boolean.parseBoolean( responseMap.get(
                     REST_RESPONSE_KEY_ERROR ).toString() ) )
             {

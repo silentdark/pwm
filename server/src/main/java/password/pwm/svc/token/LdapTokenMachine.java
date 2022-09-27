@@ -22,8 +22,7 @@ package password.pwm.svc.token;
 
 import com.novell.ldapchai.ChaiUser;
 import com.novell.ldapchai.exception.ChaiException;
-import com.novell.ldapchai.util.SearchHelper;
-import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.PwmSetting;
@@ -36,24 +35,21 @@ import password.pwm.ldap.UserInfoFactory;
 import password.pwm.ldap.search.SearchConfiguration;
 import password.pwm.ldap.search.UserSearchEngine;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 
 class LdapTokenMachine implements TokenMachine
 {
     private static final String KEY_VALUE_DELIMITER = " ";
 
-    private PwmApplication pwmApplication;
-    private String tokenAttribute;
-    private TokenService tokenService;
+    private final PwmDomain pwmDomain;
+    private final String tokenAttribute;
+    private final TokenService tokenService;
 
-    LdapTokenMachine( final TokenService tokenService, final PwmApplication pwmApplication )
-            throws PwmOperationalException
+    LdapTokenMachine( final TokenService tokenService, final PwmDomain pwmDomain )
     {
         this.tokenService = tokenService;
-        this.pwmApplication = pwmApplication;
-        this.tokenAttribute = pwmApplication.getConfig().readSettingAsString( PwmSetting.TOKEN_LDAP_ATTRIBUTE );
+        this.pwmDomain = pwmDomain;
+        this.tokenAttribute = pwmDomain.getConfig().readSettingAsString( PwmSetting.TOKEN_LDAP_ATTRIBUTE );
     }
 
     @Override
@@ -68,25 +64,13 @@ class LdapTokenMachine implements TokenMachine
 
     @Override
     public Optional<TokenPayload> retrieveToken( final SessionLabel sessionLabel, final TokenKey tokenKey )
-            throws PwmOperationalException, PwmUnrecoverableException
+            throws PwmOperationalException
     {
-        final String searchFilter;
-        {
-            final String storedHash = tokenKey.getStoredHash();
-            final SearchHelper tempSearchHelper = new SearchHelper();
-            final Map<String, String> filterAttributes = new HashMap<>();
-            for ( final String loopStr : pwmApplication.getConfig().readSettingAsStringArray( PwmSetting.DEFAULT_OBJECT_CLASSES ) )
-            {
-                filterAttributes.put( "objectClass", loopStr );
-            }
-            filterAttributes.put( tokenAttribute, storedHash + "*" );
-            tempSearchHelper.setFilterAnd( filterAttributes );
-            searchFilter = tempSearchHelper.getFilter();
-        }
+        final String searchFilter = makeLdapSearchFilter( pwmDomain, tokenKey, tokenAttribute );
 
         try
         {
-            final UserSearchEngine userSearchEngine = pwmApplication.getUserSearchEngine();
+            final UserSearchEngine userSearchEngine = pwmDomain.getUserSearchEngine();
             final SearchConfiguration searchConfiguration = SearchConfiguration.builder()
                     .filter( searchFilter )
                     .build();
@@ -95,7 +79,7 @@ class LdapTokenMachine implements TokenMachine
             {
                 return Optional.empty();
             }
-            final UserInfo userInfo = UserInfoFactory.newUserInfoUsingProxy( pwmApplication, sessionLabel, user, null );
+            final UserInfo userInfo = UserInfoFactory.newUserInfoUsingProxy( pwmDomain.getPwmApplication(), sessionLabel, user, null );
             final String tokenAttributeValue = userInfo.readStringAttribute( tokenAttribute );
             if ( tokenAttribute != null && tokenAttributeValue.length() > 0 )
             {
@@ -126,6 +110,28 @@ class LdapTokenMachine implements TokenMachine
         return Optional.empty();
     }
 
+    private static String makeLdapSearchFilter(
+            final PwmDomain pwmDomain,
+            final TokenKey tokenKey,
+            final String tokenAttribute
+    )
+    {
+        final String storedHash = tokenKey.getStoredHash();
+        final StringBuilder searchFilter = new StringBuilder();
+
+        searchFilter.append( "(&" );
+
+        for ( final String loopStr : pwmDomain.getConfig().readSettingAsStringArray( PwmSetting.DEFAULT_OBJECT_CLASSES ) )
+        {
+            searchFilter.append( "(objectClass=" ).append( loopStr ).append( ')' );
+        }
+
+        searchFilter.append( '(' ).append( tokenAttribute ).append( '=' ).append( storedHash ).append( "*)" );
+        searchFilter.append( ')' );
+
+        return searchFilter.toString();
+    }
+
     @Override
     public void storeToken( final TokenKey tokenKey, final TokenPayload tokenPayload )
             throws PwmOperationalException, PwmUnrecoverableException
@@ -136,7 +142,7 @@ class LdapTokenMachine implements TokenMachine
             final String encodedTokenPayload = tokenService.toEncryptedString( tokenPayload );
 
             final UserIdentity userIdentity = tokenPayload.getUserIdentity();
-            final ChaiUser chaiUser = pwmApplication.getProxiedChaiUser( userIdentity );
+            final ChaiUser chaiUser = pwmDomain.getProxiedChaiUser( tokenService.getSessionLabel(), userIdentity );
             chaiUser.writeStringAttribute( tokenAttribute, md5sumToken + KEY_VALUE_DELIMITER + encodedTokenPayload );
         }
         catch ( final ChaiException e )
@@ -157,7 +163,8 @@ class LdapTokenMachine implements TokenMachine
             final UserIdentity userIdentity = payload.get().getUserIdentity();
             try
             {
-                final ChaiUser chaiUser = pwmApplication.getProxiedChaiUser( userIdentity );
+                final ChaiUser chaiUser = pwmDomain.getProxiedChaiUser( tokenService.getSessionLabel(), userIdentity );
+                tokenService.getStats().increment( TokenService.StatsKey.tokensRemoved );
                 chaiUser.deleteAttribute( tokenAttribute, null );
             }
             catch ( final ChaiException e )
@@ -189,7 +196,7 @@ class LdapTokenMachine implements TokenMachine
     @Override
     public TokenKey keyFromKey( final String key ) throws PwmUnrecoverableException
     {
-        return StoredTokenKey.fromKeyValue( pwmApplication, key );
+        return StoredTokenKey.fromKeyValue( pwmDomain, key );
     }
 
     @Override

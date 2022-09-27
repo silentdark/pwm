@@ -23,23 +23,28 @@ package password.pwm;
 import lombok.Builder;
 import lombok.Singular;
 import lombok.Value;
-import password.pwm.config.Configuration;
+import password.pwm.config.AppConfig;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.ContextManager;
+import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.java.StringUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
 import java.io.File;
-import java.io.FileInputStream;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 
@@ -52,7 +57,7 @@ public class PwmEnvironment
     @lombok.Builder.Default
     private PwmApplicationMode applicationMode = PwmApplicationMode.ERROR;
 
-    private Configuration config;
+    private AppConfig config;
     private File applicationPath;
     private boolean internalRuntimeInstance;
     private File configurationFile;
@@ -105,12 +110,12 @@ public class PwmEnvironment
 
         public String conicalJavaOptionSystemName( )
         {
-            return PwmConstants.PWM_APP_NAME.toLowerCase() + "." + this.toString();
+            return PwmConstants.PWM_APP_NAME.toLowerCase() + "." + this;
         }
 
         public String conicalEnvironmentSystemName( )
         {
-            return ( PwmConstants.PWM_APP_NAME.toLowerCase() + "_" + this.toString() ).toUpperCase();
+            return ( PwmConstants.PWM_APP_NAME.toLowerCase() + "_" + this ).toUpperCase();
         }
 
         public List<String> possibleNames( final String contextName )
@@ -123,21 +128,21 @@ public class PwmEnvironment
                         + "."
                         + contextName
                         + "."
-                        + this.toString();
+                        + this;
                 returnValues.add( value );
                 returnValues.add( value.toUpperCase() );
-                returnValues.add( value.replace( ".", "_" ) );
-                returnValues.add( value.toUpperCase().replace( ".", "_" ) );
+                returnValues.add( value.replace( '.', '_' ) );
+                returnValues.add( value.toUpperCase().replace( '.', '_' ) );
             }
             {
                 // java property format <app>.<paramName> like pwm.applicationFlag
                 final String value = PwmConstants.PWM_APP_NAME.toLowerCase()
                         + "."
-                        + this.toString();
+                        + this;
                 returnValues.add( value );
                 returnValues.add( value.toUpperCase() );
-                returnValues.add( value.replace( ".", "_" ) );
-                returnValues.add( value.toUpperCase().replace( ".", "_" ) );
+                returnValues.add( value.replace( '.', '_' ) );
+                returnValues.add( value.toUpperCase().replace( '.', '_' ) );
             }
 
             return Collections.unmodifiableList( returnValues );
@@ -168,15 +173,14 @@ public class PwmEnvironment
     }
 
     public PwmEnvironment makeRuntimeInstance(
-            final Configuration configuration
+            final AppConfig appConfig
     )
-            throws PwmUnrecoverableException
     {
         return this.toBuilder()
                 .applicationMode( PwmApplicationMode.READ_ONLY )
                 .internalRuntimeInstance( true )
                 .configurationFile( null )
-                .config( configuration )
+                .config( appConfig )
                 .build();
     }
 
@@ -235,47 +239,47 @@ public class PwmEnvironment
     {
         public static Set<ApplicationFlag> readApplicationFlagsFromSystem( final String contextName )
         {
-            final String rawValue = readValueFromSystem( EnvironmentParameter.applicationFlags, contextName );
-            if ( rawValue != null )
+            final Optional<String> rawValue = readValueFromSystem( EnvironmentParameter.applicationFlags, contextName );
+            if ( rawValue.isPresent() )
             {
-                return parseApplicationFlagValueParameter( rawValue );
+                return parseApplicationFlagValueParameter( rawValue.get() );
             }
             return Collections.emptySet();
         }
 
         public static Map<ApplicationParameter, String> readApplicationParmsFromSystem( final String contextName )
         {
-            final String rawValue = readValueFromSystem( EnvironmentParameter.applicationParamFile, contextName );
-            if ( rawValue != null )
+            final Optional<String> rawValue = readValueFromSystem( EnvironmentParameter.applicationParamFile, contextName );
+            if ( rawValue.isPresent() )
             {
-                return readAppParametersFromPath( rawValue );
+                return readAppParametersFromPath( rawValue.get() );
             }
             return Collections.emptyMap();
         }
 
-        public static String readValueFromSystem( final PwmEnvironment.EnvironmentParameter parameter, final String contextName )
+        public static Optional<String> readValueFromSystem( final PwmEnvironment.EnvironmentParameter parameter, final String contextName )
         {
             final List<String> namePossibilities = parameter.possibleNames( contextName );
 
             for ( final String propertyName : namePossibilities )
             {
                 final String propValue = System.getProperty( propertyName );
-                if ( propValue != null && !propValue.isEmpty() )
+                if ( StringUtil.notEmpty( propValue ) )
                 {
-                    return propValue;
+                    return Optional.of( propValue );
                 }
             }
 
             for ( final String propertyName : namePossibilities )
             {
                 final String propValue = System.getenv( propertyName );
-                if ( propValue != null && !propValue.isEmpty() )
+                if ( StringUtil.notEmpty( propValue ) )
                 {
-                    return propValue;
+                    return Optional.of( propValue );
                 }
             }
 
-            return null;
+            return Optional.empty();
         }
 
         public static Set<ApplicationFlag> parseApplicationFlagValueParameter( final String input )
@@ -287,8 +291,8 @@ public class PwmEnvironment
 
             try
             {
-                final List<String> jsonValues = JsonUtil.deserializeStringList( input );
-                final Set<ApplicationFlag> returnFlags = JavaHelper.readEnumSetFromStringCollection( ApplicationFlag.class, jsonValues );
+                final List<String> jsonValues = JsonFactory.get().deserializeStringList( input );
+                final Set<ApplicationFlag> returnFlags = CollectionUtil.readEnumSetFromStringCollection( ApplicationFlag.class, jsonValues );
                 return Collections.unmodifiableSet( returnFlags );
             }
             catch ( final Exception e )
@@ -306,7 +310,7 @@ public class PwmEnvironment
                 }
                 else
                 {
-                    LOGGER.warn( () -> "unknown " + EnvironmentParameter.applicationFlags.toString() + " value: " + input );
+                    LOGGER.warn( () -> "unknown " + EnvironmentParameter.applicationFlags + " value: " + input );
                 }
             }
             return returnFlags;
@@ -320,14 +324,14 @@ public class PwmEnvironment
             }
 
             final Properties propValues = new Properties();
-            try ( FileInputStream fileInputStream = new FileInputStream( new File( input ) ) )
+            try ( InputStream fileInputStream = Files.newInputStream( Path.of( input ) ) )
             {
                 propValues.load( fileInputStream );
             }
             catch ( final Exception e )
             {
                 LOGGER.warn( () -> "error reading properties file '" + input + "' specified by environment setting "
-                        + EnvironmentParameter.applicationParamFile.toString() + ", error: " + e.getMessage() );
+                        + EnvironmentParameter.applicationParamFile + ", error: " + e.getMessage() );
             }
 
             try
@@ -335,22 +339,22 @@ public class PwmEnvironment
                 final Map<ApplicationParameter, String> returnParams = new EnumMap<>( ApplicationParameter.class );
                 for ( final Object key : propValues.keySet() )
                 {
-
-                    final ApplicationParameter param = ApplicationParameter.forString( key.toString() );
+                    final String keyString = key.toString();
+                    final ApplicationParameter param = ApplicationParameter.forString( keyString );
                     if ( param != null )
                     {
-                        returnParams.put( param, propValues.getProperty( key.toString() ) );
+                        returnParams.put( param, propValues.getProperty( keyString ) );
                     }
                     else
                     {
-                        LOGGER.warn( () -> "unknown " + EnvironmentParameter.applicationParamFile.toString() + " value: " + input );
+                        LOGGER.warn( () -> "unknown " + EnvironmentParameter.applicationParamFile + " value: " + input );
                     }
                 }
                 return Collections.unmodifiableMap( returnParams );
             }
             catch ( final Exception e )
             {
-                LOGGER.warn( () -> "unable to parse jason value of " + EnvironmentParameter.applicationParamFile.toString() + ", error: " + e.getMessage() );
+                LOGGER.warn( () -> "unable to parse jason value of " + EnvironmentParameter.applicationParamFile + ", error: " + e.getMessage() );
             }
 
             return Collections.emptyMap();

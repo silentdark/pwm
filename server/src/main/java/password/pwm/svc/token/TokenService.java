@@ -27,11 +27,13 @@ import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.PwmApplicationMode;
 import password.pwm.PwmConstants;
+import password.pwm.PwmDomain;
+import password.pwm.bean.DomainID;
 import password.pwm.bean.EmailItemBean;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.TokenDestinationItem;
 import password.pwm.bean.UserIdentity;
-import password.pwm.config.Configuration;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.option.DataStorageMethod;
 import password.pwm.config.option.MessageSendMethod;
@@ -49,21 +51,25 @@ import password.pwm.health.HealthRecord;
 import password.pwm.http.PwmRequestContext;
 import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.auth.SessionAuthenticator;
+import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
+import password.pwm.svc.db.DatabaseDataStore;
+import password.pwm.svc.db.DatabaseTable;
 import password.pwm.svc.event.AuditEvent;
 import password.pwm.svc.event.AuditRecord;
 import password.pwm.svc.event.AuditRecordFactory;
-import password.pwm.svc.intruder.RecordType;
+import password.pwm.svc.event.AuditServiceClient;
+import password.pwm.svc.intruder.IntruderRecordType;
+import password.pwm.svc.intruder.IntruderServiceClient;
+import password.pwm.svc.sms.SmsQueueService;
 import password.pwm.svc.stats.Statistic;
-import password.pwm.svc.stats.StatisticsManager;
+import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.util.DataStore;
-import password.pwm.util.PwmScheduler;
-import password.pwm.util.db.DatabaseDataStore;
-import password.pwm.util.db.DatabaseTable;
-import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.java.MiscUtil;
+import password.pwm.util.java.StatisticCounterBundle;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.localdb.LocalDB;
 import password.pwm.util.localdb.LocalDBDataStore;
 import password.pwm.util.logging.PwmLogger;
@@ -76,8 +82,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.TimerTask;
-import java.util.concurrent.ExecutorService;
 
 /**
  * This PWM service is responsible for reading/writing tokens used for forgotten password,
@@ -86,24 +90,28 @@ import java.util.concurrent.ExecutorService;
  *
  * @author jrivard@gmail.com
  */
-public class TokenService implements PwmService
+public class TokenService extends AbstractPwmService implements PwmService
 {
-
     private static final PwmLogger LOGGER = PwmLogger.forClass( TokenService.class );
 
-    private ExecutorService executorService;
-
-    private PwmApplication pwmApplication;
-    private Configuration configuration;
+    private PwmDomain pwmDomain;
+    private DomainConfig domainConfig;
     private TokenStorageMethod storageMethod;
+    private DataStorageMethod dataStorageMethod;
+
     private TokenMachine tokenMachine;
 
-    private ServiceInfoBean serviceInfo = ServiceInfoBean.builder().build();
-    private volatile STATUS status = STATUS.CLOSED;
-
-    private ErrorInformation errorInformation = null;
+    private final StatisticCounterBundle<StatsKey> stats = new StatisticCounterBundle<>( StatsKey.class );
 
     private boolean verifyPwModifyTime = true;
+
+    enum StatsKey
+    {
+        tokensIssued,
+        tokenValidations,
+        tokenValidationsPassed,
+        tokenValidationsFailed, tokensRemoved,
+    }
 
     public enum TokenEntryType
     {
@@ -130,33 +138,32 @@ public class TokenService implements PwmService
     }
 
     @Override
-    public void init( final PwmApplication pwmApplication )
+    public STATUS postAbstractInit( final PwmApplication pwmApplication, final DomainID domainID )
             throws PwmException
     {
-        LOGGER.trace( () -> "opening" );
+        this.pwmDomain = pwmApplication.domains().get( domainID );
 
-        this.pwmApplication = pwmApplication;
-        this.configuration = pwmApplication.getConfig();
+        LOGGER.trace( getSessionLabel(), () -> "opening" );
 
-        storageMethod = configuration.getTokenStorageMethod();
-        if ( storageMethod == null )
+        this.domainConfig = pwmDomain.getConfig();
+
+        storageMethod = domainConfig.getTokenStorageMethod().orElseThrow( () ->
         {
             final String errorMsg = "no storage method specified";
-            errorInformation = new ErrorInformation( PwmError.ERROR_INVALID_CONFIG, errorMsg );
-            status = STATUS.CLOSED;
-            throw new PwmOperationalException( errorInformation );
-        }
+            setStartupError( new ErrorInformation( PwmError.ERROR_INVALID_CONFIG, errorMsg ) );
+            return new PwmOperationalException( getStartupError() );
+        } );
 
         if ( pwmApplication.getLocalDB() == null )
         {
-            LOGGER.trace( () -> "localDB is not available, will remain closed" );
-            return;
+            LOGGER.trace( getSessionLabel(), () -> "localDB is not available, will remain closed" );
+            return STATUS.CLOSED;
         }
 
-        if ( pwmApplication.getApplicationMode() != PwmApplicationMode.RUNNING )
+        if ( pwmDomain.getApplicationMode() != PwmApplicationMode.RUNNING )
         {
-            LOGGER.trace( () -> "Application mode is not 'running', will remain closed." );
-            return;
+            LOGGER.trace( getSessionLabel(), () -> "Application mode is not 'running', will remain closed." );
+            return STATUS.CLOSED;
         }
 
         try
@@ -167,15 +174,15 @@ public class TokenService implements PwmService
                 case STORE_LOCALDB:
                 {
                     final DataStore dataStore = new LocalDBDataStore( pwmApplication.getLocalDB(), LocalDB.DB.TOKENS );
-                    tokenMachine = new DataStoreTokenMachine( pwmApplication, this, dataStore );
+                    tokenMachine = new DataStoreTokenMachine( pwmDomain, this, dataStore );
                     usedStorageMethod = DataStorageMethod.LOCALDB;
                     break;
                 }
 
                 case STORE_DB:
                 {
-                    final DataStore dataStore = new DatabaseDataStore( pwmApplication.getDatabaseService(), DatabaseTable.TOKENS );
-                    tokenMachine = new DataStoreTokenMachine( pwmApplication, this, dataStore );
+                    final DataStore dataStore = new DatabaseDataStore( pwmDomain.getPwmApplication().getDatabaseService(), DatabaseTable.TOKENS );
+                    tokenMachine = new DataStoreTokenMachine( pwmDomain, this, dataStore );
                     usedStorageMethod = DataStorageMethod.DB;
                     break;
                 }
@@ -186,41 +193,30 @@ public class TokenService implements PwmService
                     break;
 
                 case STORE_LDAP:
-                    tokenMachine = new LdapTokenMachine( this, pwmApplication );
+                    tokenMachine = new LdapTokenMachine( this, pwmDomain );
                     usedStorageMethod = DataStorageMethod.LDAP;
                     break;
 
                 default:
-                    JavaHelper.unhandledSwitchStatement( storageMethod );
+                    MiscUtil.unhandledSwitchStatement( storageMethod );
             }
-            serviceInfo = ServiceInfoBean.builder()
-                    .storageMethod( usedStorageMethod )
-                    .build();
+            dataStorageMethod = usedStorageMethod;
         }
         catch ( final PwmException e )
         {
             final String errorMsg = "unable to start token manager: " + e.getErrorInformation().getDetailedErrorMsg();
             final ErrorInformation newErrorInformation = new ErrorInformation( e.getError(), errorMsg );
-            errorInformation = newErrorInformation;
-            LOGGER.error( () -> newErrorInformation.toDebugStr() );
-            status = STATUS.CLOSED;
-            return;
+            setStartupError( newErrorInformation );
+            LOGGER.error( newErrorInformation::toDebugStr );
+            setStatus( STATUS.CLOSED );
+            return STATUS.CLOSED;
         }
 
-        verifyPwModifyTime = Boolean.parseBoolean( configuration.readAppProperty( AppProperty.TOKEN_VERIFY_PW_MODIFY_TIME ) );
+        verifyPwModifyTime = Boolean.parseBoolean( domainConfig.readAppProperty( AppProperty.TOKEN_VERIFY_PW_MODIFY_TIME ) );
 
-        executorService = PwmScheduler.makeBackgroundExecutor( pwmApplication, this.getClass() );
+        LOGGER.debug( getSessionLabel(), () -> "open" );
 
-        {
-            final int cleanerFrequencySeconds = Integer.parseInt( configuration.readAppProperty( AppProperty.TOKEN_CLEANER_INTERVAL_SECONDS ) );
-            final TimeDuration cleanerFrequency = TimeDuration.of( cleanerFrequencySeconds, TimeDuration.Unit.SECONDS );
-            pwmApplication.getPwmScheduler().scheduleFixedRateJob( new CleanerTask(), executorService, TimeDuration.MINUTE, cleanerFrequency );
-            LOGGER.trace( () -> "token cleanup will occur every " + cleanerFrequency.asCompactString() );
-        }
-
-
-        status = STATUS.OPEN;
-        LOGGER.debug( () -> "open" );
+        return STATUS.OPEN;
     }
 
     public boolean supportsName( )
@@ -248,13 +244,15 @@ public class TokenService implements PwmService
 
         LOGGER.trace( sessionLabel, () -> "generated token with payload: " + tokenPayload.toDebugString() );
 
-        final AuditRecord auditRecord = new AuditRecordFactory( pwmApplication ).createUserAuditRecord(
+        final AuditRecord auditRecord = AuditRecordFactory.make( sessionLabel, pwmDomain ).createUserAuditRecord(
                 AuditEvent.TOKEN_ISSUED,
                 tokenPayload.getUserIdentity(),
                 sessionLabel,
-                JsonUtil.serialize( tokenPayload )
+                JsonFactory.get().serialize( tokenPayload )
         );
-        pwmApplication.getAuditManager().submit( sessionLabel, auditRecord );
+
+        stats.increment( StatsKey.tokensIssued );
+        AuditServiceClient.submit( pwmDomain.getPwmApplication(), sessionLabel, auditRecord );
         return tokenKey;
     }
 
@@ -271,7 +269,7 @@ public class TokenService implements PwmService
             return;
         }
 
-        final boolean removeOnClaim = Boolean.parseBoolean( configuration.readAppProperty( AppProperty.TOKEN_REMOVE_ON_CLAIM ) );
+        final boolean removeOnClaim = Boolean.parseBoolean( domainConfig.readAppProperty( AppProperty.TOKEN_REMOVE_ON_CLAIM ) );
 
         if ( removeOnClaim )
         {
@@ -286,15 +284,15 @@ public class TokenService implements PwmService
             }
         }
 
-        final AuditRecord auditRecord = new AuditRecordFactory( pwmApplication ).createUserAuditRecord(
+        final AuditRecord auditRecord = AuditRecordFactory.make( sessionLabel, pwmDomain ).createUserAuditRecord(
                 AuditEvent.TOKEN_CLAIMED,
                 tokenPayload.getUserIdentity(),
                 sessionLabel,
-                JsonUtil.serialize( tokenPayload )
+                JsonFactory.get().serialize( tokenPayload )
         );
-        pwmApplication.getAuditManager().submit( sessionLabel, auditRecord );
+        AuditServiceClient.submit( pwmDomain.getPwmApplication(), sessionLabel, auditRecord );
 
-        StatisticsManager.incrementStat( pwmApplication, Statistic.TOKENS_PASSSED );
+        StatisticsClient.incrementStat( pwmDomain, Statistic.TOKENS_PASSSED );
     }
 
     public TokenPayload retrieveTokenData( final SessionLabel sessionLabel, final String tokenKey )
@@ -330,51 +328,41 @@ public class TokenService implements PwmService
     }
 
     @Override
-    public STATUS status( )
+    public void shutdownImpl( )
     {
-        return status;
+        setStatus( STATUS.CLOSED );
     }
 
     @Override
-    public void close( )
-    {
-        status = STATUS.CLOSED;
-        if ( executorService != null )
-        {
-            executorService.shutdown();
-        }
-    }
-
-    @Override
-    public List<HealthRecord> healthCheck( )
+    public List<HealthRecord> serviceHealthCheck( )
     {
         final List<HealthRecord> returnRecords = new ArrayList<>();
 
-        if ( tokensAreUsedInConfig( configuration ) )
+        if ( tokensAreUsedInConfig( domainConfig ) )
         {
-            if ( errorInformation != null )
+            if ( getStartupError() != null )
             {
-                returnRecords.add( HealthRecord.forMessage( HealthMessage.CryptoTokenWithNewUserVerification, errorInformation.toDebugStr() ) );
+                returnRecords.add( HealthRecord.forMessage( DomainID.systemId(), HealthMessage.CryptoTokenWithNewUserVerification, getStartupError().toDebugStr() ) );
             }
         }
 
         if ( storageMethod == TokenStorageMethod.STORE_LDAP )
         {
-            if ( configuration.readSettingAsBoolean( PwmSetting.NEWUSER_ENABLE ) )
+            if ( domainConfig.readSettingAsBoolean( PwmSetting.NEWUSER_ENABLE ) )
             {
-                for ( final NewUserProfile newUserProfile : configuration.getNewUserProfiles().values() )
+                for ( final NewUserProfile newUserProfile : domainConfig.getNewUserProfiles().values() )
                 {
                     if ( newUserProfile.readSettingAsBoolean( PwmSetting.NEWUSER_EMAIL_VERIFICATION ) )
                     {
                         final String label = PwmSetting.NEWUSER_EMAIL_VERIFICATION.toMenuLocationDebug( newUserProfile.getIdentifier(), PwmConstants.DEFAULT_LOCALE );
                         final String label2 = PwmSetting.TOKEN_STORAGEMETHOD.toMenuLocationDebug( null, PwmConstants.DEFAULT_LOCALE );
-                        returnRecords.add( HealthRecord.forMessage( HealthMessage.CryptoTokenWithNewUserVerification, label, label2 ) );
+                        returnRecords.add( HealthRecord.forMessage( DomainID.systemId(), HealthMessage.CryptoTokenWithNewUserVerification, label, label2 ) );
                     }
                     if ( newUserProfile.readSettingAsBoolean( PwmSetting.NEWUSER_SMS_VERIFICATION ) )
                     {
                         final String label = PwmSetting.NEWUSER_SMS_VERIFICATION.toMenuLocationDebug( newUserProfile.getIdentifier(), PwmConstants.DEFAULT_LOCALE );
                         final String label2 = PwmSetting.TOKEN_STORAGEMETHOD.toMenuLocationDebug( null, PwmConstants.DEFAULT_LOCALE );
-                        returnRecords.add( HealthRecord.forMessage( HealthMessage.CryptoTokenWithNewUserVerification, label, label2 ) );
+                        returnRecords.add( HealthRecord.forMessage( DomainID.systemId(), HealthMessage.CryptoTokenWithNewUserVerification, label, label2 ) );
                     }
                 }
             }
@@ -403,7 +391,7 @@ public class TokenService implements PwmService
         return theToken.getExpiration().isBefore( Instant.now() );
     }
 
-    private static String makeRandomCode( final Configuration config )
+    private static String makeRandomCode( final DomainConfig config )
     {
         final String randomChars = config.readSettingAsString( PwmSetting.TOKEN_CHARACTERS );
         final int codeLength = ( int ) config.readSettingAsLong( PwmSetting.TOKEN_LENGTH );
@@ -412,25 +400,26 @@ public class TokenService implements PwmService
         return random.alphaNumericString( randomChars, codeLength );
     }
 
-    private class CleanerTask extends TimerTask
+    void cleanup()
     {
-        @Override
-        public void run( )
+        try
         {
-            try
-            {
-                tokenMachine.cleanup();
-            }
-            catch ( final Exception e )
-            {
-                LOGGER.warn( () -> "unexpected error while cleaning expired stored tokens: " + e.getMessage(), e );
-            }
+            tokenMachine.cleanup();
         }
+        catch ( final Exception e )
+        {
+            LOGGER.warn( getSessionLabel(), () -> "unexpected error while cleaning expired stored tokens: " + e.getMessage() );
+        }
+    }
+
+    protected StatisticCounterBundle<StatsKey> getStats()
+    {
+        return stats;
     }
 
     private void checkStatus( ) throws PwmOperationalException
     {
-        if ( status != STATUS.OPEN )
+        if ( status() != STATUS.OPEN )
         {
             throw new PwmOperationalException( new ErrorInformation( PwmError.ERROR_SERVICE_NOT_AVAILABLE, "token manager is not open" ) );
         }
@@ -438,7 +427,7 @@ public class TokenService implements PwmService
 
     public long size( )
     {
-        if ( status != STATUS.OPEN )
+        if ( status() != STATUS.OPEN )
         {
             return -1;
         }
@@ -449,7 +438,7 @@ public class TokenService implements PwmService
         }
         catch ( final Exception e )
         {
-            LOGGER.error( () -> "unexpected error reading size of token storage table: " + e.getMessage() );
+            LOGGER.error( getSessionLabel(), () -> "unexpected error reading size of token storage table: " + e.getMessage() );
         }
 
         return -1;
@@ -460,10 +449,10 @@ public class TokenService implements PwmService
     {
         String tokenKey = null;
         int attempts = 0;
-        final int maxUniqueCreateAttempts = Integer.parseInt( pwmApplication.getConfig().readAppProperty( AppProperty.TOKEN_MAX_UNIQUE_CREATE_ATTEMPTS ) );
+        final int maxUniqueCreateAttempts = Integer.parseInt( pwmDomain.getConfig().readAppProperty( AppProperty.TOKEN_MAX_UNIQUE_CREATE_ATTEMPTS ) );
         while ( tokenKey == null && attempts < maxUniqueCreateAttempts )
         {
-            tokenKey = makeRandomCode( configuration );
+            tokenKey = makeRandomCode( domainConfig );
             LOGGER.trace( sessionLabel, () -> "generated new token random code, checking for uniqueness" );
             final Optional<TokenPayload> existingPayload = machine.retrieveToken( sessionLabel, tokenMachine.keyFromKey( tokenKey ) );
             if ( existingPayload.isPresent() )
@@ -485,11 +474,11 @@ public class TokenService implements PwmService
         return tokenKey;
     }
 
-    private static boolean tokensAreUsedInConfig( final Configuration configuration )
+    private static boolean tokensAreUsedInConfig( final DomainConfig domainConfig )
     {
-        if ( configuration.readSettingAsBoolean( PwmSetting.NEWUSER_ENABLE ) )
+        if ( domainConfig.readSettingAsBoolean( PwmSetting.NEWUSER_ENABLE ) )
         {
-            for ( final NewUserProfile newUserProfile : configuration.getNewUserProfiles().values() )
+            for ( final NewUserProfile newUserProfile : domainConfig.getNewUserProfiles().values() )
             {
                 if ( newUserProfile.readSettingAsBoolean( PwmSetting.NEWUSER_EMAIL_VERIFICATION ) )
                 {
@@ -498,9 +487,9 @@ public class TokenService implements PwmService
             }
         }
 
-        if ( configuration.readSettingAsBoolean( PwmSetting.ACTIVATE_USER_ENABLE ) )
+        if ( domainConfig.readSettingAsBoolean( PwmSetting.ACTIVATE_USER_ENABLE ) )
         {
-            for ( final ActivateUserProfile activateUserProfile : configuration.getUserActivationProfiles().values() )
+            for ( final ActivateUserProfile activateUserProfile : domainConfig.getUserActivationProfiles().values() )
             {
                 final MessageSendMethod activateMethod = activateUserProfile.readSettingAsEnum( PwmSetting.ACTIVATE_TOKEN_SEND_METHOD, MessageSendMethod.class );
                 if ( MessageSendMethod.NONE != activateMethod )
@@ -510,9 +499,9 @@ public class TokenService implements PwmService
             }
         }
 
-        if ( configuration.readSettingAsBoolean( PwmSetting.CHALLENGE_ENABLE ) )
+        if ( domainConfig.readSettingAsBoolean( PwmSetting.SETUP_RESPONSE_ENABLE ) )
         {
-            for ( final ForgottenPasswordProfile forgottenPasswordProfile : configuration.getForgottenPasswordProfiles().values() )
+            for ( final ForgottenPasswordProfile forgottenPasswordProfile : domainConfig.getForgottenPasswordProfiles().values() )
             {
                 final MessageSendMethod messageSendMethod = forgottenPasswordProfile.readSettingAsEnum( PwmSetting.RECOVERY_TOKEN_SEND_METHOD, MessageSendMethod.class );
                 if ( messageSendMethod != null && messageSendMethod != MessageSendMethod.NONE )
@@ -527,8 +516,8 @@ public class TokenService implements PwmService
     String toEncryptedString( final TokenPayload tokenPayload )
             throws PwmUnrecoverableException, PwmOperationalException
     {
-        final String jsonPayload = JsonUtil.serialize( tokenPayload );
-        return pwmApplication.getSecureService().encryptToString( jsonPayload );
+        final String jsonPayload = JsonFactory.get().serialize( tokenPayload );
+        return pwmDomain.getSecureService().encryptToString( jsonPayload );
     }
 
     TokenPayload fromEncryptedString( final String inputString )
@@ -537,8 +526,8 @@ public class TokenService implements PwmService
         final String deWhiteSpacedToken = inputString.replaceAll( "\\s", "" );
         try
         {
-            final String decryptedString = pwmApplication.getSecureService().decryptStringValue( deWhiteSpacedToken );
-            return JsonUtil.deserialize( decryptedString, TokenPayload.class );
+            final String decryptedString = pwmDomain.getSecureService().decryptStringValue( deWhiteSpacedToken );
+            return JsonFactory.get().deserialize( decryptedString, TokenPayload.class );
         }
         catch ( final PwmUnrecoverableException e )
         {
@@ -551,7 +540,10 @@ public class TokenService implements PwmService
     @Override
     public ServiceInfoBean serviceInfo( )
     {
-        return serviceInfo;
+        return ServiceInfoBean.builder()
+                .debugProperties( stats.debugStats() )
+                .storageMethod( dataStorageMethod )
+                .build();
     }
 
     public TokenPayload processUserEnteredCode(
@@ -563,6 +555,7 @@ public class TokenService implements PwmService
     )
             throws PwmOperationalException, PwmUnrecoverableException
     {
+        stats.increment( StatsKey.tokenValidations );
         final SessionLabel sessionLabel = pwmRequestContext.getSessionLabel();
         try
         {
@@ -572,11 +565,12 @@ public class TokenService implements PwmService
                     tokenType,
                     userEnteredCode
             );
-            if ( tokenPayload.getDestination() != null && !StringUtil.isEmpty( tokenPayload.getDestination().getValue() ) )
+            if ( tokenPayload.getDestination() != null && StringUtil.notEmpty( tokenPayload.getDestination().getValue() ) )
             {
-                pwmApplication.getIntruderManager().clear( RecordType.TOKEN_DEST, tokenPayload.getDestination().getValue() );
+                pwmDomain.getIntruderService().clear( IntruderRecordType.TOKEN_DEST, tokenPayload.getDestination().getValue() );
             }
             markTokenAsClaimed( tokenMachine.keyFromKey( userEnteredCode ), sessionLabel, tokenPayload );
+            stats.increment( StatsKey.tokenValidationsPassed );
             return tokenPayload;
         }
         catch ( final Exception e )
@@ -596,9 +590,10 @@ public class TokenService implements PwmService
             if ( sessionUserIdentity != null && tokenEntryType == TokenEntryType.unauthenticated )
             {
                 SessionAuthenticator.simulateBadPassword( pwmRequestContext, sessionUserIdentity );
-                pwmApplication.getIntruderManager().convenience().markUserIdentity( sessionUserIdentity, sessionLabel );
+                IntruderServiceClient.markUserIdentity( pwmRequestContext.getPwmDomain(), pwmRequestContext.getSessionLabel(), sessionUserIdentity );
             }
-            pwmApplication.getStatisticsManager().incrementValue( Statistic.RECOVERY_FAILURES );
+            StatisticsClient.incrementStat( pwmDomain, Statistic.RECOVERY_FAILURES );
+            stats.increment( StatsKey.tokenValidationsFailed );
             throw new PwmOperationalException( errorInformation );
         }
     }
@@ -614,7 +609,7 @@ public class TokenService implements PwmService
         final TokenPayload tokenPayload;
         try
         {
-            tokenPayload = pwmApplication.getTokenService().retrieveTokenData( sessionLabel, userEnteredCode );
+            tokenPayload = pwmDomain.getTokenService().retrieveTokenData( sessionLabel, userEnteredCode );
         }
         catch ( final PwmOperationalException e )
         {
@@ -630,7 +625,7 @@ public class TokenService implements PwmService
 
         LOGGER.trace( sessionLabel, () -> "retrieved tokenPayload: " + tokenPayload.toDebugString() );
 
-        if ( tokenType != null && pwmApplication.getTokenService().supportsName() )
+        if ( tokenType != null && pwmDomain.getTokenService().supportsName() )
         {
             if ( !tokenType.matchesName( tokenPayload.getName() ) )
             {
@@ -642,7 +637,7 @@ public class TokenService implements PwmService
         // check current session identity
         if ( tokenPayload.getUserIdentity() != null && sessionUserIdentity != null )
         {
-            if ( !tokenPayload.getUserIdentity().canonicalEquals( sessionUserIdentity, pwmApplication ) )
+            if ( !tokenPayload.getUserIdentity().canonicalEquals( sessionLabel, sessionUserIdentity, pwmDomain.getPwmApplication() ) )
             {
                 final String errorMsg = "user in session '" + sessionUserIdentity + "' entered code for user '" + tokenPayload.getUserIdentity() + "', counting as invalid attempt";
                 throw new PwmOperationalException( PwmError.ERROR_TOKEN_INCORRECT, errorMsg );
@@ -659,7 +654,7 @@ public class TokenService implements PwmService
             try
             {
                 final Instant userLastPasswordChange = PasswordUtility.determinePwdLastModified(
-                        pwmApplication,
+                        pwmDomain,
                         sessionLabel,
                         tokenPayload.getUserIdentity() );
 
@@ -668,13 +663,13 @@ public class TokenService implements PwmService
                 LOGGER.trace( sessionLabel, () -> "tokenPayload=" + tokenPayload.toDebugString()
                         + ", sessionUser=" + ( sessionUserIdentity == null ? "null" : sessionUserIdentity.toDisplayString() )
                         + ", payloadUserIdentity=" + tokenPayload.getUserIdentity().toDisplayString()
-                        + ", userLastPasswordChange=" + JavaHelper.toIsoDate( userLastPasswordChange )
+                        + ", userLastPasswordChange=" + StringUtil.toIsoDate( userLastPasswordChange )
                         + ", dateStringInToken=" + dateStringInToken );
 
                 if ( userLastPasswordChange != null && dateStringInToken != null )
                 {
 
-                    final String userChangeString = JavaHelper.toIsoDate( userLastPasswordChange );
+                    final String userChangeString = StringUtil.toIsoDate( userLastPasswordChange );
 
                     if ( !dateStringInToken.equalsIgnoreCase( userChangeString ) )
                     {
@@ -702,7 +697,7 @@ public class TokenService implements PwmService
     @Builder
     public static class TokenSendInfo
     {
-        private PwmApplication pwmApplication;
+        private PwmDomain pwmDomain;
         private UserInfo userInfo;
         private MacroRequest macroRequest;
         private EmailItemBean configuredEmailSetting;
@@ -740,8 +735,8 @@ public class TokenService implements PwmService
                 throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_TOKEN_MISSING_CONTACT ) );
             }
 
-            final PwmApplication pwmApplication = tokenSendInfo.getPwmApplication();
-            pwmApplication.getStatisticsManager().incrementValue( Statistic.TOKENS_SENT );
+            final PwmDomain pwmDomain = tokenSendInfo.getPwmDomain();
+            StatisticsClient.incrementStat( pwmDomain, Statistic.TOKENS_SENT );
         }
 
         private static boolean sendEmailToken(
@@ -755,20 +750,20 @@ public class TokenService implements PwmService
                 return false;
             }
 
-            final PwmApplication pwmApplication = tokenSendInfo.getPwmApplication();
-            pwmApplication.getIntruderManager().mark( RecordType.TOKEN_DEST, toAddress, null );
+            final PwmDomain pwmDomain = tokenSendInfo.getPwmDomain();
+            pwmDomain.getIntruderService().mark( IntruderRecordType.TOKEN_DEST, toAddress, null );
 
             final EmailItemBean configuredEmailSetting = tokenSendInfo.getConfiguredEmailSetting();
             final EmailItemBean tokenizedEmail = configuredEmailSetting.applyBodyReplacement(
                     "%TOKEN%",
                     tokenSendInfo.getTokenKey() );
 
-            pwmApplication.getEmailQueue().submitEmailImmediate(
+            pwmDomain.getPwmApplication().getEmailQueue().submitEmailImmediate(
                     tokenizedEmail,
                     tokenSendInfo.getUserInfo(),
                     tokenSendInfo.getMacroRequest() );
 
-            LOGGER.debug( () -> "token email added to send queue for " + toAddress );
+            LOGGER.debug( tokenSendInfo.getSessionLabel(),  () -> "token email added to send queue for " + toAddress );
             return true;
         }
 
@@ -786,21 +781,21 @@ public class TokenService implements PwmService
 
             final String modifiedMessage = tokenSendInfo.getSmsMessage().replaceAll( "%TOKEN%", tokenSendInfo.getTokenKey() );
 
-            final PwmApplication pwmApplication = tokenSendInfo.getPwmApplication();
-            pwmApplication.getIntruderManager().mark( RecordType.TOKEN_DEST, smsNumber, tokenSendInfo.getSessionLabel() );
+            final PwmDomain pwmDomain = tokenSendInfo.getPwmDomain();
+            pwmDomain.getIntruderService().mark( IntruderRecordType.TOKEN_DEST, smsNumber, tokenSendInfo.getSessionLabel() );
 
-            pwmApplication.sendSmsUsingQueue( smsNumber, modifiedMessage, tokenSendInfo.getSessionLabel(), tokenSendInfo.getMacroRequest() );
-            LOGGER.debug( () -> "token SMS added to send queue for " + smsNumber );
+            SmsQueueService.sendSmsUsingQueue( pwmDomain.getPwmApplication(), smsNumber, modifiedMessage, tokenSendInfo.getSessionLabel(), tokenSendInfo.getMacroRequest() );
+            LOGGER.debug( tokenSendInfo.getSessionLabel(), () -> "token SMS added to send queue for " + smsNumber );
             return true;
         }
     }
 
-    static TimeDuration maxTokenAge( final Configuration configuration )
+    static TimeDuration maxTokenAge( final DomainConfig domainConfig )
     {
         long maxValue = 0;
-        maxValue = Math.max( maxValue, configuration.readSettingAsLong( PwmSetting.TOKEN_LIFETIME ) );
-        maxValue = Math.max( maxValue, configuration.readSettingAsLong( PwmSetting.TOKEN_LIFETIME ) );
-        for ( final NewUserProfile newUserProfile : configuration.getNewUserProfiles().values() )
+        maxValue = Math.max( maxValue, domainConfig.readSettingAsLong( PwmSetting.TOKEN_LIFETIME ) );
+        maxValue = Math.max( maxValue, domainConfig.readSettingAsLong( PwmSetting.TOKEN_LIFETIME ) );
+        for ( final NewUserProfile newUserProfile : domainConfig.getNewUserProfiles().values() )
         {
             maxValue = Math.max( maxValue, newUserProfile.readSettingAsLong( PwmSetting.NEWUSER_TOKEN_LIFETIME_EMAIL ) );
             maxValue = Math.max( maxValue, newUserProfile.readSettingAsLong( PwmSetting.NEWUSER_TOKEN_LIFETIME_SMS ) );

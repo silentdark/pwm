@@ -23,7 +23,6 @@ package password.pwm.bean;
 
 import lombok.AllArgsConstructor;
 import lombok.Value;
-import password.pwm.util.java.JsonUtil;
 
 import java.io.Serializable;
 
@@ -34,9 +33,4 @@ public class SmsItemBean implements Serializable
     private final String to;
     private final String message;
     private final SessionLabel sessionLabel;
-
-    public String toString( )
-    {
-        return "SMS Item: " + JsonUtil.serialize( this );
-    }
 }

@@ -2,14 +2,14 @@
 
     <parent>
         <groupId>org.pwm-project</groupId>
-        <artifactId>pwm-parent</artifactId>
-        <version>2.0.0</version>
+        <artifactId>pwm</artifactId>
+        <version>2.1.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>pwm</artifactId>
+    <artifactId>pwm-webapp</artifactId>
     <packaging>war</packaging>
 
     <name>PWM Password Self Service: Server WAR</name>
@@ -64,6 +64,7 @@
     </profiles>
 
     <build>
+        <finalName>pwm-${project.version}</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -103,7 +104,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-war-plugin</artifactId>
-                <version>3.3.1</version>
+                <version>3.3.2</version>
                 <configuration>
                     <archiveClasses>false</archiveClasses>
                     <packagingExcludes>**/*.jsp</packagingExcludes>
@@ -112,14 +113,12 @@
                     <webXml>${webXmlForJspPreCompiledInjection}</webXml>
                     <archive>
                         <manifestEntries>
-                            <Implementation-Archive-Name>${warArtifactID}</Implementation-Archive-Name>
+                            <Implementation-Archive-Name>pwm.war</Implementation-Archive-Name>
                             <Implementation-Title>${project.name}</Implementation-Title>
                             <Implementation-Version>${project.version}</Implementation-Version>
                             <Implementation-Vendor>${project.organization.name}</Implementation-Vendor>
                             <Implementation-URL>${project.organization.url}</Implementation-URL>
-                            <Implementation-Build-Java-Vendor>${java.vendor}</Implementation-Build-Java-Vendor>
-                            <Implementation-Build-Java-Version>${java.version}</Implementation-Build-Java-Version>
-                            <Implementation-Build>${build.number}</Implementation-Build>
+                            <Implementation-Build-Java-Spec-Version>${java.specification.version}</Implementation-Build-Java-Spec-Version>
                             <Implementation-Revision>${build.revision}</Implementation-Revision>
                             <Implementation-Version-Display>v${project.version} b${build.number} r${build.revision}</Implementation-Version-Display>
                             <SCM-Git-Branch>${git.branch}</SCM-Git-Branch>
@@ -127,8 +126,7 @@
                             <SCM-Git-Commit-ID-Abbrev>${git.commit.id.abbrev}</SCM-Git-Commit-ID-Abbrev>
                             <SCM-Git-Commit-ID-Description>${git.commit.id.describe}</SCM-Git-Commit-ID-Description>
                             <SCM-Git-Commit-Timestamp>${git.commit.time}</SCM-Git-Commit-Timestamp>
-                            <SCM-Git-Commit-Dirty>${git.dirty}</SCM-Git-Commit-Dirty>
-                        </manifestEntries>
+                            <SCM-Git-Commit-Dirty>${git.dirty}</SCM-Git-Commit-Dirty>                        </manifestEntries>
                     </archive>
                 </configuration>
             </plugin>
@@ -153,7 +151,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-deploy-plugin</artifactId>
-                <version>3.0.0-M1</version>
+                <version>3.0.0-M2</version>
                 <executions>
                     <execution>
                         <phase>deploy</phase>
@@ -299,17 +297,17 @@
         <dependency>
             <groupId>org.webjars.npm</groupId>
             <artifactId>dojo</artifactId>
-            <version>1.16.4</version>
+            <version>1.17.2</version>
         </dependency>
         <dependency>
             <groupId>org.webjars.npm</groupId>
             <artifactId>dijit</artifactId>
-            <version>1.16.4</version>
+            <version>1.17.2</version>
         </dependency>
         <dependency>
             <groupId>org.webjars.npm</groupId>
             <artifactId>dojox</artifactId>
-            <version>1.16.4</version>
+            <version>1.17.2</version>
         </dependency>
         <dependency>
             <groupId>org.webjars.npm</groupId>

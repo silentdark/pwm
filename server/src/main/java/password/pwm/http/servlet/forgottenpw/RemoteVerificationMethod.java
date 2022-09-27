@@ -20,13 +20,12 @@
 
 package password.pwm.http.servlet.forgottenpw;
 
-import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
 import password.pwm.PwmConstants;
 import password.pwm.VerificationMethodSystem;
 import password.pwm.bean.RemoteVerificationRequestBean;
 import password.pwm.bean.RemoteVerificationResponseBean;
 import password.pwm.bean.SessionLabel;
-import password.pwm.bean.pub.PublicUserInfoBean;
 import password.pwm.config.PwmSetting;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
@@ -36,11 +35,12 @@ import password.pwm.http.HttpContentType;
 import password.pwm.http.HttpHeader;
 import password.pwm.http.HttpMethod;
 import password.pwm.http.PwmRequest;
+import password.pwm.ldap.UserInfoBean;
 import password.pwm.svc.httpclient.PwmHttpClient;
 import password.pwm.svc.httpclient.PwmHttpClientRequest;
 import password.pwm.svc.httpclient.PwmHttpClientResponse;
 import password.pwm.ldap.UserInfo;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
 
@@ -61,7 +61,7 @@ public class RemoteVerificationMethod implements VerificationMethodSystem
 
     private RemoteVerificationResponseBean lastResponse;
     private PwmHttpClient pwmHttpClient;
-    private PwmApplication pwmApplication;
+    private PwmDomain pwmDomain;
 
     private UserInfo userInfo;
     private SessionLabel sessionLabel;
@@ -111,16 +111,16 @@ public class RemoteVerificationMethod implements VerificationMethodSystem
     }
 
     @Override
-    public void init( final PwmApplication pwmApplication, final UserInfo userInfo, final SessionLabel sessionLabel, final Locale locale )
+    public void init( final PwmDomain pwmDomain, final UserInfo userInfo, final SessionLabel sessionLabel, final Locale locale )
             throws PwmUnrecoverableException
     {
-        pwmHttpClient = pwmApplication.getHttpClientService().getPwmHttpClient( );
-        this.remoteSessionID = pwmApplication.getSecureService().pwmRandom().randomUUID().toString();
+        pwmHttpClient = pwmDomain.getHttpClientService().getPwmHttpClient( );
+        this.remoteSessionID = pwmDomain.getSecureService().pwmRandom().randomUUID().toString();
         this.userInfo = userInfo;
         this.sessionLabel = sessionLabel;
         this.locale = locale;
-        this.pwmApplication = pwmApplication;
-        this.url = pwmApplication.getConfig().readSettingAsString( PwmSetting.EXTERNAL_MACROS_REMOTE_RESPONSES_URL );
+        this.pwmDomain = pwmDomain;
+        this.url = pwmDomain.getConfig().readSettingAsString( PwmSetting.EXTERNAL_MACROS_REMOTE_RESPONSES_URL );
 
         if ( url == null || url.isEmpty() )
         {
@@ -142,18 +142,18 @@ public class RemoteVerificationMethod implements VerificationMethodSystem
         headers.put( HttpHeader.ContentType.getHttpName(), HttpContentType.json.getHeaderValueWithEncoding() );
         headers.put( HttpHeader.AcceptLanguage.getHttpName(), locale.toLanguageTag() );
 
-        final MacroRequest macroRequest = MacroRequest.forUser( pwmApplication, sessionLabel, userInfo, null );
+        final MacroRequest macroRequest = MacroRequest.forUser( pwmDomain.getPwmApplication(), sessionLabel, userInfo, null );
 
         final RemoteVerificationRequestBean remoteVerificationRequestBean = RemoteVerificationRequestBean.builder()
             .responseSessionID( this.remoteSessionID )
-            .userInfo( PublicUserInfoBean.fromUserInfoBean( userInfo, pwmApplication.getConfig(), locale, macroRequest ) )
+            .userInfo( UserInfoBean.toPublicUserInfoBean( userInfo, pwmDomain.getConfig(), locale, macroRequest ) )
             .userResponses( userResponses )
             .build();
 
         final PwmHttpClientRequest pwmHttpClientRequest = PwmHttpClientRequest.builder()
                 .method( HttpMethod.POST )
                 .url( url )
-                .body( JsonUtil.serialize( remoteVerificationRequestBean ) )
+                .body( JsonFactory.get().serialize( remoteVerificationRequestBean ) )
                 .headers( headers )
                 .build();
 
@@ -161,7 +161,7 @@ public class RemoteVerificationMethod implements VerificationMethodSystem
         {
             final PwmHttpClientResponse response = pwmHttpClient.makeRequest( pwmHttpClientRequest, this.sessionLabel );
             final String responseBodyStr = response.getBody();
-            this.lastResponse = JsonUtil.deserialize( responseBodyStr, RemoteVerificationResponseBean.class );
+            this.lastResponse = JsonFactory.get().deserialize( responseBodyStr, RemoteVerificationResponseBean.class );
         }
         catch ( final PwmException e )
         {

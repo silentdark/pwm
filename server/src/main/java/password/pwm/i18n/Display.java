@@ -20,7 +20,7 @@
 
 package password.pwm.i18n;
 
-import password.pwm.config.Configuration;
+import password.pwm.config.SettingReader;
 import password.pwm.util.i18n.LocaleHelper;
 
 import java.util.Locale;
@@ -87,6 +87,7 @@ public enum Display implements PwmDisplayBundle
     Display_CheckingResponses,
     Display_CommunicationError,
     Display_ConfirmResponses,
+    Display_ConfirmHelpdeskResponses,
     Display_Day,
     Display_Days,
     Display_ErrorBody,
@@ -268,6 +269,7 @@ public enum Display implements PwmDisplayBundle
     Long_Title_UserEventHistory,
     Long_Title_UserInformation,
     Title_AnsweredQuestions,
+    Title_AnsweredHelpdeskQuestions,
     Title_ActivateUser,
     Title_Admin,
     Title_Application,
@@ -319,9 +321,11 @@ public enum Display implements PwmDisplayBundle
     Value_True,
     Value_NotApplicable,
     Value_Default,
-    Placeholder_Search,;
+    Placeholder_Search,
 
-    public static String getLocalizedMessage( final Locale locale, final Display key, final Configuration config )
+    Value_Deprecated,;
+
+    public static String getLocalizedMessage( final Locale locale, final Display key, final SettingReader config )
     {
         return LocaleHelper.getLocalizedMessage( locale, key.toString(), config, Display.class );
     }

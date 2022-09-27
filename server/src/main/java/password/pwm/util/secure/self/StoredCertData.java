@@ -34,7 +34,7 @@ import java.security.cert.X509Certificate;
 public class StoredCertData implements Serializable
 {
     private final X509Certificate x509Certificate;
-    private String keypairb64;
+    private final String keypairb64;
 
     public StoredCertData( final X509Certificate x509Certificate, final KeyPair keypair )
         throws IOException
@@ -56,8 +56,10 @@ public class StoredCertData implements Serializable
         throws IOException, ClassNotFoundException
     {
         final byte[] ba = StringUtil.base64Decode( keypairb64 );
-        final ByteArrayInputStream bais = new ByteArrayInputStream( ba );
-        final ObjectInputStream ois = new ObjectInputStream( bais );
+        final ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream( ba );
+        final ObjectInputStream ois = new ObjectInputStream( byteArrayInputStream );
         return ( KeyPair ) ois.readObject();
+
+
     }
 }

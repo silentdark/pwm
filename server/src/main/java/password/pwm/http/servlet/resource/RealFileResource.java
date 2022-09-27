@@ -21,9 +21,10 @@
 package password.pwm.http.servlet.resource;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.time.Instant;
 
 class RealFileResource implements FileResource
 {
@@ -37,7 +38,7 @@ class RealFileResource implements FileResource
     @Override
     public InputStream getInputStream( ) throws IOException
     {
-        return new FileInputStream( realFile );
+        return Files.newInputStream( realFile.toPath() );
     }
 
     @Override
@@ -47,15 +48,9 @@ class RealFileResource implements FileResource
     }
 
     @Override
-    public long lastModified( )
+    public Instant lastModified( )
     {
-        return realFile.lastModified();
-    }
-
-    @Override
-    public boolean exists( )
-    {
-        return realFile.exists();
+        return Instant.ofEpochMilli( realFile.lastModified() );
     }
 
     @Override

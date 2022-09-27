@@ -21,15 +21,16 @@
 package password.pwm.http.filter;
 
 import password.pwm.Permission;
-import password.pwm.PwmApplication;
 import password.pwm.PwmApplicationMode;
+import password.pwm.PwmDomain;
 import password.pwm.error.PwmError;
+import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmSession;
 import password.pwm.http.PwmURL;
+import password.pwm.http.servlet.PwmServletDefinition;
 import password.pwm.util.logging.PwmLogger;
 
-import javax.servlet.FilterConfig;
 import javax.servlet.ServletException;
 import java.io.IOException;
 
@@ -41,19 +42,12 @@ import java.io.IOException;
  */
 public class AuthorizationFilter extends AbstractPwmFilter
 {
-
     private static final PwmLogger LOGGER = PwmLogger.forClass( AuthenticationFilter.class );
-
-    @Override
-    public void init( final FilterConfig filterConfig )
-            throws ServletException
-    {
-    }
 
     @Override
     boolean isInterested( final PwmApplicationMode mode, final PwmURL pwmURL )
     {
-        return !pwmURL.isRestService();
+        return pwmURL.isAdminUrl() || pwmURL.matches( PwmServletDefinition.withFlag( PwmServletDefinition.Flag.RequiresConfigAuth ) );
     }
 
     @Override
@@ -62,17 +56,17 @@ public class AuthorizationFilter extends AbstractPwmFilter
             final PwmRequest pwmRequest,
             final PwmFilterChain chain
     )
-            throws IOException, ServletException
+            throws IOException, ServletException, PwmUnrecoverableException
     {
 
         final PwmSession pwmSession = pwmRequest.getPwmSession();
-        final PwmApplication pwmApplication = pwmRequest.getPwmApplication();
+        final PwmDomain pwmDomain = pwmRequest.getPwmDomain();
 
         // if the user is not authenticated as a PWM Admin, redirect to error page.
         boolean hasPermission = false;
         try
         {
-            hasPermission = pwmSession.getSessionManager().checkPermission( pwmApplication, Permission.PWMADMIN );
+            hasPermission = pwmSession.getSessionManager().checkPermission( pwmDomain, Permission.PWMADMIN );
         }
         catch ( final Exception e )
         {
@@ -94,10 +88,5 @@ public class AuthorizationFilter extends AbstractPwmFilter
         }
 
         pwmRequest.respondWithError( PwmError.ERROR_UNAUTHORIZED.toInfo() );
-    }
-
-    @Override
-    public void destroy( )
-    {
     }
 }

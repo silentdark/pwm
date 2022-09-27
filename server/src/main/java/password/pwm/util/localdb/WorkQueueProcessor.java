@@ -24,6 +24,7 @@ import com.google.gson.annotations.SerializedName;
 import lombok.Builder;
 import lombok.Value;
 import password.pwm.PwmApplication;
+import password.pwm.bean.SessionLabel;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmOperationalException;
@@ -31,7 +32,7 @@ import password.pwm.util.EventRateMeter;
 import password.pwm.util.PwmScheduler;
 import password.pwm.util.java.AtomicLoopIntIncrementer;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.MovingAverage;
 import password.pwm.util.java.StatisticCounterBundle;
 import password.pwm.util.java.StringUtil;
@@ -79,7 +80,7 @@ public final class WorkQueueProcessor<W extends Serializable>
 
     private ThreadPoolExecutor executorService;
 
-    private final MovingAverage avgLagTime = new MovingAverage( TimeDuration.MINUTE );
+    private final MovingAverage avgLagTime = new MovingAverage( TimeDuration.MINUTE.asDuration() );
     private final EventRateMeter sendRate = new EventRateMeter( TimeDuration.MINUTE );
 
     private final StatisticCounterBundle<WorkQueueStat> workQueueStats = new StatisticCounterBundle<>( WorkQueueStat.class );
@@ -102,10 +103,11 @@ public final class WorkQueueProcessor<W extends Serializable>
 
     public WorkQueueProcessor(
             final PwmApplication pwmApplication,
+            final SessionLabel sessionLabel,
             final Deque<String> queue,
             final Settings settings,
             final ItemProcessor<W> itemProcessor,
-            final Class sourceClass
+            final Class<?> sourceClass
     )
     {
         this.settings = settings;
@@ -117,16 +119,16 @@ public final class WorkQueueProcessor<W extends Serializable>
         {
             logger.debug( () -> "opening with " + queue.size() + " items in work queue" );
         }
-        logger.trace( () -> "initializing worker thread with settings " + JsonUtil.serialize( settings ) );
+        logger.trace( () -> "initializing worker thread with settings " + JsonFactory.get().serialize( settings ) );
 
         this.workerThread = new WorkerThread();
         workerThread.setDaemon( true );
-        workerThread.setName( PwmScheduler.makeThreadName( pwmApplication, sourceClass ) + "-worker-" );
+        workerThread.setName( PwmScheduler.makeThreadName( sessionLabel, pwmApplication, sourceClass ) + "-worker-" );
         workerThread.start();
 
         if ( settings.getPreThreads() > 0 )
         {
-            final ThreadFactory threadFactory = PwmScheduler.makePwmThreadFactory( PwmScheduler.makeThreadName( pwmApplication, sourceClass ), true );
+            final ThreadFactory threadFactory = PwmScheduler.makePwmThreadFactory( PwmScheduler.makeThreadName( sessionLabel, pwmApplication, sourceClass ), true );
             executorService = new ThreadPoolExecutor(
                     1,
                     settings.getPreThreads(),
@@ -259,7 +261,7 @@ public final class WorkQueueProcessor<W extends Serializable>
         final Instant startTime = Instant.now();
         int attempts = 1;
 
-        final String asString = JsonUtil.serialize( itemWrapper );
+        final String asString = JsonFactory.get().serialize( itemWrapper );
         while ( !queue.offerLast( asString ) )
         {
             attempts++;
@@ -437,7 +439,7 @@ public final class WorkQueueProcessor<W extends Serializable>
             final ItemWrapper<W> itemWrapper;
             try
             {
-                itemWrapper = JsonUtil.<ItemWrapper<W>>deserialize( nextStrValue, ItemWrapper.class );
+                itemWrapper = JsonFactory.get().deserialize( nextStrValue, ItemWrapper.class );
                 if ( TimeDuration.fromCurrent( itemWrapper.getDate() ).isLongerThan( settings.getRetryDiscardAge() ) )
                 {
                     removeQueueTop();
@@ -531,7 +533,7 @@ public final class WorkQueueProcessor<W extends Serializable>
         ItemWrapper( final Instant submitDate, final W workItem, final String itemId )
         {
             this.timestamp = submitDate;
-            this.item = JsonUtil.serialize( workItem );
+            this.item = JsonFactory.get().serialize( workItem );
             this.className = workItem.getClass().getName();
             this.id = itemId;
         }
@@ -546,7 +548,7 @@ public final class WorkQueueProcessor<W extends Serializable>
             try
             {
                 final Class clazz = Class.forName( className );
-                final Object o = JsonUtil.deserialize( item, clazz );
+                final Object o = JsonFactory.get().deserialize( item, clazz );
                 return ( W ) o;
             }
             catch ( final Exception e )
@@ -616,7 +618,7 @@ public final class WorkQueueProcessor<W extends Serializable>
     public Map<String, String> debugInfo( )
     {
         final Map<String, String> output = new HashMap<>();
-        output.put( "avgLagTime", TimeDuration.of( ( long ) avgLagTime.getAverage(), TimeDuration.Unit.MILLISECONDS ).asCompactString() );
+        output.put( "avgLagTime", TimeDuration.fromDuration( avgLagTime.getAverageAsDuration() ).asCompactString() );
         output.put( "sendRate", sendRate.readEventRate().setScale( 2, RoundingMode.DOWN ) + "/s" );
         if ( executorService != null )
         {

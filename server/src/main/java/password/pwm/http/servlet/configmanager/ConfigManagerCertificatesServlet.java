@@ -23,10 +23,10 @@ package password.pwm.http.servlet.configmanager;
 import lombok.Builder;
 import lombok.Value;
 import password.pwm.PwmConstants;
-import password.pwm.config.Configuration;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingSyntax;
-import password.pwm.config.stored.StoredConfigItemKey;
+import password.pwm.config.stored.StoredConfigKey;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.value.StoredValue;
 import password.pwm.config.value.ValueTypeConverter;
@@ -37,6 +37,8 @@ import password.pwm.http.JspUrl;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmRequestAttribute;
 import password.pwm.http.servlet.AbstractPwmServlet;
+import password.pwm.util.java.CollectionUtil;
+import password.pwm.util.java.JavaHelper;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.X509Utils;
 import password.pwm.ws.server.RestResultBean;
@@ -45,7 +47,6 @@ import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
 import java.io.IOException;
 import java.io.Serializable;
-import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -53,7 +54,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Set;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 @WebServlet(
         name = "ConfigManagerCertificateServlet",
@@ -84,17 +86,10 @@ public class ConfigManagerCertificatesServlet extends AbstractPwmServlet
     }
 
     @Override
-    protected ConfigManagerCertificateAction readProcessAction( final PwmRequest request )
+    protected Optional<ConfigManagerCertificateAction> readProcessAction( final PwmRequest request )
             throws PwmUnrecoverableException
     {
-        try
-        {
-            return ConfigManagerCertificateAction.valueOf( request.readParameterAsString( PwmConstants.PARAM_ACTION_REQUEST ) );
-        }
-        catch ( final IllegalArgumentException e )
-        {
-            return null;
-        }
+        return JavaHelper.readEnumFromString( ConfigManagerCertificateAction.class, request.readParameterAsString( PwmConstants.PARAM_ACTION_REQUEST ) );
     }
 
     @Override
@@ -103,12 +98,12 @@ public class ConfigManagerCertificatesServlet extends AbstractPwmServlet
     {
         ConfigManagerServlet.verifyConfigAccess( pwmRequest );
 
-        final ConfigManagerCertificateAction action = readProcessAction( pwmRequest );
-        final ArrayList<CertificateDebugDataItem> certificateDebugDataItems = new ArrayList<>( makeCertificateDebugData( pwmRequest.getConfig() ) );
+        final Optional<ConfigManagerCertificateAction> action = readProcessAction( pwmRequest );
+        final ArrayList<CertificateDebugDataItem> certificateDebugDataItems = new ArrayList<>( makeCertificateDebugData( pwmRequest.getDomainConfig() ) );
 
-        if ( action == ConfigManagerCertificateAction.certificateData )
+        if ( action.isPresent() && action.get() == ConfigManagerCertificateAction.certificateData )
         {
-            final RestResultBean restResultBean = RestResultBean.withData( certificateDebugDataItems );
+            final RestResultBean restResultBean = RestResultBean.withData( certificateDebugDataItems, List.class );
             pwmRequest.outputJsonResult( restResultBean );
             return;
         }
@@ -116,35 +111,34 @@ public class ConfigManagerCertificatesServlet extends AbstractPwmServlet
         pwmRequest.forwardToJsp( JspUrl.CONFIG_MANAGER_CERTIFICATES );
     }
 
-    List<CertificateDebugDataItem> makeCertificateDebugData( final Configuration configuration ) throws PwmUnrecoverableException
+    List<CertificateDebugDataItem> makeCertificateDebugData( final DomainConfig domainConfig ) throws PwmUnrecoverableException
     {
-        final StoredConfiguration storedConfiguration = configuration.getStoredConfiguration();
-        final Set<StoredConfigItemKey> modifiedSettings = storedConfiguration.modifiedItems();
+        final StoredConfiguration storedConfiguration = domainConfig.getStoredConfiguration();
+        final List<StoredConfigKey> modifiedSettings = CollectionUtil.iteratorToStream( storedConfiguration.keys() )
+                .filter( keys -> keys.isRecordType( StoredConfigKey.RecordType.SETTING ) )
+                .collect( Collectors.toUnmodifiableList() );
 
         final List<CertificateDebugDataItem> certificateDebugDataItems = new ArrayList<>();
 
-        for ( final StoredConfigItemKey ref : modifiedSettings )
+        for ( final StoredConfigKey key : modifiedSettings )
         {
-            if ( ref.getRecordType() == StoredConfigItemKey.RecordType.SETTING )
+            final PwmSetting pwmSetting = key.toPwmSetting();
+            if ( pwmSetting.getSyntax() == PwmSettingSyntax.X509CERT )
             {
-                final PwmSetting pwmSetting = ref.toPwmSetting();
-                if ( pwmSetting.getSyntax() == PwmSettingSyntax.X509CERT )
+                final StoredValue storedValue = storedConfiguration.readStoredValue( key ).orElseThrow();
+                final List<X509Certificate> certificates = ValueTypeConverter.valueToX509Certificates( pwmSetting, storedValue );
+                certificateDebugDataItems.addAll( makeItems( pwmSetting, key.getProfileID(), certificates ) );
+            }
+            else if ( pwmSetting.getSyntax() == PwmSettingSyntax.ACTION )
+            {
+                final StoredValue storedValue = storedConfiguration.readStoredValue( key ).orElseThrow();
+                final List<ActionConfiguration> actionConfigurations = ValueTypeConverter.valueToAction( pwmSetting, storedValue );
+                for ( final ActionConfiguration actionConfiguration : actionConfigurations )
                 {
-                    final StoredValue storedValue = storedConfiguration.readSetting( pwmSetting, ref.getProfileID() );
-                    final List<X509Certificate> certificates = ValueTypeConverter.valueToX509Certificates( pwmSetting, storedValue );
-                    certificateDebugDataItems.addAll( makeItems( pwmSetting, ref.getProfileID(), certificates ) );
-                }
-                else if ( pwmSetting.getSyntax() == PwmSettingSyntax.ACTION )
-                {
-                    final StoredValue storedValue = storedConfiguration.readSetting( pwmSetting, ref.getProfileID() );
-                    final List<ActionConfiguration> actionConfigurations = ValueTypeConverter.valueToAction( pwmSetting, storedValue );
-                    for ( final ActionConfiguration actionConfiguration : actionConfigurations )
+                    for ( final ActionConfiguration.WebAction webAction : actionConfiguration.getWebActions() )
                     {
-                        for ( final ActionConfiguration.WebAction webAction : actionConfiguration.getWebActions() )
-                        {
-                            final List<X509Certificate> certificates = webAction.getCertificates();
-                            certificateDebugDataItems.addAll( makeItems( pwmSetting, ref.getProfileID(), certificates ) );
-                        }
+                        final List<X509Certificate> certificates = webAction.getCertificates();
+                        certificateDebugDataItems.addAll( makeItems( pwmSetting, key.getProfileID(), certificates ) );
                     }
                 }
             }
@@ -166,7 +160,7 @@ public class ConfigManagerCertificatesServlet extends AbstractPwmServlet
             return Collections.emptyList();
         }
 
-        final List<CertificateDebugDataItem> certificateDebugDataItems = new ArrayList<>();
+        final List<CertificateDebugDataItem> certificateDebugDataItems = new ArrayList<>( certificates.size() );
         for ( final X509Certificate certificate : certificates )
         {
             final CertificateDebugDataItem certificateDebugDataItem = makeItem( setting, profileId, certificate );
@@ -180,23 +174,15 @@ public class ConfigManagerCertificatesServlet extends AbstractPwmServlet
             final String profileId,
             final X509Certificate certificate
     )
-            throws PwmUnrecoverableException
     {
         final CertificateDebugDataItem.CertificateDebugDataItemBuilder builder = CertificateDebugDataItem.builder();
         builder.menuLocation( setting.toMenuLocationDebug( profileId, PwmConstants.DEFAULT_LOCALE ) );
-        builder.subject( certificate.getSubjectDN().toString() );
+        builder.subject( certificate.getSubjectX500Principal().getName() );
         builder.serial( certificate.getSerialNumber().toString() );
         builder.algorithm( certificate.getSigAlgName() );
         builder.issueDate( certificate.getNotBefore().toInstant() );
         builder.expirationDate( certificate.getNotAfter().toInstant() );
-        try
-        {
-            builder.detail( X509Utils.makeDetailText( certificate ) );
-        }
-        catch ( final CertificateEncodingException e )
-        {
-            LOGGER.error( () -> "unexpected error parsing certificate detail text: " + e.getMessage() );
-        }
+        builder.detail( X509Utils.makeDetailText( certificate ) );
         return builder.build();
     }
 

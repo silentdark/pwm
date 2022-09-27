@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 public class LocalDBAdaptor implements LocalDB
 {
@@ -75,12 +76,12 @@ public class LocalDBAdaptor implements LocalDB
 
 
     @Override
-    public String get( final DB db, final String key ) throws LocalDBException
+    public Optional<String> get( final DB db, final String key ) throws LocalDBException
     {
         ParameterValidator.validateDBValue( db );
         ParameterValidator.validateKeyValue( key );
 
-        final String value = innerDB.get( db, key );
+        final Optional<String> value = innerDB.get( db, key );
         markRead();
         return value;
     }
@@ -91,7 +92,6 @@ public class LocalDBAdaptor implements LocalDB
         innerDB.init( dbDirectory, initParameters, parameters );
     }
 
-    @Override
     public LocalDBIterator<Map.Entry<String, String>> iterator( final DB db ) throws LocalDBException
     {
         ParameterValidator.validateDBValue( db );
@@ -119,10 +119,6 @@ public class LocalDBAdaptor implements LocalDB
             {
                 ParameterValidator.validateKeyValue( loopKey );
                 ParameterValidator.validateValueValue( loopValue );
-            }
-            catch ( final NullPointerException e )
-            {
-                throw new NullPointerException( e.getMessage() + " for transaction record: '" + loopKey + "'" );
             }
             catch ( final IllegalArgumentException e )
             {
@@ -184,10 +180,6 @@ public class LocalDBAdaptor implements LocalDB
             try
             {
                 ParameterValidator.validateValueValue( loopKey );
-            }
-            catch ( final NullPointerException e )
-            {
-                throw new NullPointerException( e.getMessage() + " for transaction record: '" + loopKey + "'" );
             }
             catch ( final IllegalArgumentException e )
             {

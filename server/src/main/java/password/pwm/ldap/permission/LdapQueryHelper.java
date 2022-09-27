@@ -23,13 +23,14 @@ package password.pwm.ldap.permission;
 import com.novell.ldapchai.ChaiUser;
 import com.novell.ldapchai.exception.ChaiException;
 import com.novell.ldapchai.provider.SearchScope;
-import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.value.data.UserPermission;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.ldap.search.SearchConfiguration;
+import password.pwm.util.Validator;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
 
@@ -43,7 +44,7 @@ class LdapQueryHelper implements PermissionTypeHelper
 
     @Override
     public boolean testMatch(
-            final PwmApplication pwmApplication,
+            final PwmDomain pwmDomain,
             final SessionLabel sessionLabel,
             final UserIdentity userIdentity,
             final UserPermission userPermission
@@ -52,10 +53,10 @@ class LdapQueryHelper implements PermissionTypeHelper
     {
         if ( userPermission.getLdapBase() != null && !userPermission.getLdapBase().trim().isEmpty() )
         {
-            final String canonicalBaseDN = pwmApplication.getConfig().getLdapProfiles().get( userIdentity.getLdapProfileID() )
-                    .readCanonicalDN( pwmApplication, userPermission.getLdapBase() );
+            final String canonicalBaseDN = pwmDomain.getConfig().getLdapProfiles().get( userIdentity.getLdapProfileID() )
+                    .readCanonicalDN( sessionLabel, pwmDomain, userPermission.getLdapBase() );
 
-            if ( !UserPermissionUtility.testBaseDnMatch( pwmApplication, canonicalBaseDN, userIdentity ) )
+            if ( !UserPermissionUtility.testBaseDnMatch( sessionLabel, pwmDomain, canonicalBaseDN, userIdentity ) )
             {
                 return false;
             }
@@ -82,11 +83,11 @@ class LdapQueryHelper implements PermissionTypeHelper
         }
 
         LOGGER.trace( sessionLabel, () -> "checking ldap to see if " + userIdentity + " matches '" + filterString + "'" );
-        return selfUserSearch( pwmApplication, sessionLabel, userIdentity, filterString );
+        return selfUserSearch( pwmDomain, sessionLabel, userIdentity, filterString );
     }
 
     static boolean selfUserSearch(
-            final PwmApplication pwmApplication,
+            final PwmDomain pwmDomain,
             final SessionLabel sessionLabel,
             final UserIdentity userIdentity,
             final String searchFilter
@@ -95,7 +96,7 @@ class LdapQueryHelper implements PermissionTypeHelper
     {
         try
         {
-            final ChaiUser theUser = pwmApplication.getProxiedChaiUser( userIdentity );
+            final ChaiUser theUser = pwmDomain.getProxiedChaiUser( sessionLabel, userIdentity );
             final Map<String, Map<String, String>> results = theUser.getChaiProvider().search(
                     theUser.getEntryDN(),
                     searchFilter,
@@ -124,7 +125,7 @@ class LdapQueryHelper implements PermissionTypeHelper
     {
         return SearchConfiguration.builder()
                 .filter( userPermission.getLdapQuery() )
-                .ldapProfile( UserPermissionUtility.profileIdForPermission( userPermission ) )
+                .ldapProfile( UserPermissionUtility.profileIdForPermission( userPermission ).orElse( null ) )
                 .build();
     }
 
@@ -138,6 +139,6 @@ class LdapQueryHelper implements PermissionTypeHelper
                     "userPermission of type " + UserPermissionType.ldapQuery + " must have a ldapQuery value" );
         }
 
-        StringUtil.validateLdapSearchFilter( userPermission.getLdapQuery() );
+        Validator.validateLdapSearchFilter( userPermission.getLdapQuery() );
     }
 }

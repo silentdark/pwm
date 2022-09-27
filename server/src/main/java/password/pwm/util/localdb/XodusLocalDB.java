@@ -38,9 +38,9 @@ import password.pwm.PwmConstants;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.util.java.ConditionalTaskExecutor;
-import password.pwm.util.java.JsonUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
 import java.io.ByteArrayOutputStream;
@@ -53,9 +53,10 @@ import java.time.Instant;
 import java.util.AbstractMap;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.ResourceBundle;
 import java.util.Set;
 import java.util.zip.Deflater;
@@ -71,6 +72,7 @@ public class XodusLocalDB implements LocalDBProvider
 
     private static final String FILE_SUB_PATH = "xodus";
     private static final String README_FILENAME = "README.TXT";
+    private static final int DEFAULT_MEMORY_USAGE = 50 * 1024 * 1024;
 
     private Environment environment;
     private File fileLocation;
@@ -96,10 +98,12 @@ public class XodusLocalDB implements LocalDBProvider
 
     private LocalDB.Status status = LocalDB.Status.NEW;
 
-    private final Map<LocalDB.DB, Store> cachedStoreObjects = new HashMap<>();
+    private final Map<LocalDB.DB, Store> cachedStoreObjects = new EnumMap<>( LocalDB.DB.class );
 
-    private final ConditionalTaskExecutor outputLogExecutor = new ConditionalTaskExecutor(
-            ( ) -> outputStats(), new ConditionalTaskExecutor.TimeDurationPredicate( STATS_OUTPUT_INTERVAL ).setNextTimeFromNow( TimeDuration.MINUTE )
+    private final ConditionalTaskExecutor outputLogExecutor = ConditionalTaskExecutor.forPeriodicTask(
+            this::outputStats,
+            STATS_OUTPUT_INTERVAL.asDuration(),
+            TimeDuration.MINUTE.asDuration()
     );
 
     private BindMachine bindMachine = new BindMachine( BindMachine.DEFAULT_ENABLE_COMPRESSION, BindMachine.DEFAULT_MIN_COMPRESSION_LENGTH );
@@ -157,7 +161,7 @@ public class XodusLocalDB implements LocalDBProvider
 
         readOnly = parameters.containsKey( Parameter.readOnly ) && Boolean.parseBoolean( parameters.get( Parameter.readOnly ) );
 
-        LOGGER.trace( () -> "preparing to open with configuration " + JsonUtil.serializeMap( environmentConfig.getSettings() ) );
+        LOGGER.trace( () -> "preparing to open with configuration " + JsonFactory.get().serializeMap( environmentConfig.getSettings(), String.class, Object.class ) );
         environment = Environments.newInstance( dbDirectory.getAbsolutePath() + File.separator + FILE_SUB_PATH, environmentConfig );
 
         LOGGER.trace( () -> "environment open (" + TimeDuration.fromCurrent( startTime ).asCompactString() + ")" );
@@ -209,7 +213,7 @@ public class XodusLocalDB implements LocalDBProvider
     {
         final EnvironmentConfig environmentConfig = new EnvironmentConfig();
         environmentConfig.setEnvCloseForcedly( true );
-        environmentConfig.setMemoryUsage( 50 * 1024 * 1024 );
+        environmentConfig.setMemoryUsage( DEFAULT_MEMORY_USAGE );
         environmentConfig.setEnvGatherStatistics( true );
 
         for ( final Map.Entry<String, String> entry : initParameters.entrySet() )
@@ -245,12 +249,11 @@ public class XodusLocalDB implements LocalDBProvider
     @Override
     public boolean contains( final LocalDB.DB db, final String key ) throws LocalDBException
     {
-        checkStatus( false );
-        return get( db, key ) != null;
+        return get( db, key ).isPresent();
     }
 
     @Override
-    public String get( final LocalDB.DB db, final String key ) throws LocalDBException
+    public Optional<String> get( final LocalDB.DB db, final String key ) throws LocalDBException
     {
         checkStatus( false );
         return environment.computeInReadonlyTransaction( transaction ->
@@ -259,9 +262,9 @@ public class XodusLocalDB implements LocalDBProvider
             final ByteIterable returnValue = store.get( transaction, bindMachine.keyToEntry( key ) );
             if ( returnValue != null )
             {
-                return bindMachine.entryToValue( returnValue );
+                return Optional.of( bindMachine.entryToValue( returnValue ) );
             }
-            return null;
+            return Optional.empty();
         } );
     }
 
@@ -327,7 +330,6 @@ public class XodusLocalDB implements LocalDBProvider
             }
             catch ( final Exception e )
             {
-                e.printStackTrace();
                 throw e;
             }
         }

@@ -21,31 +21,38 @@
 package password.pwm.util.cli.commands;
 
 import password.pwm.PwmApplication;
+import password.pwm.PwmDomain;
+import password.pwm.bean.DomainID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.svc.token.TokenPayload;
 import password.pwm.svc.token.TokenService;
 import password.pwm.util.cli.CliParameters;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.StringUtil;
 
-import java.util.Collections;
+import java.io.IOException;
+import java.util.List;
 
 public class TokenInfoCommand extends AbstractCliCommand
 {
-    protected static final String TOKEN_KEY_OPTIONNAME = "token";
+    protected static final String TOKEN_KEY_OPTION_TOKEN = "token";
+    protected static final String TOKEN_KEY_OPTION_DOMAIN = "domain";
+
 
     @Override
     public void doCommand( )
-            throws Exception
+            throws IOException
     {
-        final String tokenKey = ( String ) cliEnvironment.getOptions().get( TOKEN_KEY_OPTIONNAME );
+        final String tokenKey = ( String ) cliEnvironment.getOptions().get( TOKEN_KEY_OPTION_TOKEN );
+        final String domainId = ( String ) cliEnvironment.getOptions().get( TOKEN_KEY_OPTION_DOMAIN );
         final PwmApplication pwmApplication = cliEnvironment.getPwmApplication();
+        final PwmDomain pwmDomain = pwmApplication.domains().get( DomainID.create( domainId ) );
 
-        final TokenService tokenService = pwmApplication.getTokenService();
+        final TokenService tokenService = pwmDomain.getTokenService();
         TokenPayload tokenPayload = null;
         Exception lookupError = null;
         try
         {
-            tokenPayload = tokenService.retrieveTokenData( SessionLabel.TOKEN_SESSION_LABEL, tokenKey );
+            tokenPayload = tokenService.retrieveTokenData( SessionLabel.TEST_SESSION_LABEL, tokenKey );
         }
         catch ( final Exception e )
         {
@@ -55,7 +62,7 @@ public class TokenInfoCommand extends AbstractCliCommand
         out( " token: " + tokenKey );
         if ( lookupError != null )
         {
-            out( "result: error during token lookup: " + lookupError.toString() );
+            out( "result: error during token lookup: " + lookupError );
         }
         else if ( tokenPayload == null )
         {
@@ -65,8 +72,8 @@ public class TokenInfoCommand extends AbstractCliCommand
         {
             out( "  name: " + tokenPayload.getName() );
             out( "  user: " + tokenPayload.getUserIdentity() );
-            out( "issued: " + JavaHelper.toIsoDate( tokenPayload.getIssueTime() ) );
-            out( "expire: " + JavaHelper.toIsoDate( tokenPayload.getExpiration() ) );
+            out( "issued: " + StringUtil.toIsoDate( tokenPayload.getIssueTime() ) );
+            out( "expire: " + StringUtil.toIsoDate( tokenPayload.getExpiration() ) );
             for ( final String key : tokenPayload.getData().keySet() )
             {
                 final String value = tokenPayload.getData().get( key );
@@ -96,14 +103,35 @@ public class TokenInfoCommand extends AbstractCliCommand
             @Override
             public String getName( )
             {
-                return TOKEN_KEY_OPTIONNAME;
+                return TOKEN_KEY_OPTION_TOKEN;
+            }
+        };
+
+        final CliParameters.Option domainId = new CliParameters.Option()
+        {
+            @Override
+            public boolean isOptional()
+            {
+                return false;
+            }
+
+            @Override
+            public Type getType()
+            {
+                return Type.STRING;
+            }
+
+            @Override
+            public String getName()
+            {
+                return TOKEN_KEY_OPTION_DOMAIN;
             }
         };
 
         final CliParameters cliParameters = new CliParameters();
         cliParameters.commandName = "TokenInfo";
         cliParameters.description = "Get information about an issued token";
-        cliParameters.options = Collections.singletonList( tokenValue );
+        cliParameters.options = List.of( tokenValue, domainId );
         cliParameters.needsPwmApplication = true;
         cliParameters.readOnly = false;
         return cliParameters;

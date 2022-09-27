@@ -23,7 +23,6 @@ package password.pwm.http.servlet.configmanager;
 import lombok.Builder;
 import lombok.Value;
 import org.apache.commons.fileupload.servlet.ServletFileUpload;
-import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
@@ -42,6 +41,7 @@ import password.pwm.svc.wordlist.WordlistStatus;
 import password.pwm.svc.wordlist.WordlistType;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.MiscUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.ws.server.RestResultBean;
@@ -57,6 +57,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 @WebServlet(
         name = "ConfigManagerWordlistServlet",
@@ -89,17 +91,10 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
     }
 
     @Override
-    protected ConfigManagerAction readProcessAction( final PwmRequest request )
+    protected Optional<ConfigManagerAction> readProcessAction( final PwmRequest request )
             throws PwmUnrecoverableException
     {
-        try
-        {
-            return ConfigManagerAction.valueOf( request.readParameterAsString( PwmConstants.PARAM_ACTION_REQUEST ) );
-        }
-        catch ( final IllegalArgumentException e )
-        {
-            return null;
-        }
+        return JavaHelper.readEnumFromString( ConfigManagerAction.class, request.readParameterAsString( PwmConstants.PARAM_ACTION_REQUEST ) );
     }
 
     @Override
@@ -108,10 +103,10 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
     {
         ConfigManagerServlet.verifyConfigAccess( pwmRequest );
 
-        final ConfigManagerAction processAction = readProcessAction( pwmRequest );
-        if ( processAction != null )
+        final Optional<ConfigManagerAction> processAction = readProcessAction( pwmRequest );
+        if ( processAction.isPresent() )
         {
-            switch ( processAction )
+            switch ( processAction.get() )
             {
                 case uploadWordlist:
                     restUploadWordlist( pwmRequest );
@@ -126,7 +121,7 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
                     return;
 
                 default:
-                    JavaHelper.unhandledSwitchStatement( processAction );
+                    MiscUtil.unhandledSwitchStatement( processAction.get() );
             }
             return;
         }
@@ -138,14 +133,12 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
             throws IOException, ServletException, PwmUnrecoverableException
 
     {
-        final PwmApplication pwmApplication = pwmRequest.getPwmApplication();
         final HttpServletRequest req = pwmRequest.getHttpServletRequest();
-        final String wordlistTypeParam = pwmRequest.readParameterAsString( "wordlist" );
-        final WordlistType wordlistType = WordlistType.valueOf( wordlistTypeParam );
+        final Optional<WordlistType> wordlistType = JavaHelper.readEnumFromString( WordlistType.class, pwmRequest.readParameterAsString( "wordlist" ) );
 
-        if ( wordlistType == null )
+        if ( wordlistType.isEmpty() )
         {
-            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_INTERNAL, "unknown wordlist type: " + wordlistTypeParam );
+            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_INTERNAL, "unknown wordlist type" );
             pwmRequest.outputJsonResult( RestResultBean.fromError( errorInformation, pwmRequest ) );
             LOGGER.error( pwmRequest, () -> "error during import: " + errorInformation.toDebugStr() );
             return;
@@ -159,19 +152,22 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
             return;
         }
 
-        final InputStream inputStream = pwmRequest.readFileUploadStream( PwmConstants.PARAM_FILE_UPLOAD );
+        final Optional<InputStream> optionalInputStream = pwmRequest.readFileUploadStream( PwmConstants.PARAM_FILE_UPLOAD );
 
-        try
+        if ( optionalInputStream.isPresent() )
         {
-            wordlistType.forType( pwmApplication ).populate( inputStream );
-        }
-        catch ( final PwmUnrecoverableException e )
-        {
-            final ErrorInformation errorInfo = new ErrorInformation( PwmError.ERROR_INTERNAL, e.getMessage() );
-            final RestResultBean restResultBean = RestResultBean.fromError( errorInfo, pwmRequest );
-            LOGGER.debug( pwmRequest, errorInfo );
-            pwmRequest.outputJsonResult( restResultBean );
-            return;
+            try ( InputStream inputStream = optionalInputStream.get() )
+            {
+                wordlistType.get().forType( pwmRequest.getPwmApplication() ).populate( inputStream );
+            }
+            catch ( final PwmUnrecoverableException e )
+            {
+                final ErrorInformation errorInfo = new ErrorInformation( PwmError.ERROR_INTERNAL, e.getMessage() );
+                final RestResultBean restResultBean = RestResultBean.fromError( errorInfo, pwmRequest );
+                LOGGER.debug( pwmRequest, errorInfo );
+                pwmRequest.outputJsonResult( restResultBean );
+                return;
+            }
         }
 
         pwmRequest.outputJsonResult( RestResultBean.forSuccessMessage( pwmRequest, Message.Success_Unknown ) );
@@ -180,12 +176,11 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
     void restClearWordlist( final PwmRequest pwmRequest )
             throws IOException, PwmUnrecoverableException
     {
-        final String wordlistTypeParam = pwmRequest.readParameterAsString( "wordlist" );
-        final WordlistType wordlistType = WordlistType.valueOf( wordlistTypeParam );
+        final Optional<WordlistType> wordlistType = JavaHelper.readEnumFromString( WordlistType.class, pwmRequest.readParameterAsString( "wordlist" ) );
 
-        if ( wordlistType == null )
+        if ( wordlistType.isEmpty() )
         {
-            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_INTERNAL, "unknown wordlist type: " + wordlistTypeParam );
+            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_INTERNAL, "unknown wordlist type" );
             pwmRequest.outputJsonResult( RestResultBean.fromError( errorInformation, pwmRequest ) );
             LOGGER.error( pwmRequest, () -> "error during clear: " + errorInformation.toDebugStr() );
             return;
@@ -193,7 +188,7 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
 
         try
         {
-            wordlistType.forType( pwmRequest.getPwmApplication() ).clear();
+            wordlistType.get().forType( pwmRequest.getPwmApplication() ).clear();
         }
         catch ( final Exception e )
         {
@@ -253,9 +248,9 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
                                 wordlistType.name() + "_populationTimestamp",
                                 DisplayElement.Type.timestamp,
                                 "Population Timestamp",
-                                JavaHelper.toIsoDate( wordlistStatus.getStoreDate() ) ) );
+                                StringUtil.toIsoDate( wordlistStatus.getStoreDate() ) ) );
                     }
-                    if ( wordlistStatus.getRemoteInfo() != null && !StringUtil.isEmpty( wordlistStatus.getRemoteInfo().getHash() ) )
+                    if ( wordlistStatus.getRemoteInfo() != null && StringUtil.notEmpty( wordlistStatus.getRemoteInfo().getHash() ) )
                     {
                         presentableValues.add( new DisplayElement(
                                 wordlistType.name() + "_sha256Hash",
@@ -275,13 +270,13 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
                             wordlistType.name() + "_lastImportAttempt",
                             DisplayElement.Type.timestamp,
                             "Last Import Attempt",
-                            JavaHelper.toIsoDate( wordlist.getAutoImportError().getDate() ) ) );
+                            StringUtil.toIsoDate( wordlist.getAutoImportError().getDate() ) ) );
                 }
 
                 if ( activity == Wordlist.Activity.Importing )
                 {
                     final String percentComplete = wordlist.getImportPercentComplete();
-                    if ( !StringUtil.isEmpty( percentComplete ) )
+                    if ( StringUtil.notEmpty( percentComplete ) )
                     {
                         presentableValues.add( new DisplayElement(
                                 "percentComplete",
@@ -311,7 +306,7 @@ public class ConfigManagerWordlistServlet extends AbstractPwmServlet
             }
             outputData.put( wordlistType, builder.build() );
         }
-        pwmRequest.outputJsonResult( RestResultBean.withData( outputData ) );
+        pwmRequest.outputJsonResult( RestResultBean.withData( outputData, Map.class ) );
     }
 
     @Value

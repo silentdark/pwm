@@ -21,12 +21,11 @@
 package password.pwm.svc.token;
 
 import com.google.gson.annotations.SerializedName;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
+import lombok.Value;
 import password.pwm.bean.TokenDestinationItem;
 import password.pwm.bean.UserIdentity;
-import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.JsonUtil;
+import password.pwm.util.java.StringUtil;
+import password.pwm.util.json.JsonFactory;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -34,8 +33,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-@Getter
-@EqualsAndHashCode
+@Value
 public class TokenPayload implements Serializable
 {
     @SerializedName( "t" )
@@ -81,14 +79,14 @@ public class TokenPayload implements Serializable
     public String toDebugString( )
     {
         final Map<String, String> debugMap = new HashMap<>();
-        debugMap.put( "issueTime", JavaHelper.toIsoDate( issueTime ) );
-        debugMap.put( "expiration", JavaHelper.toIsoDate( expiration ) );
+        debugMap.put( "issueTime", StringUtil.toIsoDate( issueTime ) );
+        debugMap.put( "expiration", StringUtil.toIsoDate( expiration ) );
         debugMap.put( "name", getName() );
         if ( getUserIdentity() != null )
         {
             debugMap.put( "user", getUserIdentity().toDisplayString() );
         }
         debugMap.put( "guid", getGuid() );
-        return JsonUtil.serializeMap( debugMap );
+        return JsonFactory.get().serializeMap( debugMap );
     }
 }

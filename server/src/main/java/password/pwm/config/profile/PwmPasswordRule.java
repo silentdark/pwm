@@ -22,19 +22,14 @@ package password.pwm.config.profile;
 
 import com.novell.ldapchai.ChaiPasswordRule;
 import password.pwm.AppProperty;
-import password.pwm.config.Configuration;
+import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.i18n.Message;
 import password.pwm.util.i18n.LocaleHelper;
-import password.pwm.util.logging.PwmLogger;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.MissingResourceException;
-import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -390,25 +385,6 @@ public enum PwmPasswordRule
             "true",
             false ),;
 
-    private static final PwmLogger LOGGER = PwmLogger.forClass( PwmPasswordRule.class );
-
-    static
-    {
-        try
-        {
-            final Set<String> keys = new HashSet<>();
-            for ( final PwmSetting setting : PwmSetting.values() )
-            {
-                keys.add( setting.getKey() );
-            }
-            assert keys.size() == PwmSetting.values().length;
-        }
-        catch ( final Throwable t )
-        {
-            LOGGER.fatal( () -> "error initializing PwmPasswordRule class: " + t.getMessage(), t );
-        }
-    }
-
     private final ChaiPasswordRule chaiPasswordRule;
     private final PwmSetting pwmSetting;
     private final AppProperty appProperty;
@@ -490,27 +466,9 @@ public enum PwmPasswordRule
         return positiveBooleanMerge;
     }
 
-    public static PwmPasswordRule forKey( final String key )
+    public String getLabel( final Locale locale, final DomainConfig config )
     {
-        if ( key == null )
-        {
-            return null;
-        }
-
-        for ( final PwmPasswordRule rule : values() )
-        {
-            if ( key.equals( rule.getKey() ) )
-            {
-                return rule;
-            }
-        }
-
-        return null;
-    }
-
-    public String getLabel( final Locale locale, final Configuration config )
-    {
-        final String key = "Rule_" + this.toString();
+        final String key = "Rule_" + this;
         try
         {
             return LocaleHelper.getLocalizedMessage( locale, key, config, Message.class );
@@ -521,13 +479,13 @@ public enum PwmPasswordRule
         }
     }
 
-    public static List<PwmPasswordRule> sortedByLabel ( final Locale locale, final Configuration config )
+    public static List<PwmPasswordRule> sortedByLabel ( final Locale locale, final DomainConfig config )
     {
         final TreeMap<String, PwmPasswordRule> sortedMap = new TreeMap<>();
         for ( final PwmPasswordRule rule : PwmPasswordRule.values() )
         {
             sortedMap.put( rule.getLabel( locale, config ), rule );
         }
-        return Collections.unmodifiableList( new ArrayList<>( sortedMap.values() ) );
+        return List.copyOf( sortedMap.values() );
     }
 }

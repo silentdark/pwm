@@ -21,8 +21,8 @@
 package password.pwm.util.localdb;
 
 import password.pwm.PwmApplication;
+import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.ConditionalTaskExecutor;
-import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
@@ -36,10 +36,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
@@ -141,20 +146,33 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
     @Override
     public Object[] toArray( )
     {
-        final List<Object> returnList = new ArrayList<>( this );
-        return returnList.toArray();
+        try
+        {
+            return internalQueue.toArray();
+        }
+        catch ( final LocalDBException e )
+        {
+            throw new IllegalStateException( e );
+        }
     }
 
     @Override
     public <T> T[] toArray( final T[] a )
     {
-        int index = 0;
-        for ( final String s : this )
+        try
         {
-            a[index] = ( T ) s;
-            index++;
+            final String[] strArray = internalQueue.toArray();
+            if ( a == null || a.length < strArray.length )
+            {
+                return ( T[] ) strArray;
+            }
+            System.arraycopy( strArray, 0, a, 0, strArray.length );
+            return a;
         }
-        return a;
+        catch ( final LocalDBException e )
+        {
+            throw new IllegalStateException( e );
+        }
     }
 
     @Override
@@ -390,7 +408,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
         try
         {
             final List<String> values = internalQueue.getFirst( 1 );
-            if ( JavaHelper.isEmpty( values ) )
+            if ( CollectionUtil.isEmpty( values ) )
             {
                 return null;
             }
@@ -520,50 +538,77 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
 
     private static class InnerIterator implements Iterator<String>
     {
-        private Position position;
+        private final AtomicReference<Position> position = new AtomicReference<>();
         private final InternalQueue internalQueue;
-        private final boolean first;
-        private final long queueSizeAtCreate;
-        private int steps;
+        private final boolean headFirst;
 
+        private final Position initialPosition;
+        private final AtomicLong itemsRemaining = new AtomicLong();
+        private final Lock lock = new ReentrantLock();
 
-        private InnerIterator( final InternalQueue internalQueue, final boolean first )
+        private InnerIterator( final InternalQueue internalQueue, final boolean headFirst )
                 throws LocalDBException
         {
             this.internalQueue = internalQueue;
-            this.first = first;
-            position = internalQueue.size() == 0 ? null : first ? internalQueue.headPosition : internalQueue.tailPosition;
-            queueSizeAtCreate = internalQueue.size();
+            this.headFirst = headFirst;
+            this.initialPosition = internalQueue.size() == 0
+                    ? null
+                    : headFirst
+                            ? internalQueue.headPosition
+                            : internalQueue.tailPosition;
+            position.set( initialPosition );
+            itemsRemaining.set( internalQueue.size() );
         }
 
         @Override
         public boolean hasNext( )
         {
-            return position != null;
+            lock.lock();
+            try
+            {
+                return position.get() != null;
+            }
+            finally
+            {
+                lock.unlock();
+            }
         }
 
         @Override
         public String next( )
         {
-            if ( position == null )
+            lock.lock();
+            try
+            {
+                return nextImpl();
+            }
+            finally
+            {
+                lock.unlock();
+            }
+        }
+
+        private String nextImpl()
+        {
+            if ( position.get() == null )
             {
                 throw new NoSuchElementException();
             }
-            steps++;
+            itemsRemaining.decrementAndGet();
             try
             {
-                final String nextValue = internalQueue.localDB.get( internalQueue.db, position.key() );
-                if ( first )
+                final String nextValue = internalQueue.localDB.get( internalQueue.db, position.get().key() ).orElseThrow();
+                if ( headFirst )
                 {
-                    position = position.equals( internalQueue.tailPosition ) ? null : position.previous();
+                    position.updateAndGet( position -> Objects.equals( position, internalQueue.tailPosition ) ? null : position.previous() );
                 }
                 else
                 {
-                    position = position.equals( internalQueue.headPosition ) ? null : position.next();
+                    position.updateAndGet( position -> Objects.equals( position, internalQueue.headPosition ) ? null : position.next() );
                 }
-                if ( steps > queueSizeAtCreate )
+                if ( itemsRemaining.get() <= 0 || Objects.equals( position.get(), initialPosition ) )
                 {
-                    position = null;
+                    position.set( null );
                 }
                 return nextValue;
             }
@@ -682,9 +727,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
         private boolean developerDebug = false;
         private static final int DEBUG_MAX_ROWS = 50;
         private static final int DEBUG_MAX_WIDTH = 120;
-        private static final Set<LocalDB.DB> DEBUG_IGNORED_DB = Collections.unmodifiableSet(
-                Collections.unmodifiableSet( Collections.singleton( LocalDB.DB.EVENTLOG_EVENTS ) )
-        );
+        private static final Set<LocalDB.DB> DEBUG_IGNORED_DB = Set.of( LocalDB.DB.EVENTLOG_EVENTS );
 
         private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
@@ -728,11 +771,11 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
                 clear();
             }
 
-            final String headPositionStr = localDB.get( db, KEY_HEAD_POSITION );
-            final String tailPositionStr = localDB.get( db, KEY_TAIL_POSITION );
+            final Optional<String> headPositionStr = localDB.get( db, KEY_HEAD_POSITION );
+            final Optional<String> tailPositionStr = localDB.get( db, KEY_TAIL_POSITION );
 
-            headPosition = headPositionStr != null && headPositionStr.length() > 0 ? new Position( headPositionStr ) : new Position( "0" );
-            tailPosition = tailPositionStr != null && tailPositionStr.length() > 0 ? new Position( tailPositionStr ) : new Position( "0" );
+            headPosition = headPositionStr.isPresent() && headPositionStr.get().length() > 0 ? new Position( headPositionStr.get() ) : new Position( "0" );
+            tailPosition = tailPositionStr.isPresent() && tailPositionStr.get().length() > 0 ? new Position( tailPositionStr.get() ) : new Position( "0" );
 
             {
                 final long finalSize = this.size();
@@ -746,8 +789,8 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
 
         private boolean checkVersion( ) throws LocalDBException
         {
-            final String storedVersion = localDB.get( db, KEY_VERSION );
-            if ( !Objects.equals( storedVersion, VALUE_VERSION ) )
+            final Optional<String> storedVersion = localDB.get( db, KEY_VERSION );
+            if ( storedVersion.isEmpty() || !Objects.equals( storedVersion.get(), VALUE_VERSION ) )
             {
                 LOGGER.warn( () -> "values in db " + db + " use an outdated format, the stored events will be purged!" );
                 return false;
@@ -796,7 +839,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
         private long internalSize( )
                 throws LocalDBException
         {
-            if ( headPosition.equals( tailPosition ) && localDB.get( db, headPosition.toString() ) == null )
+            if ( headPosition.equals( tailPosition ) && localDB.get( db, headPosition.toString() ).isEmpty() )
             {
                 return 0;
             }
@@ -843,8 +886,8 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
                 return Collections.emptyList();
             }
 
-            final List<String> removalKeys = new ArrayList<>();
-            final List<String> removedValues = new ArrayList<>();
+            final List<String> removalKeys = new ArrayList<>( removalCount );
+            final List<String> removedValues = new ArrayList<>( removalCount );
             Position loopPosition = forward ? headPosition : tailPosition;
             int removedPositions = 0;
             while ( removedPositions < removalCount )
@@ -852,11 +895,8 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
                 removalKeys.add( loopPosition.key() );
                 if ( returnValues )
                 {
-                    final String loopValue = localDB.get( db, loopPosition.key() );
-                    if ( loopValue != null )
-                    {
-                        removedValues.add( loopValue );
-                    }
+                    final Optional<String> loopValue = localDB.get( db, loopPosition.key() );
+                    loopValue.ifPresent( removedValues::add );
                 }
 
                 if ( forward )
@@ -901,6 +941,29 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
             }
         }
 
+        String[] toArray()
+                throws LocalDBException
+        {
+            lock.readLock().lock();
+            try
+            {
+                debugOutput( "pre toArray()" );
+                final int size = Math.toIntExact( internalSize() );
+                final String[] stringArray = new String[ size ];
+                final InnerIterator iterator = new InnerIterator( this, true );
+                for ( int i = 0; i < size; i++ )
+                {
+                    stringArray[i] = iterator.next();
+                }
+                debugOutput( "post toArray()" );
+                return stringArray;
+            }
+            finally
+            {
+                lock.readLock().unlock();
+            }
+        }
+
         void addLast( final Collection<String> values ) throws LocalDBException
         {
             lock.writeLock().lock();
@@ -919,7 +982,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
         private void addImpl( final Collection<String> values, final boolean forward )
                 throws LocalDBException
         {
-            if ( JavaHelper.isEmpty( values ) )
+            if ( CollectionUtil.isEmpty( values ) )
             {
                 return;
             }
@@ -931,7 +994,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
 
             final Iterator<String> valueIterator = values.iterator();
 
-            final Map<String, String> keyValueMap = new HashMap<>();
+            final Map<String, String> keyValueMap = new HashMap<>( values.size() );
             Position loopPosition = forward ? headPosition : tailPosition;
 
             if ( internalSize() == 0 )
@@ -1013,7 +1076,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
             Position nextPosition = forward ? headPosition : tailPosition;
             while ( returnList.size() < getCount )
             {
-                returnList.add( localDB.get( db, nextPosition.key() ) );
+                returnList.add( localDB.get( db, nextPosition.key() ).orElseThrow() );
                 nextPosition = forward ? nextPosition.previous() : nextPosition.next();
             }
 
@@ -1034,7 +1097,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
                 {
                     sb.append( input );
                     sb.append( "  tailPosition=" ).append( tailPosition ).append( ", headPosition=" ).append( headPosition ).append( ", db=" ).append( db );
-                    sb.append( ", size=" ).append( internalSize() ).append( "\n" );
+                    sb.append( ", size=" ).append( internalSize() ).append( '\n' );
 
                     try ( LocalDB.LocalDBIterator<Map.Entry<String, String>> localDBIterator = localDB.iterator( db ) )
                     {
@@ -1047,7 +1110,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
                             value = value == null ? "" : value;
                             value = value.length() < DEBUG_MAX_WIDTH ? value : value.substring( 0, DEBUG_MAX_WIDTH ) + "...";
                             final String row = key + " " + value;
-                            sb.append( row ).append( "\n" );
+                            sb.append( row ).append( '\n' );
                             rowCount++;
                         }
                     }
@@ -1075,7 +1138,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
 
                 final AtomicInteger examinedRecords = new AtomicInteger( 0 );
 
-                final ConditionalTaskExecutor conditionalTaskExecutor = new ConditionalTaskExecutor( () ->
+                final Runnable checkPointProcess = () ->
                 {
                     try
                     {
@@ -1088,14 +1151,17 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
                     }
                     catch ( final Exception e )
                     {
-                        LOGGER.error( () -> "unexpected error during output of debug message during stored queue repair operation: " + e.getMessage(), e );
+                        LOGGER.error( () -> "unexpected error during output of debug message during stored queue repair operation: "
+                                + e.getMessage(), e );
                     }
-                },
-                        new ConditionalTaskExecutor.TimeDurationPredicate( TimeDuration.SECONDS_10 )
-                );
+                };
+
+                final ConditionalTaskExecutor conditionalTaskExecutor = ConditionalTaskExecutor.forPeriodicTask(
+                        checkPointProcess,
+                        TimeDuration.SECONDS_10.asDuration() );
 
                 // trim the top.
-                while ( !headPosition.equals( tailPosition ) && localDB.get( db, headPosition.key() ) == null )
+                while ( !headPosition.equals( tailPosition ) && localDB.get( db, headPosition.key() ).isPresent() )
                 {
                     examinedRecords.incrementAndGet();
                     conditionalTaskExecutor.conditionallyExecuteTask();
@@ -1105,7 +1171,7 @@ public class LocalDBStoredQueue implements Queue<String>, Deque<String>
                 localDB.put( db, KEY_HEAD_POSITION, headPosition.key() );
 
                 // trim the bottom.
-                while ( !headPosition.equals( tailPosition ) && localDB.get( db, tailPosition.toString() ) == null )
+                while ( !headPosition.equals( tailPosition ) && localDB.get( db, tailPosition.toString() ).isPresent() )
                 {
                     examinedRecords.incrementAndGet();
                     conditionalTaskExecutor.conditionallyExecuteTask();
