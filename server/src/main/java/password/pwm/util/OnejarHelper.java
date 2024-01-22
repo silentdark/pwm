@@ -20,10 +20,12 @@
 
 package password.pwm.util;
 
+import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
 import password.pwm.PwmApplicationMode;
 import password.pwm.PwmConstants;
 import password.pwm.PwmEnvironment;
+import password.pwm.bean.SessionLabel;
 import password.pwm.config.AppConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.ConfigurationFileManager;
@@ -32,11 +34,10 @@ import password.pwm.util.cli.commands.ExportHttpsTomcatConfigCommand;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.secure.HttpsServerCertificateManager;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.KeyStore;
-import java.util.Collections;
 import java.util.Properties;
 
 public class OnejarHelper
@@ -55,10 +56,10 @@ public class OnejarHelper
     )
             throws Exception
     {
-        final PwmApplication pwmApplication = makePwmApplication( new File( applicationPath ) );
+        final PwmApplication pwmApplication = makePwmApplication( Path.of( applicationPath ) );
         try
         {
-            exportKeystore( pwmApplication, password, alias, new File( keystorePath ) );
+            exportKeystore( pwmApplication, password, alias, Path.of( keystorePath ) );
             return createProperties( pwmApplication.getConfig() );
         }
         finally
@@ -80,6 +81,7 @@ public class OnejarHelper
         final String sslProtocolSettingValue = ExportHttpsTomcatConfigCommand.TomcatConfigWriter.getTlsProtocolsValue( appConfig );
         final Properties newProps = new Properties();
         newProps.setProperty( "sslEnabledProtocols",  sslProtocolSettingValue );
+        newProps.setProperty( "enableCompression", appConfig.readAppProperty( AppProperty.HTTP_ENABLE_GZIP ) );
         final String ciphers = appConfig.readSettingAsString( PwmSetting.HTTPS_CIPHERS );
         if ( StringUtil.notEmpty( ciphers ) )
         {
@@ -92,7 +94,7 @@ public class OnejarHelper
             final PwmApplication pwmApplication,
             final String password,
             final String alias,
-            final File exportFile
+            final Path exportFile
     )
             throws Exception
     {
@@ -100,24 +102,24 @@ public class OnejarHelper
                 pwmApplication,
                 new PasswordData( password ),
                 alias );
-        try ( OutputStream outputStream = new FileOutputStream( exportFile ) )
+        try ( OutputStream outputStream = Files.newOutputStream( exportFile ) )
         {
             keyStore.store( outputStream, password.toCharArray() );
         }
     }
 
-    private static PwmApplication makePwmApplication( final File applicationPath )
+    private static PwmApplication makePwmApplication( final Path applicationPath )
             throws Exception
     {
-        final File configFile = new File( applicationPath + File.separator + PwmConstants.DEFAULT_CONFIG_FILE_FILENAME );
-        final ConfigurationFileManager configReader = new ConfigurationFileManager( configFile );
+        final Path configFile = applicationPath.resolve( PwmConstants.DEFAULT_CONFIG_FILE_FILENAME );
+        final ConfigurationFileManager configReader = new ConfigurationFileManager( configFile, SessionLabel.ONEJAR_LABEL );
         final AppConfig config = configReader.getConfiguration();
         final PwmEnvironment pwmEnvironment = PwmEnvironment.builder()
                 .config( config )
                 .applicationPath( applicationPath )
                 .applicationMode( PwmApplicationMode.READ_ONLY )
                 .configurationFile( configFile )
-                .flags( Collections.singleton( PwmEnvironment.ApplicationFlag.CommandLineInstance ) )
+                .internalRuntimeInstance( true )
                 .build();
 
         return PwmApplication.createPwmApplication( pwmEnvironment );

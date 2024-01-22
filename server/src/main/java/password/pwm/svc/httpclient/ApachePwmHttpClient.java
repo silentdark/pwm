@@ -70,7 +70,7 @@ import password.pwm.http.HttpContentType;
 import password.pwm.http.HttpEntityDataType;
 import password.pwm.http.HttpMethod;
 import password.pwm.http.PwmURL;
-import password.pwm.util.java.ImmutableByteArray;
+import password.pwm.data.ImmutableByteArray;
 import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.util.java.AtomicLoopIntIncrementer;
@@ -87,7 +87,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
@@ -110,9 +109,11 @@ public class ApachePwmHttpClient implements AutoCloseable, PwmHttpClientProvider
     private PwmApplication pwmApplication;
     private PwmHttpClientConfiguration pwmHttpClientConfiguration;
     private HttpClientService httpClientService;
+    private SessionLabel sessionLabel;
 
     private TrustManager[] trustManagers;
     private CloseableHttpClient httpClient;
+
 
     private volatile boolean open = true;
 
@@ -123,11 +124,13 @@ public class ApachePwmHttpClient implements AutoCloseable, PwmHttpClientProvider
     public void init(
             final PwmApplication pwmApplication,
             final HttpClientService httpClientService,
-            final PwmHttpClientConfiguration pwmHttpClientConfiguration
+            final PwmHttpClientConfiguration pwmHttpClientConfiguration,
+            final SessionLabel sessionLabel
     )
             throws PwmUnrecoverableException
     {
         this.pwmApplication = Objects.requireNonNull( pwmApplication );
+        this.sessionLabel = sessionLabel;
         this.httpClientService = Objects.requireNonNull( httpClientService );
         this.pwmHttpClientConfiguration = pwmHttpClientConfiguration;
 
@@ -145,14 +148,14 @@ public class ApachePwmHttpClient implements AutoCloseable, PwmHttpClientProvider
     @Override
     public void close()
     {
-        LOGGER.trace( () -> "closed client #" + clientID );
+        LOGGER.trace( sessionLabel, () -> "closed client #" + clientID );
         try
         {
             httpClient.close();
         }
         catch ( final IOException e )
         {
-            LOGGER.trace( () -> "error closing ApacheHttpClient: " + e.getMessage() );
+            LOGGER.trace( sessionLabel, () -> "error closing ApacheHttpClient: " + e.getMessage() );
         }
         open = false;
     }
@@ -245,14 +248,13 @@ public class ApachePwmHttpClient implements AutoCloseable, PwmHttpClientProvider
 
     @Override
     public PwmHttpClientResponse makeRequest(
-            final PwmHttpClientRequest clientRequest,
-            final SessionLabel sessionLabel
+            final PwmHttpClientRequest clientRequest
     )
             throws PwmUnrecoverableException
     {
         try
         {
-            return makeRequestImpl( clientRequest, sessionLabel );
+            return makeRequestImpl( clientRequest );
         }
         catch ( final IOException e )
         {
@@ -261,13 +263,12 @@ public class ApachePwmHttpClient implements AutoCloseable, PwmHttpClientProvider
     }
 
     private PwmHttpClientResponse makeRequestImpl(
-            final PwmHttpClientRequest clientRequest,
-            final SessionLabel sessionLabel
+            final PwmHttpClientRequest clientRequest
     )
             throws IOException, PwmUnrecoverableException
     {
         final Instant startTime = Instant.now();
-        if ( LOGGER.isEnabled( PwmLogLevel.TRACE ) )
+        if ( LOGGER.isInterestingLevel( PwmLogLevel.TRACE ) )
         {
             final String sslDebugText;
             if ( clientRequest.isHttps() )
@@ -402,13 +403,9 @@ public class ApachePwmHttpClient implements AutoCloseable, PwmHttpClientProvider
     public InputStream streamForUrl( final String inputUrl )
             throws IOException, PwmUnrecoverableException
     {
-        final URL url = new URL( inputUrl );
-        if ( "file".equals( url.getProtocol() ) )
-        {
-            return url.openStream();
-        }
+        final URI uri = URI.create( inputUrl );
 
-        if ( "http".equals( url.getProtocol() ) || "https".equals( url.getProtocol() ) )
+        if ( PwmURL.uriSchemeMatches( uri, PwmURL.Scheme.http, PwmURL.Scheme.https ) )
         {
 
             final PwmHttpClientRequest pwmHttpClientRequest = PwmHttpClientRequest.builder()
@@ -421,13 +418,13 @@ public class ApachePwmHttpClient implements AutoCloseable, PwmHttpClientProvider
             {
                 final String errorMsg = "error retrieving stream for url '" + inputUrl + "', remote response: " + httpResponse.getStatusLine().toString();
                 final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_REMOTE_ERROR_VALUE, errorMsg );
-                LOGGER.error( errorInformation );
+                LOGGER.error( sessionLabel, errorInformation );
                 throw new PwmUnrecoverableException( errorInformation );
             }
             return httpResponse.getEntity().getContent();
         }
 
-        throw new IllegalArgumentException( "unknown protocol type: " + url.getProtocol() );
+        throw new IllegalArgumentException( "unknown protocol type: " + uri.getScheme() );
     }
 
     private static class ProxyRoutePlanner implements HttpRoutePlanner

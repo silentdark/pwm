@@ -20,6 +20,7 @@
 
 package password.pwm.http.servlet.configeditor.function;
 
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.stored.StoredConfigKey;
 import password.pwm.config.stored.StoredConfigurationModifier;
@@ -46,9 +47,9 @@ public class SmtpCertImportFunction implements SettingUIFunction
             throws PwmUnrecoverableException
     {
         final PwmSession pwmSession = pwmRequest.getPwmSession();
-        final String profile = key.getProfileID();
+        final ProfileID profile = key.getProfileID().orElse( null );
 
-        final List<X509Certificate> certs = EmailServerUtil.readCertificates( pwmRequest.getAppConfig(), profile );
+        final List<X509Certificate> certs = EmailServerUtil.readCertificates( pwmRequest.getAppConfig(), profile, pwmRequest.getLabel() );
         if ( !CollectionUtil.isEmpty( certs ) )
         {
             final UserIdentity userIdentity = pwmSession.isAuthenticated() ? pwmSession.getUserInfo().getUserIdentity() : null;

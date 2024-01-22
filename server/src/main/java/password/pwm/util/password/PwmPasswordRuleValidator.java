@@ -38,12 +38,12 @@ import password.pwm.error.PwmDataValidationException;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.ldap.UserInfo;
-import password.pwm.ldap.UserInfoBean;
+import password.pwm.user.UserInfo;
+import password.pwm.user.UserInfoBean;
 import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.util.PasswordData;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.EnumUtil;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
@@ -110,6 +110,7 @@ public class PwmPasswordRuleValidator
     }
 
     public boolean testPassword(
+            final SessionLabel sessionLabel,
             final PasswordData password,
             final PasswordData oldPassword,
             final UserInfo userInfo,
@@ -124,21 +125,21 @@ public class PwmPasswordRuleValidator
             throw new PwmDataValidationException( errorResults.get( 0 ) );
         }
 
-        if ( user != null && !JavaHelper.enumArrayContainsValue( flags, Flag.BypassLdapRuleCheck ) )
+        if ( user != null && !EnumUtil.enumArrayContainsValue( flags, Flag.BypassLdapRuleCheck ) )
         {
             try
             {
-                LOGGER.trace( () -> "calling chai directory password validation checker" );
+                LOGGER.trace( sessionLabel, () -> "calling chai directory password validation checker" );
                 user.testPasswordPolicy( password.getStringValue() );
             }
             catch ( final UnsupportedOperationException e )
             {
-                LOGGER.trace( () -> "Unsupported operation was thrown while validating password: " + e );
+                LOGGER.trace( sessionLabel, () -> "Unsupported operation was thrown while validating password: " + e );
             }
             catch ( final ChaiUnavailableException e )
             {
                 StatisticsClient.incrementStat( pwmDomain.getPwmApplication(), Statistic.LDAP_UNAVAILABLE_COUNT );
-                LOGGER.warn( () -> "ChaiUnavailableException was thrown while validating password: " + e );
+                LOGGER.warn( sessionLabel, () -> "ChaiUnavailableException was thrown while validating password: " + e );
                 throw e;
             }
             catch ( final ChaiPasswordPolicyException e )
@@ -146,7 +147,7 @@ public class PwmPasswordRuleValidator
                 final ChaiError passwordError = e.getErrorCode();
                 final PwmError pwmError = PwmError.forChaiError( passwordError ).orElse( PwmError.PASSWORD_UNKNOWN_VALIDATION );
                 final ErrorInformation info = new ErrorInformation( pwmError );
-                LOGGER.trace( () -> "ChaiPasswordPolicyException was thrown while validating password: " + e );
+                LOGGER.trace( sessionLabel, () -> "ChaiPasswordPolicyException was thrown while validating password: " + e );
                 errorResults.add( info );
             }
         }
@@ -252,8 +253,9 @@ public class PwmPasswordRuleValidator
             final MacroRequest macroRequest = MacroRequest.forUser(
                     pwmDomain.getPwmApplication(),
                     PwmConstants.DEFAULT_LOCALE,
-                    SessionLabel.SYSTEM_LABEL,
+                    sessionLabel,
                     userInfo.getUserIdentity() );
+
             final PublicUserInfoBean publicUserInfoBean = UserInfoBean.toPublicUserInfoBean( userInfo, pwmDomain.getConfig(), locale, macroRequest );
             sendData.put( "userInfo", publicUserInfoBean );
         }
@@ -261,8 +263,7 @@ public class PwmPasswordRuleValidator
         final String jsonRequestBody = JsonFactory.get().serializeMap( sendData );
         try
         {
-            final String responseBody = RestClientHelper.makeOutboundRestWSCall( pwmDomain, locale, restURL,
-                    jsonRequestBody );
+            final String responseBody = RestClientHelper.makeOutboundRestWSCall( pwmDomain, sessionLabel, locale, restURL, jsonRequestBody );
             final Map<String, Object> responseMap = JsonFactory.get().deserializeMap( responseBody,
                     String.class,
                     Object.class );

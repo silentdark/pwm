@@ -48,11 +48,11 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -198,7 +198,7 @@ public class X509Utils
         final PwmHttpClientConfiguration pwmHttpClientConfiguration = PwmHttpClientConfiguration.builder()
                 .trustManagerType( PwmHttpClientConfiguration.TrustManagerType.promiscuousCertReader )
                 .build();
-        final PwmHttpClient pwmHttpClient = pwmDomain.getHttpClientService().getPwmHttpClient( pwmHttpClientConfiguration );
+        final PwmHttpClient pwmHttpClient = pwmDomain.getHttpClientService().getPwmHttpClient( pwmHttpClientConfiguration, sessionLabel );
         final PwmHttpClientRequest request = PwmHttpClientRequest.builder()
                 .method( HttpMethod.GET )
                 .url( uri.toString() )
@@ -209,7 +209,7 @@ public class X509Utils
         ErrorInformation requestError = null;
         try
         {
-            pwmHttpClient.makeRequest( request, sessionLabel );
+            pwmHttpClient.makeRequest( request );
         }
         catch ( final PwmException e )
         {
@@ -356,7 +356,7 @@ public class X509Utils
 
     public static void outputKeystore(
             final KeyStore keyStore,
-            final File keyStoreFile,
+            final Path keyStoreFile,
             final String password
     )
             throws CertificateException, KeyStoreException, IOException, NoSuchAlgorithmException
@@ -364,12 +364,9 @@ public class X509Utils
         final ByteArrayOutputStream outputContents = new ByteArrayOutputStream();
         keyStore.store( outputContents, password.toCharArray() );
 
-        if ( keyStoreFile.exists() )
-        {
-            Files.delete( keyStoreFile.toPath() );
-        }
+        Files.deleteIfExists( keyStoreFile );
 
-        try ( OutputStream fileOutputStream = Files.newOutputStream( keyStoreFile.toPath() ) )
+        try ( OutputStream fileOutputStream = Files.newOutputStream( keyStoreFile ) )
         {
             fileOutputStream.write( outputContents.toByteArray() );
         }

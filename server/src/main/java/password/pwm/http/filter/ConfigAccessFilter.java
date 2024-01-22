@@ -99,7 +99,7 @@ public class ConfigAccessFilter extends AbstractPwmFilter
     )
             throws IOException, PwmUnrecoverableException, ServletException
     {
-        final ConfigurationFileManager runningConfigReader = ContextManager.getContextManager( pwmRequest.getHttpServletRequest().getSession() ).getConfigReader();
+        final ConfigurationFileManager runningConfigReader = ContextManager.getContextManager( pwmRequest ).getConfigReader();
         final StoredConfiguration storedConfig = runningConfigReader.getStoredConfiguration();
 
         checkPreconditions( pwmRequest, storedConfig );
@@ -143,7 +143,7 @@ public class ConfigAccessFilter extends AbstractPwmFilter
                 throw new PwmUnrecoverableException( PwmError.ERROR_AUTHENTICATION_REQUIRED );
             }
 
-            if ( !pwmRequest.getPwmSession().getSessionManager().checkPermission( pwmRequest.getPwmDomain(), Permission.PWMADMIN ) )
+            if ( !pwmRequest.checkPermission( Permission.PWMADMIN ) )
             {
                 throw new PwmUnrecoverableException( PwmError.ERROR_UNAUTHORIZED );
             }

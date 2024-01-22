@@ -22,6 +22,7 @@ package password.pwm.svc.cache;
 
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
+import password.pwm.PwmConstants;
 import password.pwm.bean.DomainID;
 import password.pwm.error.PwmException;
 import password.pwm.error.PwmUnrecoverableException;
@@ -29,12 +30,11 @@ import password.pwm.health.HealthRecord;
 import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
 import password.pwm.util.java.ConditionalTaskExecutor;
-import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StatisticCounterBundle;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
-import java.io.Serializable;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -103,21 +103,23 @@ public class CacheService extends AbstractPwmService implements PwmService
         final Map<String, String> debugInfo = new TreeMap<>( );
         debugInfo.put( "itemCount", String.valueOf( memoryCacheStore.itemCount() ) );
         debugInfo.put( "byteCount", String.valueOf( memoryCacheStore.byteCount() ) );
-        debugInfo.putAll( JsonFactory.get().deserializeStringMap( JsonFactory.get().serializeMap( memoryCacheStore.getCacheStoreInfo().debugStats() ) ) );
-        debugInfo.putAll( JsonFactory.get().deserializeStringMap( JsonFactory.get().serializeMap( memoryCacheStore.storedClassHistogram( "histogram." ) ) ) );
+        debugInfo.putAll( JsonFactory.get().deserializeStringMap(
+                JsonFactory.get().serializeMap( memoryCacheStore.getCacheStoreInfo().debugStats( PwmConstants.DEFAULT_LOCALE ) ) ) );
+        debugInfo.putAll( JsonFactory.get().deserializeStringMap(
+                JsonFactory.get().serializeMap( memoryCacheStore.storedClassHistogram( "histogram." ) ) ) );
         return ServiceInfoBean.builder().debugProperties( debugInfo ).build();
     }
 
-    public Map<String, Serializable> debugInfo( )
+    public Map<String, Object> debugInfo( )
     {
-        final Map<String, Serializable> debugInfo = new LinkedHashMap<>( );
-        debugInfo.put( "memory-statistics", JsonFactory.get().serializeMap( memoryCacheStore.getCacheStoreInfo().debugStats() ) );
-        debugInfo.put( "memory-items", new ArrayList<Serializable>( memoryCacheStore.getCacheDebugItems() ) );
+        final Map<String, Object> debugInfo = new LinkedHashMap<>( );
+        debugInfo.put( "memory-statistics", JsonFactory.get().serializeMap( memoryCacheStore.getCacheStoreInfo().debugStats( PwmConstants.DEFAULT_LOCALE ) ) );
+        debugInfo.put( "memory-items", new ArrayList<Object>( memoryCacheStore.getCacheDebugItems() ) );
         debugInfo.put( "memory-histogram", new HashMap<>( memoryCacheStore.storedClassHistogram( "" ) ) );
         return Collections.unmodifiableMap( debugInfo );
     }
 
-    public void put( final CacheKey cacheKey, final CachePolicy cachePolicy, final Serializable payload )
+    public void put( final CacheKey cacheKey, final CachePolicy cachePolicy, final Object payload )
             throws PwmUnrecoverableException
     {
         if ( status() != STATUS.OPEN )
@@ -135,7 +137,7 @@ public class CacheService extends AbstractPwmService implements PwmService
         traceDebugOutputter.conditionallyExecuteTask();
     }
 
-    public <T extends Serializable> T get( final CacheKey cacheKey, final Class<T> classOfT  )
+    public <T extends Object> T get( final CacheKey cacheKey, final Class<T> classOfT  )
     {
         Objects.requireNonNull( cacheKey );
         Objects.requireNonNull( classOfT );
@@ -156,7 +158,7 @@ public class CacheService extends AbstractPwmService implements PwmService
         return payload;
     }
 
-    public <T extends Serializable> T get( final CacheKey cacheKey, final CachePolicy cachePolicy, final Class<T> classOfT, final CacheLoader<T> cacheLoader )
+    public <T extends Object> T get( final CacheKey cacheKey, final CachePolicy cachePolicy, final Class<T> classOfT, final CacheLoader<T> cacheLoader )
             throws PwmUnrecoverableException
     {
         Objects.requireNonNull( cacheKey );
@@ -177,15 +179,18 @@ public class CacheService extends AbstractPwmService implements PwmService
 
     private void outputTraceInfo( )
     {
-        final StringBuilder traceOutput = new StringBuilder();
-        if ( memoryCacheStore != null )
+        LOGGER.trace( getSessionLabel(), () ->
         {
-            final StatisticCounterBundle<CacheStore.DebugKey> info = memoryCacheStore.getCacheStoreInfo();
-            traceOutput.append( "memCache=" );
-            traceOutput.append( JsonFactory.get().serializeMap( info.debugStats() ) );
-            traceOutput.append( ", histogram=" );
-            traceOutput.append( JsonFactory.get().serializeMap( memoryCacheStore.storedClassHistogram( "" ) ) );
-        }
-        LOGGER.trace( () -> traceOutput );
+            final StringBuilder traceOutput = new StringBuilder();
+            if ( memoryCacheStore != null )
+            {
+                final StatisticCounterBundle<CacheStore.DebugKey> info = memoryCacheStore.getCacheStoreInfo();
+                traceOutput.append( "memCache=" );
+                traceOutput.append( JsonFactory.get().serializeMap( info.debugStats( PwmConstants.DEFAULT_LOCALE ) ) );
+                traceOutput.append( ", histogram=" );
+                traceOutput.append( JsonFactory.get().serializeMap( memoryCacheStore.storedClassHistogram( "" ) ) );
+            }
+            return traceOutput.toString();
+        } );
     }
 }

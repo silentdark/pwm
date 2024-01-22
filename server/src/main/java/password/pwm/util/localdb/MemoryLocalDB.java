@@ -22,8 +22,7 @@ package password.pwm.util.localdb;
 
 import password.pwm.util.java.CollectionUtil;
 
-import java.io.File;
-import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
@@ -93,7 +92,7 @@ public class MemoryLocalDB implements LocalDBProvider
     @Override
     @LocalDB.WriteOperation
     public void init(
-            final File dbDirectory,
+            final Path dbDirectory,
             final Map<String, String> initParameters,
             final Map<LocalDBProvider.Parameter, String> parameters
     )
@@ -116,7 +115,7 @@ public class MemoryLocalDB implements LocalDBProvider
     }
 
     @Override
-    public LocalDB.LocalDBIterator<Map.Entry<String, String>> iterator( final LocalDB.DB db ) throws LocalDBException
+    public LocalDB.LocalDBIterator iterator( final LocalDB.DB db ) throws LocalDBException
     {
         return new MapIterator( db );
     }
@@ -208,13 +207,13 @@ public class MemoryLocalDB implements LocalDBProvider
     }
 
     @Override
-    public Map<String, Serializable> debugInfo( )
+    public Map<String, Object> debugInfo( )
     {
         return Collections.emptyMap();
     }
 
 
-    private class MapIterator implements LocalDB.LocalDBIterator<Map.Entry<String, String>>
+    private class MapIterator implements LocalDB.LocalDBIterator
     {
         private final Iterator<Map.Entry<String, String>> iterator;
 
@@ -248,7 +247,7 @@ public class MemoryLocalDB implements LocalDBProvider
     }
 
     @Override
-    public File getFileLocation( )
+    public Path getFileLocation( )
     {
         return null;
     }

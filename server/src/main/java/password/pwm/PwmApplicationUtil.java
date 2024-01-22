@@ -21,7 +21,7 @@
 package password.pwm;
 
 import password.pwm.bean.DomainID;
-import password.pwm.config.PwmSetting;
+import password.pwm.bean.SessionLabel;
 import password.pwm.config.stored.StoredConfigKey;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.stored.StoredConfigurationUtil;
@@ -31,6 +31,7 @@ import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.PasswordData;
 import password.pwm.util.cli.commands.ExportHttpsTomcatConfigCommand;
 import password.pwm.util.java.CollectionUtil;
+import password.pwm.util.java.CollectorUtil;
 import password.pwm.util.java.FileSystemUtility;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
@@ -38,16 +39,18 @@ import password.pwm.util.localdb.LocalDB;
 import password.pwm.util.localdb.LocalDBFactory;
 import password.pwm.util.logging.PwmLogLevel;
 import password.pwm.util.logging.PwmLogManager;
+import password.pwm.util.logging.PwmLogSettings;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.HttpsServerCertificateManager;
 import password.pwm.util.secure.PwmRandom;
 import password.pwm.util.secure.X509Utils;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.KeyStore;
 import java.time.Instant;
 import java.util.List;
@@ -66,7 +69,7 @@ class PwmApplicationUtil
     static LocalDB initializeLocalDB( final PwmApplication pwmApplication, final PwmEnvironment pwmEnvironment )
             throws PwmUnrecoverableException
     {
-        final File databaseDirectory;
+        final Path databaseDirectory;
 
         try
         {
@@ -100,49 +103,30 @@ class PwmApplicationUtil
     {
         final PwmEnvironment pwmEnvironment = pwmApplication.getPwmEnvironment();
 
-        if ( !pwmEnvironment.isInternalRuntimeInstance() && !pwmEnvironment.getFlags().contains( PwmEnvironment.ApplicationFlag.CommandLineInstance ) )
+        if ( pwmEnvironment.isInternalRuntimeInstance() || pwmEnvironment.readPropertyAsBoolean( EnvironmentProperty.CommandLineInstance ) )
         {
-            final String log4jFileName = pwmEnvironment.getConfig().readSettingAsString( PwmSetting.EVENTS_JAVA_LOG4JCONFIG_FILE );
-            final File log4jFile = FileSystemUtility.figureFilepath( log4jFileName, pwmEnvironment.getApplicationPath() );
-            final String consoleLevel;
-            final String fileLevel;
-
-            switch ( pwmApplication.getApplicationMode() )
-            {
-                case ERROR:
-                case NEW:
-                    consoleLevel = PwmLogLevel.TRACE.toString();
-                    fileLevel = PwmLogLevel.TRACE.toString();
-                    break;
-
-                default:
-                    consoleLevel = pwmEnvironment.getConfig().readSettingAsString( PwmSetting.EVENTS_JAVA_STDOUT_LEVEL );
-                    fileLevel = pwmEnvironment.getConfig().readSettingAsString( PwmSetting.EVENTS_FILE_LEVEL );
-                    break;
-            }
-
-            PwmLogManager.initializeLogger(
-                    pwmApplication,
-                    pwmApplication.getConfig(),
-                    log4jFile,
-                    consoleLevel,
-                    pwmEnvironment.getApplicationPath(),
-                    fileLevel );
-
-            switch ( pwmApplication.getApplicationMode() )
-            {
-                case RUNNING:
-                    break;
-
-                case ERROR:
-                    LOGGER.fatal( pwmApplication.getSessionLabel(), () -> "starting up in ERROR mode! Check log or health check information for cause" );
-                    break;
-
-                default:
-                    LOGGER.trace( pwmApplication.getSessionLabel(), () -> "setting log level to TRACE because application mode is " + pwmApplication.getApplicationMode() );
-                    break;
-            }
+            return;
         }
+
+        final PwmLogSettings pwmLogSettings;
+        switch ( pwmApplication.getApplicationMode() )
+        {
+            case ERROR:
+            case NEW:
+                pwmLogSettings = PwmLogSettings.defaultSettings();
+                break;
+
+            default:
+                pwmLogSettings = PwmLogSettings.fromAppConfig( pwmApplication.getConfig() );
+                break;
+        }
+
+        PwmLogManager.initializeLogging(
+                pwmApplication,
+                pwmApplication.getConfig(),
+                pwmEnvironment.getApplicationPath(),
+                pwmLogSettings );
+
     }
 
     static String fetchInstanceID(
@@ -151,11 +135,10 @@ class PwmApplicationUtil
     )
     {
         {
-            final String newInstanceID = pwmApplication.getPwmEnvironment().getParameters().get( PwmEnvironment.ApplicationParameter.InstanceID );
-
-            if ( !StringUtil.isTrimEmpty( newInstanceID ) )
+            final Optional<String> newInstanceID = pwmApplication.getPwmEnvironment().readProperty( EnvironmentProperty.InstanceID );
+            if ( newInstanceID.isPresent() )
             {
-                return newInstanceID;
+                return newInstanceID.get();
             }
         }
 
@@ -193,20 +176,21 @@ class PwmApplicationUtil
     {
         try
         {
-
-            final Map<PwmEnvironment.ApplicationParameter, String> applicationParams = pwmApplication.getPwmEnvironment().getParameters();
-            final String keystoreFileString = applicationParams.get( PwmEnvironment.ApplicationParameter.AutoExportHttpsKeyStoreFile );
-            if ( StringUtil.isEmpty( keystoreFileString ) )
+            final PwmEnvironment pwmEnvironment = pwmApplication.getPwmEnvironment();
+            final Optional<String> keystoreFileString = pwmEnvironment.readProperty( EnvironmentProperty.AutoExportHttpsKeyStoreFile );
+            if ( keystoreFileString.isEmpty() )
             {
                 return;
             }
 
-            final File keyStoreFile = new File( keystoreFileString );
-            final String password = applicationParams.get( PwmEnvironment.ApplicationParameter.AutoExportHttpsKeyStorePassword );
-            final String alias = applicationParams.get( PwmEnvironment.ApplicationParameter.AutoExportHttpsKeyStoreAlias );
+            final Path keyStoreFile = Path.of( keystoreFileString.get() );
+            final String password = pwmEnvironment.readProperty( EnvironmentProperty.AutoExportHttpsKeyStorePassword )
+                    .orElseThrow( () -> new IllegalArgumentException( "keystore export property is configured, but keystore password is not specified " ) );
+            final String alias = pwmEnvironment.readProperty( EnvironmentProperty.AutoExportHttpsKeyStoreAlias )
+                    .orElseThrow( () -> new IllegalArgumentException( "keystore export property is configured, but keystore alias is not specified " ) );
             final KeyStore keyStore = HttpsServerCertificateManager.keyStoreForApplication( pwmApplication, new PasswordData( password ), alias );
             X509Utils.outputKeystore( keyStore, keyStoreFile, password );
-            LOGGER.info( pwmApplication.getSessionLabel(), () -> "exported application https key to keystore file " + keyStoreFile.getAbsolutePath() );
+            LOGGER.info( pwmApplication.getSessionLabel(), () -> "exported application https key to keystore file " + keyStoreFile );
         }
         catch ( final Exception e )
         {
@@ -216,65 +200,65 @@ class PwmApplicationUtil
 
     static void outputTomcatConf( final PwmApplication pwmApplication )
     {
+        final PwmEnvironment pwmEnvironment = pwmApplication.getPwmEnvironment();
+        final Optional<String> tomcatOutputFileStr = pwmEnvironment.readProperty( EnvironmentProperty.AutoWriteTomcatConfOutputFile );
+        if ( tomcatOutputFileStr.isEmpty() )
+        {
+            return;
+        }
+
         try
         {
-            final Map<PwmEnvironment.ApplicationParameter, String> applicationParams = pwmApplication.getPwmEnvironment().getParameters();
-            final String tomcatOutputFileStr = applicationParams.get( PwmEnvironment.ApplicationParameter.AutoWriteTomcatConfOutputFile );
-            if ( tomcatOutputFileStr != null && !tomcatOutputFileStr.isEmpty() )
+            LOGGER.trace( pwmApplication.getSessionLabel(),
+                    () -> "attempting to output tomcat configuration file as configured by environment parameters to " + tomcatOutputFileStr );
+            final Path tomcatOutputFile = Path.of( tomcatOutputFileStr.get() );
+            final Path tomcatSourceFile;
             {
-                LOGGER.trace( pwmApplication.getSessionLabel(),
-                        () -> "attempting to output tomcat configuration file as configured by environment parameters to " + tomcatOutputFileStr );
-                final File tomcatOutputFile = new File( tomcatOutputFileStr );
-                final File tomcatSourceFile;
+                final Optional<String> tomcatSourceFileStr = pwmEnvironment.readProperty( EnvironmentProperty.AutoWriteTomcatConfSourceFile );
+                if ( tomcatSourceFileStr.isPresent() )
                 {
-                    final String tomcatSourceFileStr = applicationParams.get( PwmEnvironment.ApplicationParameter.AutoWriteTomcatConfSourceFile );
-                    if ( tomcatSourceFileStr != null && !tomcatSourceFileStr.isEmpty() )
-                    {
-                        tomcatSourceFile = new File( tomcatSourceFileStr );
-                        if ( !tomcatSourceFile.exists() )
-                        {
-                            LOGGER.error( pwmApplication.getSessionLabel(),
-                                    () -> "can not output tomcat configuration file, source file does not exist: " + tomcatSourceFile.getAbsolutePath() );
-                            return;
-                        }
-                    }
-                    else
+                    tomcatSourceFile = Path.of( tomcatSourceFileStr.get() );
+                    if ( !Files.exists( tomcatSourceFile ) )
                     {
                         LOGGER.error( pwmApplication.getSessionLabel(),
-                                () -> "can not output tomcat configuration file, source file parameter '"
-                                        + PwmEnvironment.ApplicationParameter.AutoWriteTomcatConfSourceFile + "' is not specified." );
+                                () -> "can not output tomcat configuration file, source file does not exist: " + tomcatSourceFile );
                         return;
                     }
                 }
-
-                try ( ByteArrayOutputStream outputContents = new ByteArrayOutputStream() )
+                else
                 {
-                    try ( InputStream fileInputStream = Files.newInputStream( tomcatOutputFile.toPath() ) )
-                    {
-                        ExportHttpsTomcatConfigCommand.TomcatConfigWriter.writeOutputFile(
-                                pwmApplication.getConfig(),
-                                fileInputStream,
-                                outputContents
-                        );
-                    }
+                    LOGGER.error( pwmApplication.getSessionLabel(),
+                            () -> "can not output tomcat configuration file, source file parameter '"
+                                    + EnvironmentProperty.AutoWriteTomcatConfSourceFile + "' is not specified." );
+                    return;
+                }
+            }
 
-                    if ( tomcatOutputFile.exists() )
-                    {
-                        LOGGER.trace( pwmApplication.getSessionLabel(), () -> "deleting existing tomcat configuration file " + tomcatOutputFile.getAbsolutePath() );
-                        if ( tomcatOutputFile.delete() )
-                        {
-                            LOGGER.trace( pwmApplication.getSessionLabel(), () -> "deleted existing tomcat configuration file: " + tomcatOutputFile.getAbsolutePath() );
-                        }
-                    }
-
-                    try ( OutputStream fileOutputStream = Files.newOutputStream( tomcatOutputFile.toPath() ) )
-                    {
-                        fileOutputStream.write( outputContents.toByteArray() );
-                    }
+            try ( ByteArrayOutputStream outputContents = new ByteArrayOutputStream() )
+            {
+                try ( InputStream fileInputStream = Files.newInputStream( tomcatOutputFile ) )
+                {
+                    ExportHttpsTomcatConfigCommand.TomcatConfigWriter.writeOutputFile(
+                            pwmApplication.getConfig(),
+                            fileInputStream,
+                            outputContents
+                    );
                 }
 
-                LOGGER.info( pwmApplication.getSessionLabel(), () -> "successfully wrote tomcat configuration to file " + tomcatOutputFile.getAbsolutePath() );
+                if ( Files.exists( tomcatOutputFile ) )
+                {
+                    LOGGER.trace( pwmApplication.getSessionLabel(), () -> "deleting existing tomcat configuration file " + tomcatOutputFile );
+                    Files.delete( tomcatOutputFile );
+                    LOGGER.trace( pwmApplication.getSessionLabel(), () -> "deleted existing tomcat configuration file: " + tomcatOutputFile );
+                }
+
+                try ( OutputStream fileOutputStream = Files.newOutputStream( tomcatOutputFile ) )
+                {
+                    fileOutputStream.write( outputContents.toByteArray() );
+                }
             }
+
+            LOGGER.info( pwmApplication.getSessionLabel(), () -> "successfully wrote tomcat configuration to file " + tomcatOutputFile );
         }
         catch ( final Exception e )
         {
@@ -285,6 +269,11 @@ class PwmApplicationUtil
 
     static void outputConfigurationToLog( final PwmApplication pwmApplication, final DomainID domainID )
     {
+        if ( !checkIfOutputDumpingEnabled( pwmApplication ) )
+        {
+            return;
+        }
+
         final Instant startTime = Instant.now();
 
         final Function<Map.Entry<String, String>, String> valueFormatter = entry ->
@@ -305,51 +294,117 @@ class PwmApplicationUtil
         LOGGER.trace( pwmApplication.getSessionLabel(), () -> "--begin current configuration output for domainID '" + domainID + "'--" );
         debugStrings.entrySet().stream()
                 .map( valueFormatter )
-                .map( s -> ( Supplier<CharSequence> ) () -> s )
+                .map( s -> ( Supplier<String> ) () -> s )
                 .forEach( s -> LOGGER.trace( pwmApplication.getSessionLabel(), s ) );
 
         final long itemCount = debugStrings.size();
         LOGGER.trace( pwmApplication.getSessionLabel(), () -> "--end current configuration output of " + itemCount + " items --",
-                () -> TimeDuration.fromCurrent( startTime ) );
+                TimeDuration.fromCurrent( startTime ) );
     }
 
     static void outputNonDefaultPropertiesToLog( final PwmApplication pwmApplication )
     {
-        final Instant startTime = Instant.now();
+        final Map<String, String> data = pwmApplication.getConfig().readAllNonDefaultAppProperties().entrySet().stream()
+                .collect( CollectorUtil.toUnmodifiableLinkedMap(
+                        entry -> "AppProperty: " + entry.getKey().getKey(),
+                        Map.Entry::getValue ) );
 
-        final Map<AppProperty, String> nonDefaultProperties = pwmApplication.getConfig().readAllNonDefaultAppProperties();
-        if ( !CollectionUtil.isEmpty( nonDefaultProperties ) )
-        {
-            LOGGER.trace( pwmApplication.getSessionLabel(), () -> "--begin non-default app properties output--" );
-            nonDefaultProperties.entrySet().stream()
-                    .map( entry -> "AppProperty: " + entry.getKey().getKey() + " -> " + entry.getValue() )
-                    .map( s -> ( Supplier<CharSequence> ) () -> s )
-                    .forEach( s -> LOGGER.trace( pwmApplication.getSessionLabel(), s ) );
-            LOGGER.trace( pwmApplication.getSessionLabel(), () -> "--end non-default app properties output--", () -> TimeDuration.fromCurrent( startTime ) );
-        }
-        else
-        {
-            LOGGER.trace( pwmApplication.getSessionLabel(), () -> "no non-default app properties in configuration" );
-        }
+        outputMapToLog( pwmApplication, data, "non-default app properties" );
     }
 
     static void outputApplicationInfoToLog( final PwmApplication pwmApplication )
     {
-        final Instant startTime = Instant.now();
+        final Map<String, String> data = PwmAboutProperty.makeInfoBean( pwmApplication ).entrySet().stream()
+                .collect( CollectorUtil.toUnmodifiableLinkedMap(
+                        entry -> "AboutProperty: " + entry.getKey().getLabel(),
+                        Map.Entry::getValue ) );
 
-        final Map<PwmAboutProperty, String> aboutProperties = PwmAboutProperty.makeInfoBean( pwmApplication );
-        if ( !CollectionUtil.isEmpty( aboutProperties ) )
+        outputMapToLog( pwmApplication, data, "about property info" );
+    }
+
+    private static void outputMapToLog(
+            final PwmApplication pwmApplication,
+            final Map<String, String> input,
+            final String label
+    )
+    {
+        LOGGER.trace( pwmApplication.getSessionLabel(), () -> "--begin " + label + "--" );
+
+        if ( !CollectionUtil.isEmpty( input ) )
         {
-            LOGGER.trace( pwmApplication.getSessionLabel(), () -> "--begin application info--" );
-            aboutProperties.entrySet().stream()
-                    .map( entry -> "AppProperty: " + entry.getKey().getLabel() + " -> " + entry.getValue() )
-                    .map( s -> ( Supplier<CharSequence> ) () -> s )
+            final String separator = " -> ";
+            input.entrySet().stream()
+                    .map( entry -> ( Supplier<String> ) () -> entry.getKey() + separator + entry.getValue() )
                     .forEach( s -> LOGGER.trace( pwmApplication.getSessionLabel(), s ) );
-            LOGGER.trace( pwmApplication.getSessionLabel(), () -> "--end application info--", () -> TimeDuration.fromCurrent( startTime ) );
         }
         else
         {
-            LOGGER.trace( pwmApplication.getSessionLabel(), () -> "no non-default app properties in configuration" );
+            LOGGER.trace( pwmApplication.getSessionLabel(), () -> "no " + label + " values" );
         }
+
+        LOGGER.trace( pwmApplication.getSessionLabel(), () -> "--end " + label + "--" );
+    }
+
+    private static boolean checkIfOutputDumpingEnabled( final PwmApplication pwmApplication )
+    {
+        return LOGGER.isInterestingLevel( PwmLogLevel.TRACE )
+                && !pwmApplication.getPwmEnvironment().isInternalRuntimeInstance()
+                && Boolean.parseBoolean( pwmApplication.getConfig().readAppProperty( AppProperty.LOGGING_OUTPUT_CONFIGURATION ) );
+    }
+
+    static String makeRuntimeNonce()
+    {
+        return PwmRandom.getInstance().randomUUID().toString();
+    }
+
+    static Path initTempDirectory( final SessionLabel sessionLabel, final PwmEnvironment pwmEnvironment )
+            throws PwmUnrecoverableException
+    {
+        if ( pwmEnvironment.getApplicationPath() == null )
+        {
+            final ErrorInformation errorInformation = new ErrorInformation(
+                    PwmError.ERROR_STARTUP_ERROR,
+                    "unable to establish temp work directory: application path unavailable"
+            );
+            throw new PwmUnrecoverableException( errorInformation );
+        }
+
+        final Path tempDirectory = pwmEnvironment.getApplicationPath().resolve( "temp" );
+
+        if ( !Files.exists( tempDirectory ) )
+        {
+            LOGGER.trace( sessionLabel, () -> "preparing to create temporary directory " + tempDirectory );
+            try
+            {
+                Files.createDirectories( tempDirectory );
+                LOGGER.debug( sessionLabel, () -> "created " + tempDirectory );
+            }
+            catch ( final IOException e )
+            {
+                LOGGER.debug( sessionLabel, () -> "unable to create temporary directory " + tempDirectory );
+                final ErrorInformation errorInformation = new ErrorInformation(
+                        PwmError.ERROR_STARTUP_ERROR,
+                        "unable to establish create temp work directory " + tempDirectory );
+                throw new PwmUnrecoverableException( errorInformation );
+            }
+        }
+
+        // clear temp dir
+        if ( !pwmEnvironment.isInternalRuntimeInstance() )
+        {
+            try
+            {
+                LOGGER.debug( sessionLabel, () -> "deleting directory (and sub-directory) contents in " + tempDirectory );
+                FileSystemUtility.deleteDirectoryContentsRecursively( tempDirectory );
+            }
+            catch ( final Exception e )
+            {
+                throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_STARTUP_ERROR,
+                        "unable to clear temp file directory '" + tempDirectory + "', error: " + e.getMessage()
+                ) );
+            }
+        }
+
+        return tempDirectory;
     }
 }

@@ -122,7 +122,7 @@ public class ApplicationModeFilter extends AbstractPwmFilter
 
         if ( mode == PwmApplicationMode.ERROR )
         {
-            ErrorInformation rootError = ContextManager.getContextManager( pwmRequest.getHttpServletRequest().getSession() ).getStartupErrorInformation();
+            ErrorInformation rootError = ContextManager.getContextManager( pwmRequest ).getStartupErrorInformation();
             if ( rootError == null )
             {
                 rootError = new ErrorInformation( PwmError.ERROR_APP_UNAVAILABLE, "Application startup failed." );
@@ -141,6 +141,8 @@ public class ApplicationModeFilter extends AbstractPwmFilter
         if ( !PwmConstants.TRIAL_MODE )
         {
             final Set<PwmServletDefinition> permittedServlets = Set.of(
+                    PwmServletDefinition.ConfigEditor,
+                    PwmServletDefinition.ConfigManager_Login,
                     PwmServletDefinition.ConfigManager,
                     PwmServletDefinition.ConfigGuide,
                     PwmServletDefinition.PublicCommand,
@@ -148,7 +150,7 @@ public class ApplicationModeFilter extends AbstractPwmFilter
                     PwmServletDefinition.Login,
                     PwmServletDefinition.Logout,
                     PwmServletDefinition.OAuthConsumer,
-                    PwmServletDefinition.Admin );
+                    PwmServletDefinition.SystemAdmin );
 
             if ( mode != PwmApplicationMode.RUNNING )
             {

@@ -20,14 +20,15 @@
 
 package password.pwm.receiver;
 
-import javax.servlet.ServletContext;
-import javax.servlet.ServletContextEvent;
-import javax.servlet.ServletContextListener;
-import javax.servlet.annotation.WebListener;
+import jakarta.servlet.ServletContext;
+import jakarta.servlet.ServletContextEvent;
+import jakarta.servlet.ServletContextListener;
+import jakarta.servlet.annotation.WebListener;
 
 @WebListener
 public class ContextManager implements ServletContextListener
 {
+    private static final Logger LOGGER = Logger.createLogger( ContextManager.class );
     private static final String CONTEXT_ATTR = "contextManager";
     private PwmReceiverApp app;
 
@@ -36,6 +37,7 @@ public class ContextManager implements ServletContextListener
     {
         app = new PwmReceiverApp();
         sce.getServletContext().setAttribute( CONTEXT_ATTR, this );
+        LOGGER.info( () -> "open for bidness" );
     }
 
     @Override
@@ -43,6 +45,7 @@ public class ContextManager implements ServletContextListener
     {
         app.close();
         app = null;
+        LOGGER.info( () -> "cya!" );
     }
 
     public PwmReceiverApp getApp( )

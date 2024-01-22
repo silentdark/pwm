@@ -54,6 +54,8 @@ import java.util.function.Supplier;
 
 public abstract class AbstractPwmServlet extends HttpServlet implements PwmServlet
 {
+
+
     private static final PwmLogger LOGGER = PwmLogger.forClass( AbstractPwmServlet.class );
 
     @Override
@@ -238,13 +240,13 @@ public abstract class AbstractPwmServlet extends HttpServlet implements PwmServl
                 }
                 catch ( final Throwable e1 )
                 {
-                    LOGGER.error( () -> "error while marking pre-login url:" + e1.getMessage() );
+                    LOGGER.error( pwmRequest, () -> "error while marking pre-login url:" + e1.getMessage() );
                 }
                 break;
 
             case ERROR_INTERNAL:
             default:
-                final Supplier<CharSequence> msg = () -> "unexpected error: " + e.getErrorInformation().toDebugStr();
+                final Supplier<String> msg = () -> "unexpected error: " + e.getErrorInformation().toDebugStr();
                 final PwmLogLevel level = e.getError().isTrivial() ? PwmLogLevel.TRACE : PwmLogLevel.ERROR;
                 LOGGER.log( level, pwmRequest.getLabel(), msg );
                 StatisticsClient.incrementStat( pwmRequest, Statistic.PWM_UNKNOWN_ERRORS );
@@ -262,6 +264,7 @@ public abstract class AbstractPwmServlet extends HttpServlet implements PwmServl
         {
             final RestResultBean restResultBean = RestResultBean.fromError( e.getErrorInformation(), pwmRequest );
             pwmRequest.outputJsonResult( restResultBean );
+            pwmRequest.getPwmResponse().setStatus( 500 );
         }
         else
         {
@@ -291,7 +294,7 @@ public abstract class AbstractPwmServlet extends HttpServlet implements PwmServl
     public String servletUriRemainder( final PwmRequest pwmRequest, final String command ) throws PwmUnrecoverableException
     {
         final String basePath = pwmRequest.getBasePath();
-        String uri = pwmRequest.getURLwithoutQueryString();
+        String uri = pwmRequest.getBasePath();
         if ( uri.startsWith( basePath ) )
         {
             uri = uri.substring( basePath.length() );

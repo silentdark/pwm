@@ -20,8 +20,8 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.XmlOutputProcessData;
 import password.pwm.util.java.CollectionUtil;
@@ -50,7 +50,7 @@ public class NumericArrayValue extends AbstractValue implements StoredValue
         return new StoredValueFactory()
         {
             @Override
-            public NumericArrayValue fromJson( final String value )
+            public NumericArrayValue fromJson( final PwmSetting pwmSetting, final String value )
             {
                 final long[] longArray = JsonFactory.get().deserialize( value, long[].class );
                 final List<Long> list = Arrays.stream( longArray ).boxed().collect( Collectors.toList() );
@@ -81,7 +81,7 @@ public class NumericArrayValue extends AbstractValue implements StoredValue
         final List<XmlElement> returnList = new ArrayList<>( values.size() );
         for ( final Long value : this.values )
         {
-            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
             valueElement.setText( String.valueOf( value ) );
             returnList.add( valueElement );
         }

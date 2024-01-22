@@ -33,10 +33,9 @@ import password.pwm.health.HealthMessage;
 import password.pwm.health.HealthRecord;
 import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
+import password.pwm.util.Percent;
 import password.pwm.util.PwmScheduler;
 import password.pwm.util.java.ConditionalTaskExecutor;
-import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.Percent;
 import password.pwm.util.java.PwmCallable;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
@@ -125,7 +124,7 @@ abstract class AbstractWordlist extends AbstractPwmService implements Wordlist, 
 
         if ( !pwmApplication.getPwmEnvironment().isInternalRuntimeInstance() )
         {
-            pwmApplication.getPwmScheduler().scheduleFixedRateJob(
+            PwmScheduler.scheduleFixedRateJob(
                     new InspectorJob(), executorService, TimeDuration.SECOND, wordlistConfiguration.getInspectorFrequency() );
         }
 
@@ -301,9 +300,8 @@ abstract class AbstractWordlist extends AbstractPwmService implements Wordlist, 
 
         if ( executorService != null )
         {
-            executorService.shutdown();
+            PwmScheduler.closeAndWaitExecutor( executorService, closeWaitTime, getLogger(), getSessionLabel() );
 
-            JavaHelper.closeAndWaitExecutor( executorService, closeWaitTime );
             if ( backgroundImportRunning.isLocked() )
             {
                 getLogger().warn( getSessionLabel(), () -> "background thread still running after waiting " + closeWaitTime.asCompactString() );
@@ -398,7 +396,7 @@ abstract class AbstractWordlist extends AbstractPwmService implements Wordlist, 
         activity = Wordlist.Activity.Clearing;
         writeWordlistStatus( WordlistStatus.builder().build() );
         getWordlistBucket().clear();
-        getLogger().debug( getSessionLabel(), () -> "cleared stored wordlist", () -> TimeDuration.fromCurrent( startTime ) );
+        getLogger().debug( getSessionLabel(), () -> "cleared stored wordlist", TimeDuration.fromCurrent( startTime ) );
         setActivity( postCleanActivity );
     }
 

@@ -30,12 +30,11 @@ import password.pwm.util.json.JsonProvider;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-class ClusterInfoDebugGenerator implements AppItemGenerator
+final class ClusterInfoDebugGenerator implements AppItemGenerator
 {
     @Override
     public String getFilename()
@@ -44,13 +43,13 @@ class ClusterInfoDebugGenerator implements AppItemGenerator
     }
 
     @Override
-    public void outputItem( final AppDebugItemInput debugItemInput, final OutputStream outputStream )
+    public void outputItem( final AppDebugItemRequest debugItemInput, final OutputStream outputStream )
             throws IOException, PwmUnrecoverableException
     {
-        final PwmApplication pwmApplication = debugItemInput.getPwmApplication();
+        final PwmApplication pwmApplication = debugItemInput.pwmApplication();
         final NodeService nodeService = pwmApplication.getNodeService();
 
-        final Map<String, Serializable> debugOutput = new LinkedHashMap<>();
+        final Map<String, Object> debugOutput = new LinkedHashMap<>();
         debugOutput.put( "status", nodeService.status() );
 
         if ( nodeService.status() == PwmService.STATUS.OPEN )

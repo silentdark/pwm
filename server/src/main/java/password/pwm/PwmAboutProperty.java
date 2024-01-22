@@ -20,12 +20,13 @@
 
 package password.pwm;
 
-import lombok.Value;
 import password.pwm.config.PwmSetting;
 import password.pwm.i18n.Display;
-import password.pwm.ldap.LdapConnectionService;
+import password.pwm.ldap.LdapDomainService;
 import password.pwm.svc.db.DatabaseService;
 import password.pwm.util.i18n.LocaleHelper;
+import password.pwm.util.java.CollectorUtil;
+import password.pwm.util.java.EnumUtil;
 import password.pwm.util.java.FileSystemUtility;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
@@ -36,18 +37,12 @@ import java.lang.management.ManagementFactory;
 import java.nio.charset.Charset;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.Map;
 import java.util.Optional;
-import java.util.TreeMap;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 public enum PwmAboutProperty
 {
-
     app_version( "App Version", pwmApplication -> PwmConstants.SERVLET_VERSION ),
     app_chaiApiVersion( "App Chai Version", pwmApplication -> PwmConstants.CHAI_API_VERSION ),
     app_currentTime( "App Current Time", pwmApplication -> format( Instant.now() ) ),
@@ -56,13 +51,9 @@ public enum PwmAboutProperty
     app_siteUrl( "App Site URL", pwmApplication -> pwmApplication.getConfig().readSettingAsString( PwmSetting.PWM_SITE_URL ) ),
     app_instanceID( "App InstanceID", PwmApplication::getInstanceID ),
     app_trialMode( null, pwmApplication -> Boolean.toString( PwmConstants.TRIAL_MODE ) ),
-    app_mode_appliance( null, pwmApplication -> Boolean.toString( pwmApplication.getPwmEnvironment().getFlags().contains( PwmEnvironment.ApplicationFlag.Appliance ) ) ),
-    app_mode_docker( null, pwmApplication -> Boolean.toString( pwmApplication.getPwmEnvironment().getFlags().contains( PwmEnvironment.ApplicationFlag.Docker ) ) ),
-    app_mode_manageHttps( null, pwmApplication -> Boolean.toString( pwmApplication.getPwmEnvironment().getFlags().contains( PwmEnvironment.ApplicationFlag.ManageHttps ) ) ),
-    app_applicationPath( null, pwmApplication -> pwmApplication.getPwmEnvironment().getApplicationPath().getAbsolutePath() ),
-    app_environmentFlags( null, pwmApplication -> StringUtil.collectionToString( pwmApplication.getPwmEnvironment().getFlags() ) ),
+    app_deployment_type( null, pwmApplication -> pwmApplication.getPwmEnvironment().getDeploymentPlatform().name() ),
+    app_applicationPath( null, pwmApplication -> pwmApplication.getPwmEnvironment().getApplicationPath().toString() ),
     app_wordlistSize( null, pwmApplication -> Long.toString( pwmApplication.getWordlistService().size() ) ),
-    app_seedlistSize( null, pwmApplication -> Long.toString( pwmApplication.getSeedlistManager().size() ) ),
     app_sharedHistorySize( null, pwmApplication -> Long.toString( pwmApplication.getSharedHistoryManager().size() ) ),
     app_sharedHistoryOldestTime( null, pwmApplication -> format( pwmApplication.getSharedHistoryManager().getOldestEntryTime() ) ),
     app_emailQueueSize( null, pwmApplication -> Integer.toString( pwmApplication.getEmailQueue().queueSize() ) ),
@@ -77,10 +68,10 @@ public enum PwmAboutProperty
     app_configurationRestartCounter( null, pwmApplication -> Integer.toString( pwmApplication.getPwmEnvironment().getContextManager().getRestartCount() ) ),
     app_secureBlockAlgorithm( null, pwmApplication -> pwmApplication.getSecureService().getDefaultBlockAlgorithm().getLabel() ),
     app_secureHashAlgorithm( null, pwmApplication -> pwmApplication.getSecureService().getDefaultHashAlgorithm().toString() ),
-    app_ldapProfileCount( null, pwmApplication -> Integer.toString( LdapConnectionService.totalLdapProfileCount( pwmApplication ) ) ),
-    app_ldapConnectionCount( null, pwmApplication -> Long.toString( LdapConnectionService.totalLdapConnectionCount( pwmApplication ) ) ),
+    app_ldapProfileCount( null, pwmApplication -> Integer.toString( LdapDomainService.totalLdapProfileCount( pwmApplication ) ) ),
+    app_ldapConnectionCount( null, pwmApplication -> Long.toString( LdapDomainService.totalLdapConnectionCount( pwmApplication ) ) ),
     app_activeSessionCount( "App Active Session Count", pwmApplication -> Integer.toString( pwmApplication.getSessionTrackService().sessionCount() ) ),
-    app_activeRequestCount( "App Active Request Count", pwmApplication -> Integer.toString( pwmApplication.getActiveServletRequests().get() ) ),
+    app_activeRequestCount( "App Active Request Count", pwmApplication -> Integer.toString( pwmApplication.getTotalActiveServletRequests() ) ),
     app_definedDomainCount( "App Defined Domain Count", pwmApplication -> Integer.toString( pwmApplication.domains().size() ) ),
 
     build_Time( "Build Time", pwmApplication -> PwmConstants.BUILD_TIME ),
@@ -111,13 +102,13 @@ public enum PwmAboutProperty
     java_gcName( "Java GC Name", pwmApplication -> readGcName() ),
 
     database_driverName( null,
-            pwmApplication -> pwmApplication.getDatabaseService().getConnectionDebugProperties().get( DatabaseService.DatabaseAboutProperty.driverName ) ),
+            pwmApplication -> pwmApplication.getDatabaseService().getConnectionDebugProperties().get( DatabaseService.DatabaseDebugProperty.driverName ) ),
     database_driverVersion( null,
-            pwmApplication -> pwmApplication.getDatabaseService().getConnectionDebugProperties().get( DatabaseService.DatabaseAboutProperty.driverVersion ) ),
+            pwmApplication -> pwmApplication.getDatabaseService().getConnectionDebugProperties().get( DatabaseService.DatabaseDebugProperty.driverVersion ) ),
     database_databaseProductName( null,
-            pwmApplication -> pwmApplication.getDatabaseService().getConnectionDebugProperties().get( DatabaseService.DatabaseAboutProperty.databaseProductName ) ),
+            pwmApplication -> pwmApplication.getDatabaseService().getConnectionDebugProperties().get( DatabaseService.DatabaseDebugProperty.databaseProductName ) ),
     database_databaseProductVersion( null,
-            pwmApplication -> pwmApplication.getDatabaseService().getConnectionDebugProperties().get( DatabaseService.DatabaseAboutProperty.databaseProductVersion ) ),;
+            pwmApplication -> pwmApplication.getDatabaseService().getConnectionDebugProperties().get( DatabaseService.DatabaseDebugProperty.databaseProductVersion ) ),;
 
     private final String label;
     private final transient Function<PwmApplication, String> value;
@@ -130,26 +121,16 @@ public enum PwmAboutProperty
 
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmAboutProperty.class );
 
-    @Value
-    private static class Pair<K, V>
-    {
-        private final K key;
-        private final V value;
-    }
-
     public static Map<PwmAboutProperty, String> makeInfoBean(
             final PwmApplication pwmApplication
     )
     {
-        return Collections.unmodifiableMap( EnumSet.allOf( PwmAboutProperty.class )
-                .stream()
-                .map( aboutProp -> new Pair<>( aboutProp, readAboutValue( pwmApplication, aboutProp ) ) )
+        return EnumUtil.enumStream( PwmAboutProperty.class )
+                .map( aboutProp -> Map.entry( aboutProp, readAboutValue( pwmApplication, aboutProp ) ) )
                 .filter( entry -> entry.getValue().isPresent() )
-                .collect( Collectors.toMap(
-                        Pair::getKey,
-                        entry -> entry.getValue().get(),
-                        ( k, k2 ) -> k,
-                        () -> new EnumMap<>( PwmAboutProperty.class ) ) ) );
+                .collect( CollectorUtil.toUnmodifiableEnumMap( PwmAboutProperty.class,
+                        Map.Entry::getKey,
+                        entry -> entry.getValue().get() ) );
 
     }
 
@@ -179,28 +160,13 @@ public enum PwmAboutProperty
         {
             return date.toString();
         }
-        else
-        {
-            return LocaleHelper.getLocalizedMessage( PwmConstants.DEFAULT_LOCALE, Display.Value_NotApplicable, null );
-        }
 
+        return LocaleHelper.getLocalizedMessage( PwmConstants.DEFAULT_LOCALE, Display.Value_NotApplicable, null );
     }
 
     public String getLabel( )
     {
         return label == null ? this.name() : label;
-    }
-
-    public static Map<String, String> toStringMap( final Map<PwmAboutProperty, String> infoBeanMap )
-    {
-        final Map<String, String> outputProps = new TreeMap<>( );
-        for ( final Map.Entry<PwmAboutProperty, String> entry : infoBeanMap.entrySet() )
-        {
-            final PwmAboutProperty aboutProperty = entry.getKey();
-            final String value = entry.getValue();
-            outputProps.put( aboutProperty.toString().replace( '_', '.' ), value );
-        }
-        return Collections.unmodifiableMap( outputProps );
     }
 
     private static String readSslVersions()

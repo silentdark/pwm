@@ -21,6 +21,7 @@
 package password.pwm.ldap;
 
 import com.novell.ldapchai.ChaiEntry;
+import com.novell.ldapchai.ChaiEntryFactory;
 import com.novell.ldapchai.exception.ChaiOperationException;
 import com.novell.ldapchai.exception.ChaiUnavailableException;
 import com.novell.ldapchai.provider.ChaiProvider;
@@ -31,8 +32,9 @@ import com.novell.ldapchai.util.ChaiUtility;
 import com.novell.ldapchai.util.SearchHelper;
 import lombok.Builder;
 import lombok.Value;
-import password.pwm.AppProperty;
+import password.pwm.DomainProperty;
 import password.pwm.bean.DomainID;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.config.AppConfig;
 import password.pwm.config.DomainConfig;
@@ -41,15 +43,15 @@ import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.CollectionUtil;
+import password.pwm.util.java.CollectorUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -68,7 +70,7 @@ public class LdapBrowser
 
     private final SessionLabel sessionLabel;
     private final ChaiProviderFactory chaiProviderFactory;
-    private final Map<String, ChaiProvider> providerCache = new HashMap<>();
+    private final Map<ProfileID, ChaiProvider> providerCache = new HashMap<>();
 
     private enum DnType
     {
@@ -89,7 +91,7 @@ public class LdapBrowser
 
     public LdapBrowseResult doBrowse(
             final DomainID domainID,
-            final String profile,
+            final ProfileID profile,
             final String dn
     )
             throws PwmUnrecoverableException
@@ -119,7 +121,7 @@ public class LdapBrowser
 
     private LdapBrowseResult doBrowseImpl(
             final DomainID domainID,
-            final String profileID,
+            final ProfileID profileID,
             final String dn
     )
             throws PwmUnrecoverableException, ChaiUnavailableException, ChaiOperationException
@@ -130,7 +132,7 @@ public class LdapBrowser
 
         result.dn( dn );
         result.profileID( profileID );
-        final DomainConfig domainConfig = new AppConfig( storedConfiguration ).getDomainConfigs().get( domainID );
+        final DomainConfig domainConfig = AppConfig.forStoredConfig( storedConfiguration ).getDomainConfigs().get( domainID );
 
         if ( domainConfig.getLdapProfiles().size() > 1 )
         {
@@ -160,7 +162,7 @@ public class LdapBrowser
 
     private void updateBrowseResultChildren(
             final DomainID domainID,
-            final String profileID,
+            final ProfileID profileID,
             final String dn,
             final LdapBrowseResult.LdapBrowseResultBuilder result
     )
@@ -173,7 +175,7 @@ public class LdapBrowser
         for ( final Map.Entry<String, DnType> entry : childDNs.entrySet() )
         {
             final String childDN = entry.getKey();
-            final DNInformation dnInformation = new DNInformation( entryNameFromDN( childDN ), childDN );
+            final DNInformation dnInformation = new DNInformation( rdnNameFromDN( childDN ), childDN );
 
             if ( entry.getValue() == DnType.navigable )
             {
@@ -186,14 +188,15 @@ public class LdapBrowser
         }
         result.navigableDNlist( navigableDNs );
         result.selectableDNlist( selectableDNs );
-        result.maxResults( childDNs.size() >= getMaxSizeLimit() );
+        result.maxResults( childDNs.size() >= getMaxSizeLimit( domainID, storedConfiguration ) );
     }
 
-    private ChaiProvider getChaiProvider( final DomainID domainID, final String profile ) throws PwmUnrecoverableException
+    private ChaiProvider getChaiProvider( final DomainID domainID, final ProfileID profile )
+            throws PwmUnrecoverableException
     {
         if ( !providerCache.containsKey( profile ) )
         {
-            final DomainConfig domainConfig = new AppConfig( storedConfiguration ).getDomainConfigs().get( domainID );
+            final DomainConfig domainConfig = AppConfig.forStoredConfig( storedConfiguration ).getDomainConfigs().get( domainID );
             final LdapProfile ldapProfile = domainConfig.getLdapProfiles().get( profile );
             final ChaiProvider chaiProvider = LdapOperationsHelper.openProxyChaiProvider( chaiProviderFactory, sessionLabel, ldapProfile, domainConfig, null );
             providerCache.put( profile, chaiProvider );
@@ -201,15 +204,18 @@ public class LdapBrowser
         return providerCache.get( profile );
     }
 
-    private int getMaxSizeLimit( )
+    private static int getMaxSizeLimit(
+            final DomainID domainID,
+            final StoredConfiguration storedConfiguration
+    )
     {
-        final AppConfig appConfig = new AppConfig( storedConfiguration );
-        return Integer.parseInt( appConfig.readAppProperty( AppProperty.LDAP_BROWSER_MAX_ENTRIES ) );
+        final DomainConfig domainConfig = AppConfig.forStoredConfig( storedConfiguration ).getDomainConfigs().get( domainID );
+        return Integer.parseInt( domainConfig.readDomainProperty( DomainProperty.LDAP_BROWSER_MAX_ENTRIES ) );
     }
 
     private Map<String, DnType> getChildEntries(
             final DomainID domainID,
-            final String profile,
+            final ProfileID profile,
             final String dn
     )
             throws ChaiUnavailableException, PwmUnrecoverableException, ChaiOperationException
@@ -219,76 +225,53 @@ public class LdapBrowser
 
         if ( StringUtil.isEmpty( dn ) && chaiProvider.getDirectoryVendor() == DirectoryVendor.ACTIVE_DIRECTORY )
         {
-            return Collections.unmodifiableMap( adRootDNList( domainID, profile ).stream().collect( CollectionUtil.collectorToLinkedMap(
+            return Collections.unmodifiableMap( adRootDNList( domainID, profile ).stream().collect( CollectorUtil.toLinkedMap(
                     Function.identity(),
                     rootDN -> DnType.navigable
             ) ) );
         }
 
-        final Map<String, Map<String, List<String>>> results = doLdapSearch( dn, chaiProvider );
+        final Set<String> results = doLdapSearch( domainID, dn, chaiProvider );
 
-        final HashMap<String, DnType> returnMap = new HashMap<>( results.size() );
-        for ( final Map.Entry<String, Map<String, List<String>>> entry : results.entrySet() )
+        final HashMap<String, DnType> returnMap = new LinkedHashMap<>( results.size() );
+        for ( final String resultDN : results )
         {
-            final String resultDN = entry.getKey();
-            final Map<String, List<String>> attributeResults = entry.getValue();
-
-            final DnType dnType = dnHasSubordinates( dn, chaiProvider, resultDN, attributeResults );
+            final DnType dnType = dnHasSubordinates( resultDN, chaiProvider );
             returnMap.put( resultDN, dnType );
         }
+
         return Collections.unmodifiableMap( returnMap );
     }
 
     private DnType dnHasSubordinates(
             final String dn,
-            final ChaiProvider chaiProvider,
-            final String resultDN,
-            final Map<String, List<String>> attributeResults
-    )
-    {
-        if ( attributeResults.containsKey( ATTR_SUBORDINATE_COUNT ) )
-        {
-            // only eDir actually returns this operational attribute
-            final int subordinateCount = Integer.parseInt( attributeResults.get( ATTR_SUBORDINATE_COUNT ).get( 0 ) );
-            return subordinateCount > 0 ? DnType.navigable : DnType.selectable;
-        }
-        else
-        {
-            final SearchHelper searchHelper = new SearchHelper();
-            searchHelper.setFilter( "(objectclass=*)" );
-            searchHelper.setMaxResults( 1 );
-            searchHelper.setAttributes( Collections.emptyList() );
-            searchHelper.setSearchScope( SearchScope.ONE );
-            try
-            {
-                final Map<String, Map<String, String>> subSearchResults = chaiProvider.search( resultDN, searchHelper );
-                return !subSearchResults.isEmpty() ? DnType.navigable : DnType.selectable;
-            }
-            catch ( final Exception e )
-            {
-                LOGGER.debug( sessionLabel, () -> "error during subordinate entry count of " + dn + ", error: " + e.getMessage() );
-            }
-        }
-        return DnType.selectable;
-    }
-
-    private Map<String, Map<String, List<String>>> doLdapSearch(
-            final String dn, final ChaiProvider chaiProvider
+            final ChaiProvider chaiProvider
     )
             throws ChaiUnavailableException, ChaiOperationException
     {
-        final Map<String, Map<String, List<String>>> results;
-
-        final SearchHelper searchHelper = new SearchHelper();
-        searchHelper.setFilter( "(objectclass=*)" );
-        searchHelper.setMaxResults( getMaxSizeLimit() );
-        searchHelper.setAttributes( ATTR_SUBORDINATE_COUNT );
-        searchHelper.setSearchScope( SearchScope.ONE );
-
-        return chaiProvider.searchMultiValues( dn, searchHelper );
+        final ChaiEntry chaiEntry = ChaiEntryFactory.newChaiFactory( chaiProvider ).newChaiEntry( dn );
+        return chaiEntry.hasChildren()
+                ? DnType.navigable
+                : DnType.selectable;
     }
 
-    private Set<String> adRootDNList( final DomainID domainID, final String profile )
+    private Set<String> doLdapSearch(
+            final DomainID domainID,
+            final String dn,
+            final ChaiProvider chaiProvider
+    )
+            throws ChaiUnavailableException, ChaiOperationException
+    {
+        final SearchHelper searchHelper = new SearchHelper();
+        searchHelper.setFilter( SearchHelper.DEFAULT_FILTER );
+        searchHelper.setAttributes( Collections.emptyList() );
+        searchHelper.setMaxResults( getMaxSizeLimit( domainID, storedConfiguration ) );
+        searchHelper.setSearchScope( SearchScope.ONE );
+
+        return chaiProvider.search( dn, searchHelper ).keySet();
+    }
+
+    private Set<String> adRootDNList( final DomainID domainID, final ProfileID profile )
             throws ChaiUnavailableException, ChaiOperationException, PwmUnrecoverableException
     {
         final ChaiProvider chaiProvider = getChaiProvider( domainID, profile );
@@ -301,27 +284,25 @@ public class LdapBrowser
         return adRootValues;
     }
 
-    private static String entryNameFromDN( final String dn )
+    private static String rdnNameFromDN( final String dn )
     {
-        int start = dn.indexOf( '=' );
-        start = start == -1 ? 0 : start + 1;
         int end = dn.indexOf( ',' );
         if ( end == -1 )
         {
             end = dn.length();
         }
 
-        return dn.substring( start, end );
+        return dn.substring( 0, end );
     }
 
     @Value
     @Builder
-    public static class LdapBrowseResult implements Serializable
+    public static class LdapBrowseResult
     {
         private String dn;
-        private String profileID;
+        private ProfileID profileID;
         private String parentDN;
-        private List<String> profileList;
+        private List<ProfileID> profileList;
         private boolean maxResults;
 
         private List<DNInformation> navigableDNlist;
@@ -329,7 +310,7 @@ public class LdapBrowser
     }
 
     @Value
-    public static class DNInformation implements Serializable
+    public static class DNInformation
     {
         private final String entryName;
         private final String dn;

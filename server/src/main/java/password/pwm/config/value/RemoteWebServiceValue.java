@@ -20,8 +20,8 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.StoredConfigXmlConstants;
@@ -34,7 +34,6 @@ import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmSecurityKey;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -59,7 +58,7 @@ public class RemoteWebServiceValue extends AbstractValue implements StoredValue
         return new StoredValueFactory()
         {
             @Override
-            public RemoteWebServiceValue fromJson( final String input )
+            public RemoteWebServiceValue fromJson( final PwmSetting pwmSetting, final String input )
             {
                 if ( input == null )
                 {
@@ -106,7 +105,7 @@ public class RemoteWebServiceValue extends AbstractValue implements StoredValue
         final List<XmlElement> returnList = new ArrayList<>( values.size() );
         for ( final RemoteWebServiceConfiguration value : values )
         {
-            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
 
             String encodedValue = value.getPassword();
             try
@@ -176,9 +175,9 @@ public class RemoteWebServiceValue extends AbstractValue implements StoredValue
     }
 
     @Override
-    public Serializable toDebugJsonObject( final Locale locale )
+    public Object toDebugJsonObject( final Locale locale )
     {
-        return ( Serializable ) makeDebugJsonObject( locale );
+        return makeDebugJsonObject( locale );
     }
 
     private List<RemoteWebServiceConfiguration> makeDebugJsonObject( final Locale locale )

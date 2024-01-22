@@ -23,7 +23,7 @@ package password.pwm.ldap;
 import lombok.Builder;
 import lombok.Data;
 import lombok.Value;
-import password.pwm.AppProperty;
+import password.pwm.DomainProperty;
 import password.pwm.PwmConstants;
 import password.pwm.PwmDomain;
 import password.pwm.bean.SessionLabel;
@@ -33,16 +33,15 @@ import password.pwm.config.option.PasswordSyncCheckMode;
 import password.pwm.config.profile.ChangePasswordProfile;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.i18n.Display;
-import password.pwm.util.ProgressInfo;
+import password.pwm.util.Percent;
+import password.pwm.util.ProgressInfoCalculator;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.PwmTimeUtil;
-import password.pwm.util.json.JsonFactory;
-import password.pwm.util.java.Percent;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.password.PasswordUtility;
 
-import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
@@ -95,7 +94,7 @@ public class PasswordChangeProgressChecker
     }
 
     @Value
-    public static class PasswordChangeProgress implements Serializable
+    public static class PasswordChangeProgress
     {
         private boolean complete;
         private BigDecimal percentComplete;
@@ -114,7 +113,7 @@ public class PasswordChangeProgressChecker
 
     @Value
     @Builder
-    public static class ProgressRecord implements Serializable
+    public static class ProgressRecord
     {
         private String key;
         private String label;
@@ -124,7 +123,7 @@ public class PasswordChangeProgressChecker
     }
 
     @Data
-    public static class ProgressTracker implements Serializable
+    public static class ProgressTracker
     {
         private Instant beginTime = Instant.now();
         private Instant lastReplicaCheckTime;
@@ -230,8 +229,8 @@ public class PasswordChangeProgressChecker
         {
             final float pctComplete = figureAverageProgress( progressRecords );
             LOGGER.trace( pwmSession, () -> "percent complete: " + pctComplete );
-            final ProgressInfo progressInfo = new ProgressInfo( tracker.beginTime, 100, ( long ) pctComplete );
-            final Instant actualEstimate = progressInfo.estimatedCompletion();
+            final ProgressInfoCalculator progressInfoCalculator = ProgressInfoCalculator.createProgressInfo( tracker.beginTime, 100, ( long ) pctComplete );
+            final Instant actualEstimate = progressInfoCalculator.estimatedCompletion();
 
             if ( actualEstimate.isBefore( minCompletionTime ) )
             {
@@ -276,8 +275,8 @@ public class PasswordChangeProgressChecker
 
     private Optional<ProgressRecord> figureReplicationStatusCompletion( final ProgressTracker tracker )
     {
-        final long initDelayMs = Long.parseLong( pwmDomain.getConfig().readAppProperty( AppProperty.LDAP_PASSWORD_REPLICA_CHECK_INIT_DELAY_MS ) );
-        final long cycleDelayMs = Long.parseLong( pwmDomain.getConfig().readAppProperty( AppProperty.LDAP_PASSWORD_REPLICA_CHECK_CYCLE_DELAY_MS ) );
+        final long initDelayMs = Long.parseLong( pwmDomain.getConfig().readDomainProperty( DomainProperty.LDAP_PASSWORD_REPLICA_CHECK_INIT_DELAY_MS ) );
+        final long cycleDelayMs = Long.parseLong( pwmDomain.getConfig().readDomainProperty( DomainProperty.LDAP_PASSWORD_REPLICA_CHECK_CYCLE_DELAY_MS ) );
         final TimeDuration initialReplicaDelay = TimeDuration.of( initDelayMs, TimeDuration.Unit.MILLISECONDS );
         final TimeDuration cycleReplicaDelay = TimeDuration.of( cycleDelayMs, TimeDuration.Unit.MILLISECONDS );
 
@@ -319,7 +318,7 @@ public class PasswordChangeProgressChecker
                     pwmSession, userIdentity );
             if ( checkResults.size() <= 1 )
             {
-                LOGGER.trace( () -> "only one replica returned data, marking as complete" );
+                LOGGER.trace( pwmSession, () -> "only one replica returned data, marking as complete" );
                 return Optional.of( completedReplicationRecord );
             }
             else
@@ -339,7 +338,7 @@ public class PasswordChangeProgressChecker
                 }
                 final Percent pctComplete = Percent.of( duplicateValues + 1, checkResults.size() );
                 final ProgressRecord progressRecord = makeReplicaProgressRecord( pctComplete );
-                LOGGER.trace( () -> "read password replication sync status as: " + JsonFactory.get().serialize( progressRecord ) );
+                LOGGER.trace( pwmSession, () -> "read password replication sync status as: " + JsonFactory.get().serialize( progressRecord ) );
                 return Optional.of( progressRecord );
             }
         }

@@ -21,19 +21,32 @@
 package password.pwm.util;
 
 import com.novell.ldapchai.cr.Answer;
+import password.pwm.PwmApplication;
+import password.pwm.PwmApplicationMode;
 import password.pwm.PwmConstants;
-import password.pwm.PwmDomain;
+import password.pwm.PwmEnvironment;
 import password.pwm.bean.DomainID;
 import password.pwm.bean.LoginInfoBean;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.ResponseInfoBean;
 import password.pwm.bean.UserIdentity;
+import password.pwm.config.AppConfig;
+import password.pwm.config.PwmSetting;
 import password.pwm.config.option.DataStorageMethod;
+import password.pwm.config.stored.StoredConfigKey;
+import password.pwm.config.stored.StoredConfiguration;
+import password.pwm.config.stored.StoredConfigurationFactory;
+import password.pwm.config.stored.StoredConfigurationModifier;
+import password.pwm.config.value.LocalizedStringValue;
+import password.pwm.config.value.StringValue;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.ldap.UserInfo;
-import password.pwm.ldap.UserInfoBean;
 import password.pwm.svc.otp.OTPUserRecord;
+import password.pwm.user.UserInfo;
+import password.pwm.user.UserInfoBean;
+import password.pwm.util.logging.PwmLogLevel;
 import password.pwm.util.macro.MacroRequest;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
@@ -41,7 +54,10 @@ import java.util.Map;
 public class SampleDataGenerator
 {
     private static final DomainID SAMPLE_USER_DOMAIN = DomainID.create( "default" );
-    private static final String SAMPLE_USER_LDAP_PROFILE = "profile1";
+    private static final ProfileID SAMPLE_USER_LDAP_PROFILE = ProfileID.PROFILE_ID_DEFAULT;
+
+    private static final UserIdentity SAMPLE_CONFIG_MODIFIER_IDENTITY = UserIdentity
+            .create( "cn=configModifier,ou=users,o=org", SAMPLE_USER_LDAP_PROFILE, SAMPLE_USER_DOMAIN );
 
     private static final Map<String, String> USER1_ATTRIBUTES = Map.ofEntries(
             Map.entry( "givenName", "First" ),
@@ -142,7 +158,7 @@ public class SampleDataGenerator
                 .build();
     }
 
-    public static MacroRequest sampleMacroRequest( final PwmDomain pwmDomain )
+    public static MacroRequest sampleMacroRequest( final Path applicationPath )
             throws PwmUnrecoverableException
     {
         final UserInfo targetUserInfoBean = sampleTargetUserInfo();
@@ -156,11 +172,46 @@ public class SampleDataGenerator
         loginInfoBean.setUserCurrentPassword( PasswordData.forStringValue( "PaSSw0rd" ) );
 
         return MacroRequest.builder()
-                .pwmApplication( null )
+                .pwmApplication( makeSamplePwmApp( applicationPath ) )
                 .userInfo( userInfoBean )
                 .targetUserInfo( targetUserInfoBean )
                 .loginInfoBean( loginInfoBean )
                 .build();
 
+    }
+
+    private static AppConfig makeConfig()
+            throws PwmUnrecoverableException
+    {
+        final StoredConfiguration storedConfiguration = StoredConfigurationFactory.newConfig();
+        final StoredConfigurationModifier modifier = StoredConfigurationModifier.newModifier( storedConfiguration );
+
+        modifier.writeSetting( StoredConfigKey.forSetting(
+                        PwmSetting.EVENTS_JAVA_STDOUT_LEVEL, SAMPLE_USER_LDAP_PROFILE, SAMPLE_USER_DOMAIN ),
+                new StringValue( PwmLogLevel.FATAL.toString() ), SAMPLE_CONFIG_MODIFIER_IDENTITY );
+        modifier.writeSetting( StoredConfigKey.forSetting(
+                        PwmSetting.LDAP_PROFILE_DISPLAY_NAME, SAMPLE_USER_LDAP_PROFILE, SAMPLE_USER_DOMAIN ),
+                new LocalizedStringValue( Map.of( "", "ProfileName" ) ), SAMPLE_CONFIG_MODIFIER_IDENTITY );
+
+        return AppConfig.forStoredConfig( modifier.newStoredConfiguration() );
+    }
+
+    private static PwmApplication makeSamplePwmApp( final Path applicationPath )
+            throws PwmUnrecoverableException
+    {
+        return makeSamplePwmApp( makeConfig(), applicationPath );
+    }
+
+    private static PwmApplication makeSamplePwmApp( final AppConfig appConfig, final Path applicationPath )
+            throws PwmUnrecoverableException
+    {
+        final PwmEnvironment pwmEnvironment = PwmEnvironment.builder()
+                .config( appConfig )
+                .applicationPath( applicationPath )
+                .applicationMode( PwmApplicationMode.READ_ONLY )
+                .internalRuntimeInstance( true )
+                .build();
+
+        return PwmApplication.createPwmApplication( pwmEnvironment );
     }
 }

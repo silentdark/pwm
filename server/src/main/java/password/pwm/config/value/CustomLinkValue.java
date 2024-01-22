@@ -20,11 +20,12 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.XmlOutputProcessData;
 import password.pwm.config.value.data.CustomLinkConfiguration;
+import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmSecurityKey;
 
@@ -41,7 +42,7 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
 
     public CustomLinkValue( final List<CustomLinkConfiguration> values )
     {
-        this.values = values == null ? Collections.emptyList() : Collections.unmodifiableList( values );
+        this.values = values == null ? Collections.emptyList() : Collections.unmodifiableList( CollectionUtil.stripNulls( values ) );
     }
 
     public static StoredValueFactory factory( )
@@ -49,7 +50,7 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
         return new StoredValueFactory()
         {
             @Override
-            public CustomLinkValue fromJson( final String input )
+            public CustomLinkValue fromJson( final PwmSetting pwmSetting, final String input )
             {
                 if ( input == null )
                 {
@@ -57,13 +58,8 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
                 }
                 else
                 {
-                    List<CustomLinkConfiguration> srcList = JsonFactory.get().deserializeList( input, CustomLinkConfiguration.class );
-                    srcList = srcList == null ? Collections.emptyList() : srcList;
-                    while ( srcList.contains( null ) )
-                    {
-                        srcList.remove( null );
-                    }
-                    return new CustomLinkValue( Collections.unmodifiableList( srcList ) );
+                    final List<CustomLinkConfiguration> srcList = JsonFactory.get().deserializeList( input, CustomLinkConfiguration.class );
+                    return new CustomLinkValue( srcList );
                 }
             }
 
@@ -87,7 +83,7 @@ public class CustomLinkValue extends AbstractValue implements StoredValue
         final List<XmlElement> returnList = new ArrayList<>( values.size() );
         for ( final CustomLinkConfiguration value : values )
         {
-            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
             valueElement.setText( JsonFactory.get().serialize( value ) );
             returnList.add( valueElement );
         }

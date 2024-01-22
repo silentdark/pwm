@@ -24,12 +24,11 @@ import lombok.Builder;
 import lombok.Value;
 import password.pwm.config.PwmSettingCategory;
 
-import java.io.Serializable;
 import java.util.Locale;
 
 @Value
 @Builder
-public class CategoryInfo implements Serializable
+public class CategoryInfo
 {
     private int level;
     private String key;
@@ -53,7 +52,7 @@ public class CategoryInfo implements Serializable
                 .hidden( category.isHidden() )
                 .parent( category.getParent() != null ? category.getParent().getKey() : null )
                 .profiles( category.hasProfiles() )
-                .menuLocation( category.toMenuLocationDebug( "PROFILE", locale ) )
+                .menuLocation( category.toMenuLocationDebug( null, locale ) )
                 .build();
     }
 }

@@ -27,6 +27,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.Value;
 import password.pwm.VerificationMethodSystem;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.TokenDestinationItem;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.option.IdentityVerificationMethod;
@@ -34,7 +35,6 @@ import password.pwm.config.option.RecoveryAction;
 import password.pwm.config.option.SessionBeanMode;
 import password.pwm.config.value.data.FormConfiguration;
 
-import java.io.Serializable;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -49,10 +49,8 @@ import java.util.Set;
 @EqualsAndHashCode( callSuper = false )
 public class ForgottenPasswordBean extends PwmSessionBean
 {
-    private static final long serialVersionUID = 1L;
-
     @SerializedName( "pr" )
-    private String profile;
+    private ProfileID profile;
 
     @SerializedName( "u" )
     private UserIdentity userIdentity;
@@ -79,16 +77,14 @@ public class ForgottenPasswordBean extends PwmSessionBean
     private boolean agreementPassed;
 
     @SerializedName( "fp" )
-    private String forgottenPasswordProfileID;
+    private ProfileID forgottenPasswordProfileID;
 
     @SerializedName( "lf" )
     private Map<String, String> userSearchValues;
 
     @Data
-    public static class Progress implements Serializable
+    public static class Progress
     {
-        private static final long serialVersionUID = 1L;
-
         @SerializedName( "s" )
         private boolean tokenSent;
 
@@ -118,7 +114,7 @@ public class ForgottenPasswordBean extends PwmSessionBean
 
     @Value
     @AllArgsConstructor
-    public static class RecoveryFlags implements Serializable
+    public static class RecoveryFlags
     {
         @SerializedName( "a" )
         private final boolean allowWhenLdapIntruderLocked;

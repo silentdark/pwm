@@ -66,6 +66,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * User interaction servlet for setting up OTP secret.
@@ -82,6 +83,12 @@ import java.util.Map;
 public class SetupOtpServlet extends ControlledPwmServlet
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( SetupOtpServlet.class );
+
+    @Override
+    protected PwmLogger getLogger()
+    {
+        return LOGGER;
+    }
 
     public enum SetupOtpAction implements AbstractPwmServlet.ProcessAction
     {
@@ -107,9 +114,9 @@ public class SetupOtpServlet extends ControlledPwmServlet
     }
 
     @Override
-    public Class<? extends ProcessAction> getProcessActionsClass( )
+    public Optional<Class<? extends ProcessAction>> getProcessActionsClass( )
     {
-        return SetupOtpAction.class;
+        return Optional.of( SetupOtpAction.class );
     }
 
 
@@ -286,8 +293,7 @@ public class SetupOtpServlet extends ControlledPwmServlet
         final OTPUserRecord otpUserRecord = pwmSession.getUserInfo().getOtpUserRecord();
         final OtpService otpService = pwmDomain.getOtpService();
 
-        final String bodyString = pwmRequest.readRequestBodyAsString();
-        final Map<String, String> clientValues = JsonFactory.get().deserializeStringMap( bodyString );
+        final Map<String, String> clientValues = pwmRequest.readBodyAsJsonStringMap(  );
         final String code = Validator.sanitizeInputValue( pwmRequest.getAppConfig(), clientValues.get( "code" ), 1024 );
 
         try
@@ -329,7 +335,7 @@ public class SetupOtpServlet extends ControlledPwmServlet
         final UserIdentity theUser = pwmSession.getUserInfo().getUserIdentity();
         try
         {
-            service.clearOTPUserConfiguration( pwmRequest, theUser, pwmSession.getSessionManager().getActor( ) );
+            service.clearOTPUserConfiguration( pwmRequest, theUser, pwmRequest.getClientConnectionHolder().getActor( ) );
         }
         catch ( final PwmOperationalException e )
         {
@@ -441,7 +447,7 @@ public class SetupOtpServlet extends ControlledPwmServlet
                 final DomainConfig config = pwmDomain.getConfig();
                 final SetupOtpProfile setupOtpProfile = getSetupOtpProfile( pwmRequest );
                 final String identifierConfigValue = setupOtpProfile.readSettingAsString( PwmSetting.OTP_SECRET_IDENTIFIER );
-                final String identifier = pwmSession.getSessionManager().getMacroMachine( ).expandMacros( identifierConfigValue );
+                final String identifier = pwmRequest.getMacroMachine( ).expandMacros( identifierConfigValue );
                 final OTPUserRecord otpUserRecord = new OTPUserRecord();
                 final List<String> rawRecoveryCodes = pwmDomain.getOtpService().initializeUserRecord(
                         setupOtpProfile,
@@ -527,11 +533,11 @@ public class SetupOtpServlet extends ControlledPwmServlet
             if ( policy == ForceSetupPolicy.FORCE_ALLOW_SKIP )
             {
                 LOGGER.trace( pwmRequest, () -> "allowing setup skipping due to setting "
-                        + PwmSetting.OTP_FORCE_SETUP.toMenuLocationDebug( setupOtpProfile.getIdentifier(), pwmRequest.getLocale() ) );
+                        + PwmSetting.OTP_FORCE_SETUP.toMenuLocationDebug( setupOtpProfile.getId(), pwmRequest.getLocale() ) );
                 return true;
             }
 
-            final boolean admin = pwmRequest.getPwmSession().getSessionManager().checkPermission( pwmRequest.getPwmDomain(), Permission.PWMADMIN );
+            final boolean admin = pwmRequest.checkPermission( Permission.PWMADMIN );
             if ( admin )
             {
                 if ( pwmRequest.getDomainConfig().readSettingAsBoolean( PwmSetting.ADMIN_ALLOW_SKIP_FORCED_ACTIVITIES ) )

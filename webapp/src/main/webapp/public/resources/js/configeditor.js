@@ -137,11 +137,11 @@ PWM_CFGEDIT.readSetting = function(keyName, valueWriter) {
         const showSetting = (PWM_SETTINGS['settings'][keyName] && PWM_SETTINGS['settings'][keyName]['syntax'] === 'PROFILE') ||   (!modifiedOnly || !isDefault) && (maxLevel < 0 || settingLevel  <= maxLevel );
         if (showSetting) {
             valueWriter(resultValue);
-            PWM_MAIN.setStyle('outline_' + keyName,'display','inherit');
+            PWM_MAIN.removeCssClass('outline_' + keyName,'nodisplay');
             PWM_CFGEDIT.updateSettingDisplay(keyName, isDefault);
             PWM_CFGEDIT.updateLastModifiedInfo(keyName, data);
         } else {
-            PWM_MAIN.setStyle('outline_' + keyName,'display','none');
+            PWM_MAIN.addCssClass('outline_' + keyName,'nodisplay');
             PWM_VAR['skippedSettingCount']++;
             if (PWM_VAR['skippedSettingCount'] > 0 && PWM_MAIN.getObject('panel-skippedSettingInfo')) {
                 PWM_MAIN.getObject('panel-skippedSettingInfo').innerHTML = "" + PWM_VAR['skippedSettingCount'] + " items are not shown due to filter settings."
@@ -212,7 +212,7 @@ PWM_CFGEDIT.writeSetting = function(keyName, valueData, nextAction) {
     const errorFunction = function(error) {
         PWM_VAR['outstandingOperations']--;
         PWM_CFGEDIT.handleWorkingIcon();
-        PWM_MAIN.showDialog({title:PWM_MAIN.showString('Title_Error'),text:"Unable to communicate with server.  Please refresh page."});
+        PWM_MAIN.showErrorDialog(error);
         console.log("error writing setting " + keyName + ", reason: " + error)
     };
     PWM_MAIN.ajaxRequest(url,loadFunction,{errorFunction:errorFunction,content:valueData});
@@ -396,7 +396,7 @@ PWM_CFGEDIT.setConfigurationPassword = function(password) {
             PWM_MAIN.closeWaitDialog();
             PWM_MAIN.showDialog ({title:PWM_MAIN.showString('Title_Error'),text:"error saving configuration password: " + errorObj});
         };
-        PWM_MAIN.clearDijitWidget('dialogPopup');
+        PWM_CFGEDIT.clearDijitWidget('dialogPopup');
         PWM_MAIN.showWaitDialog({loadFunction:function(){
                 PWM_MAIN.ajaxRequest(url,loadFunction,{errorFunction:errorFunction,content:{password:password}});
             }});
@@ -593,7 +593,7 @@ PWM_CFGEDIT.processSettingSearch = function(destinationDiv) {
                         toolBody += '<br/>' + PWM_SETTINGS['settings'][settingKey]['description'] + '<br/><br/>';
                         toolBody += '<span style="font-weight: bold">Value</span>';
                         toolBody += '<br/>' + value.replace('\n', '<br/>') + '<br/>';
-                        PWM_MAIN.showDijitTooltip({
+                        PWM_MAIN.showTooltip({
                             id: settingID + '_popup',
                             text: toolBody,
                             width: 500
@@ -785,7 +785,6 @@ PWM_CFGEDIT.showMacroHelp = function() {
     options['title'] = 'Macro Help'
     options['id'] = 'id-dialog-macroHelp'
     options['dialogClass'] = 'wide';
-    options['dojoStyle'] = 'width: 750px';
     options['showClose'] = true;
     options['href'] = PWM_GLOBAL['url-resources'] + "/text/macroHelp.html"
     options['loadFunction'] = loadFunction;
@@ -797,7 +796,6 @@ PWM_CFGEDIT.showTimezoneList = function() {
     options['title'] = 'Timezones'
     options['id'] = 'id-dialog-timeZoneHelp'
     options['dialogClass'] = 'wide';
-    options['dojoStyle'] = 'width: 750px';
     options['showClose'] = true;
     options['href'] = PWM_GLOBAL['url-context'] + "/public/reference/timezones.jsp"
     PWM_MAIN.showDialog( options );
@@ -808,7 +806,6 @@ PWM_CFGEDIT.showDateTimeFormatHelp = function() {
     options['title'] = 'Date & Time Formatting'
     options['id'] = 'id-dialog-dateTimePopup'
     options['dialogClass'] = 'wide';
-    options['dojoStyle'] = 'width: 750px';
     options['showClose'] = true;
     options['href'] = PWM_GLOBAL['url-resources'] + "/text/datetimeFormatHelp.html"
     PWM_MAIN.showDialog( options );
@@ -868,50 +865,44 @@ PWM_CFGEDIT.httpsCertificateView = function() {
 };
 
 PWM_CFGEDIT.smsHealthCheck = function() {
-    let dialogBody = '<p>' + PWM_CONFIG.showString('Warning_SmsTestData') + '</p><form id="smsCheckParametersForm"><table>';
-    dialogBody += '<tr><td>To</td><td><input name="to" type="text" value="555-1212"/></td></tr>';
-    dialogBody += '<tr><td>Message</td><td><input name="message" type="text" value="Test Message"/></td></tr>';
-    dialogBody += '</table></form>';
-    PWM_MAIN.showDialog({text:dialogBody,showCancel:true,title:'Test SMS connection',closeOnOk:false,okAction:function(){
-            const formElement = PWM_MAIN.getObject("smsCheckParametersForm");
-            const formData = PWM_MAIN.JSLibrary.formToValueMap(formElement);
-            const url = PWM_MAIN.addParamToUrl(window.location.pathname, 'processAction', 'smsHealthCheck');
-            PWM_MAIN.showWaitDialog({loadFunction:function(){
-                    const loadFunction = function(data) {
-                        if (data['error']) {
-                            PWM_MAIN.showErrorDialog(data);
-                        } else {
-                            const bodyText = PWM_ADMIN.makeHealthHtml(data['data'],false,false);
-                            const titleText = 'SMS Send Message Status';
-                            PWM_MAIN.showDialog({text:bodyText,title:titleText,showCancel:true});
-                        }
+    const title = 'Test SMS Settings'
 
-                    };
-                    PWM_MAIN.ajaxRequest(url,loadFunction,{content:formData});
-                }});
-        }});
+    const dialogFormRows = '<p>' + PWM_CONFIG.showString('Warning_SmsTestData') +'</p>'
+    + '<tr><td>To</td><td><input name="to" type="text" value="555-1212"/></td></tr>'
+     + '<tr><td>Message</td><td><input name="message" type="text" value="Test Message"/></td></tr>';
+
+    const actionParam = 'smsHealthCheck';
+
+    PWM_CFGEDIT.healthCheckImpl(dialogFormRows,title,actionParam);
 };
 
 PWM_CFGEDIT.emailHealthCheck = function() {
-    let dialogBody = '<p>' + PWM_CONFIG.showString('Warning_EmailTestData') + '</p><form id="emailCheckParametersForm"><table>';
-    dialogBody += '<tr><td>To</td><td><input name="to" type="text" value="test@example.com"/></td></tr>';
-    dialogBody += '<tr><td>From</td><td><input name="from" type="text" value="@DefaultEmailFromAddress@"/></td></tr>';
-    dialogBody += '<tr><td>Subject</td><td><input name="subject" type="text" value="Test Email"/></td></tr>';
-    dialogBody += '<tr><td>Body</td><td><input name="body" type="text" value="Test Email""/></td></tr>';
-    dialogBody += '</table></form>';
-    PWM_MAIN.showDialog({text:dialogBody,showCancel:true,title:'Test Email Connection',closeOnOk:false,okAction:function(){
-            const formElement = PWM_MAIN.getObject("emailCheckParametersForm");
+    const title =  PWM_CONFIG.showString('Warning_EmailTestData');
+
+    const dialogFormRows = '<tr><td>To</td><td><input name="to" type="text" value="test@example.com"/></td></tr>'
+     + '<tr><td>From</td><td><input name="from" type="text" value="@DefaultEmailFromAddress@"/></td></tr>'
+     + '<tr><td>Subject</td><td><input name="subject" type="text" value="Test Email"/></td></tr>'
+     + '<tr><td>Body</td><td><input name="body" type="text" value="Test Email""/></td></tr>';
+
+    const actionParam = 'emailHealthCheck';
+
+    PWM_CFGEDIT.healthCheckImpl(dialogFormRows,title,actionParam);
+};
+
+PWM_CFGEDIT.healthCheckImpl = function(dialogFormRows, title, actionParam) {
+    const formBody = '<form id="parametersForm"><table>' + dialogFormRows + '</table></form>';
+    PWM_MAIN.showDialog({text:formBody,showCancel:true,title:title,closeOnOk:false,okAction:function(){
+            const formElement = PWM_MAIN.getObject("parametersForm");
             const formData = PWM_MAIN.JSLibrary.formToValueMap(formElement);
-            let url = PWM_MAIN.addParamToUrl(window.location.pathname, 'processAction', 'emailHealthCheck');
+            let url = PWM_MAIN.addParamToUrl(window.location.pathname, 'processAction', actionParam);
             url = PWM_MAIN.addParamToUrl(url,'profile',PWM_CFGEDIT.readCurrentProfile());
             PWM_MAIN.showWaitDialog({loadFunction:function(){
                     const loadFunction = function(data) {
                         if (data['error']) {
                             PWM_MAIN.showErrorDialog(data);
                         } else {
-                            const bodyText = PWM_ADMIN.makeHealthHtml(data['data'],false,false);
-                            const titleText = 'Email Send Message Status';
-                            PWM_MAIN.showDialog({text:bodyText,title:titleText,showCancel:true});
+                            const bodyText = '<div class="logViewer">' + data['data'] + '</div>';
+                            PWM_MAIN.showDialog({text:bodyText,title:title,showCancel:true,dialogClass:'wide'});
                         }
                     };
                     PWM_MAIN.ajaxRequest(url,loadFunction,{content:formData});
@@ -1041,7 +1032,7 @@ PWM_CFGEDIT.drawHtmlOutlineForSetting = function(settingInfo, options) {
     options = options === undefined ? {} : options;
     const settingKey = settingInfo['key'];
     const settingLabel = settingInfo['label'];
-    let htmlBody = '<div id="outline_' + settingKey + '" class="setting_outline" style="display:none">'
+    let htmlBody = '<div id="outline_' + settingKey + '" class="setting_outline nodisplay">'
         + '<div class="setting_title" id="title_' + settingKey + '">'
         + '<a id="setting-' + settingKey + '" class="text">' + settingLabel + '</a>'
         + '<div class="pwm-icon pwm-icon-pencil-square modifiedNoticeIcon" title="' + PWM_CONFIG.showString('Tooltip_ModifiedNotice') + '" id="modifiedNoticeIcon-' + settingKey + '" style="display: none" ></div>';
@@ -1100,13 +1091,13 @@ PWM_CFGEDIT.initSettingDisplay = function(setting, options) {
 PWM_CFGEDIT.drawNavigationMenu = function(nextFunction) {
     console.log('drawNavigationMenu')
     PWM_MAIN.getObject('navigationTree').innerHTML = '';
-    PWM_MAIN.setStyle('navigationTreeWrapper','display','none');
+    //PWM_MAIN.setStyle('navigationTreeWrapper','display','none');
 
     const makeTreeFunction = function(menuTreeData) {
-        require(["dojo/_base/window", "dojo/store/Memory", "dijit/tree/ObjectStoreModel", "dijit/Tree","dijit","dojo/domReady!"],
-            function(win, Memory, ObjectStoreModel, Tree)
+        require(["dojo","dojo/_base/window", "dojo/store/Memory", "dijit/tree/ObjectStoreModel", "dijit/Tree","dijit","dojo/domReady!"],
+            function(dojo, win, Memory, ObjectStoreModel, Tree)
             {
-                PWM_MAIN.clearDijitWidget('navigationTree');
+                PWM_CFGEDIT.clearDijitWidget('navigationTree');
                 // Create test store, adding the getChildren() method required by ObjectStoreModel
                 const myStore = new Memory({
                     data: menuTreeData,
@@ -1151,7 +1142,7 @@ PWM_CFGEDIT.drawNavigationMenu = function(nextFunction) {
                 PWM_MAIN.getObject('navigationTree').innerHTML = '';
                 tree.placeAt(PWM_MAIN.getObject('navigationTree'));
                 tree.startup();
-                PWM_MAIN.setStyle('navigationTreeWrapper','display','inherit');
+                //PWM_MAIN.setStyle('navigationTreeWrapper','display','inherit');
                 PWM_VAR['navigationTree'] = tree; // used for expand/collapse button events;
                 console.log('completed menu tree drawing');
             }
@@ -1379,3 +1370,22 @@ PWM_CFGEDIT.drawInfoPage = function(settingInfo) {
 };
 
 
+PWM_CFGEDIT.clearDijitWidget = function (widgetName) {
+    require(["dojo","dijit/registry"],function(dojo, registry){
+
+        const oldDijitNode = registry.byId(widgetName);
+        if (oldDijitNode) {
+            try {
+                oldDijitNode.destroyRecursive();
+            } catch (error) {
+                PWM_MAIN.log('error destroying old widget: ' + error);
+            }
+
+            try {
+                oldDijitNode.destroy();
+            } catch (error) {
+                PWM_MAIN.log('error destroying old widget: ' + error);
+            }
+        }
+    });
+};

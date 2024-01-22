@@ -24,12 +24,14 @@ import com.novell.ldapchai.exception.ChaiUnavailableException;
 import com.novell.ldapchai.provider.ChaiProvider;
 import password.pwm.PwmApplication;
 import password.pwm.PwmDomain;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.PwmRequestContext;
+import password.pwm.user.UserInfo;
 import password.pwm.util.PasswordData;
 
 import java.util.Locale;
@@ -51,7 +53,7 @@ public class UserInfoFactory
             throws PwmUnrecoverableException
     {
         final PwmDomain pwmDomain = pwmApplication.domains().get( userIdentity.getDomainID() );
-        final String userLdapProfile = userIdentity.getLdapProfileID();
+        final ProfileID userLdapProfile = userIdentity.getLdapProfileID();
         final ChaiProvider provider = pwmDomain.getProxyChaiProvider( sessionLabel, userLdapProfile );
         return newUserInfo(
                 pwmApplication,
@@ -149,7 +151,7 @@ public class UserInfoFactory
     )
             throws PwmUnrecoverableException, ChaiUnavailableException
     {
-        return UserInfoReader.create( userIdentity, currentPassword, sessionLabel, userLocale, pwmApplication, provider );
+        return LdapUserInfoReader.create( userIdentity, currentPassword, sessionLabel, userLocale, pwmApplication, provider );
     }
 
 

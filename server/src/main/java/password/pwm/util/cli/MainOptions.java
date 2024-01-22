@@ -20,37 +20,29 @@
 
 package password.pwm.util.cli;
 
-import password.pwm.PwmEnvironment;
 import password.pwm.util.logging.PwmLogLevel;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.Serializable;
 import java.io.Writer;
+import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
-public class MainOptions implements Serializable
+public class MainOptions
 {
     private static final String OPT_DEBUG_LEVEL = "-debugLevel";
     private static final String OPT_APP_PATH = "-applicationPath";
-    private static final String OPT_APP_FLAGS = "-applicationFlags";
     private static final String OPT_FORCE = "-force";
 
-
     private PwmLogLevel pwmLogLevel;
-    private File applicationPath;
+    private Path applicationPath;
     private boolean forceFlag;
-    private Collection<PwmEnvironment.ApplicationFlag> applicationFlags;
     private List<String> remainingArguments;
 
     MainOptions(
             final PwmLogLevel pwmLogLevel,
-            final File applicationPath,
+            final Path applicationPath,
             final boolean forceFlag,
-            final Collection<PwmEnvironment.ApplicationFlag> applicationFlags,
             final List<String> remainingArguments
 
     )
@@ -58,9 +50,7 @@ public class MainOptions implements Serializable
         this.pwmLogLevel = pwmLogLevel;
         this.applicationPath = applicationPath;
         this.forceFlag = forceFlag;
-        this.applicationFlags = applicationFlags;
         this.remainingArguments = remainingArguments;
-
     }
 
     public PwmLogLevel getPwmLogLevel( )
@@ -68,7 +58,7 @@ public class MainOptions implements Serializable
         return pwmLogLevel;
     }
 
-    public File getApplicationPath( )
+    public Path getApplicationPath( )
     {
         return applicationPath;
     }
@@ -76,11 +66,6 @@ public class MainOptions implements Serializable
     public boolean isForceFlag( )
     {
         return forceFlag;
-    }
-
-    public Collection<PwmEnvironment.ApplicationFlag> getApplicationFlags( )
-    {
-        return applicationFlags;
     }
 
     public List<String> getRemainingArguments( )
@@ -93,12 +78,9 @@ public class MainOptions implements Serializable
             final Writer debugWriter
     )
     {
-
-
         PwmLogLevel pwmLogLevel = null;
-        File applicationPath = null;
+        Path applicationPath = null;
         boolean forceFlag = false;
-        Collection<PwmEnvironment.ApplicationFlag> applicationFlags = Collections.emptyList();
         final List<String> remainingArguments;
 
         final List<String> outputArgs = new ArrayList<>();
@@ -139,26 +121,12 @@ public class MainOptions implements Serializable
                         else
                         {
                             final String pathStr = arg.substring( OPT_APP_PATH.length() + 1 );
-                            applicationPath = new File( pathStr );
+                            applicationPath = Path.of( pathStr );
                         }
                     }
                     else if ( OPT_FORCE.equals( arg ) )
                     {
                         forceFlag = true;
-                    }
-                    else if ( arg.startsWith( OPT_APP_FLAGS ) )
-                    {
-                        if ( arg.length() < OPT_APP_FLAGS.length() + 2 )
-                        {
-                            out( debugWriter, OPT_APP_FLAGS + " option must include value (example: " + OPT_APP_FLAGS + "=Flag1,Flag2)" );
-                            System.exit( -1 );
-                        }
-                        else
-                        {
-                            final String flagStr = arg.substring( OPT_APP_PATH.length() + 1 );
-                            applicationFlags = PwmEnvironment.ParseHelper.parseApplicationFlagValueParameter( flagStr );
-                        }
-                        outputArgs.add( arg );
                     }
                     else
                     {
@@ -169,7 +137,7 @@ public class MainOptions implements Serializable
         }
 
         remainingArguments = new ArrayList<>( outputArgs );
-        return new MainOptions( pwmLogLevel, applicationPath, forceFlag, applicationFlags, remainingArguments );
+        return new MainOptions( pwmLogLevel, applicationPath, forceFlag, remainingArguments );
     }
 
     static void out( final Writer debugWriter, final CharSequence out )

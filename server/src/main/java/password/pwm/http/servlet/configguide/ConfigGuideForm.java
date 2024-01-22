@@ -21,6 +21,7 @@
 package password.pwm.http.servlet.configguide;
 
 import password.pwm.bean.DomainID;
+import password.pwm.bean.ProfileID;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingTemplate;
 import password.pwm.config.stored.StoredConfigKey;
@@ -55,7 +56,7 @@ public class ConfigGuideForm
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( ConfigGuideForm.class );
 
-    static final String LDAP_PROFILE_NAME = "default";
+    static final ProfileID LDAP_PROFILE_NAME = ProfileID.PROFILE_ID_DEFAULT;
     public static final DomainID DOMAIN_ID = DomainID.DOMAIN_ID_DEFAULT;
 
     public static Map<ConfigGuideFormField, String> defaultForm( )
@@ -124,13 +125,13 @@ public class ConfigGuideForm
 
         // establish a default ldap profile
 
-        modifySetting( modifier, PwmSetting.LDAP_PROFILE_LIST, null, new StringArrayValue(
-                Collections.singletonList( LDAP_PROFILE_NAME )
+        modifySetting( modifier, PwmSetting.LDAP_PROFILE_LIST, null, StringArrayValue.create(
+                Collections.singletonList( LDAP_PROFILE_NAME.stringValue() )
         ) );
 
         {
             final String newLdapURI = figureLdapUrlFromFormConfig( formData );
-            final StringArrayValue newValue = new StringArrayValue( Collections.singletonList( newLdapURI ) );
+            final StringArrayValue newValue = StringArrayValue.create( Collections.singletonList( newLdapURI ) );
             modifySetting( modifier, PwmSetting.LDAP_SERVER_URLS, LDAP_PROFILE_NAME, newValue );
         }
 
@@ -149,13 +150,13 @@ public class ConfigGuideForm
             modifySetting( modifier, PwmSetting.LDAP_PROXY_USER_PASSWORD, LDAP_PROFILE_NAME, passwordValue );
         }
 
-        modifySetting( modifier, PwmSetting.LDAP_CONTEXTLESS_ROOT, LDAP_PROFILE_NAME, new StringArrayValue(
+        modifySetting( modifier, PwmSetting.LDAP_CONTEXTLESS_ROOT, LDAP_PROFILE_NAME, StringArrayValue.create(
                 Collections.singletonList( formData.get( ConfigGuideFormField.PARAM_LDAP_CONTEXT ) )
         ) );
 
         {
             final String ldapContext = formData.get( ConfigGuideFormField.PARAM_LDAP_CONTEXT );
-            modifySetting( modifier, PwmSetting.LDAP_CONTEXTLESS_ROOT, LDAP_PROFILE_NAME, new StringArrayValue(
+            modifySetting( modifier, PwmSetting.LDAP_CONTEXTLESS_ROOT, LDAP_PROFILE_NAME, StringArrayValue.create(
                     Collections.singletonList( ldapContext )
             ) );
         }
@@ -219,8 +220,8 @@ public class ConfigGuideForm
         if ( formData.containsKey( ConfigGuideFormField.CHALLENGE_RESPONSE_DATA ) )
         {
             final String stringValue = formData.get( ConfigGuideFormField.CHALLENGE_RESPONSE_DATA );
-            final StoredValue challengeValue = ChallengeValue.factory().fromJson( stringValue );
-            modifySetting( modifier, PwmSetting.CHALLENGE_RANDOM_CHALLENGES, "default", challengeValue );
+            final StoredValue challengeValue = ChallengeValue.factory().fromJson( PwmSetting.CHALLENGE_RANDOM_CHALLENGES, stringValue );
+            modifySetting( modifier, PwmSetting.CHALLENGE_RANDOM_CHALLENGES, LDAP_PROFILE_NAME, challengeValue );
         }
 
         // set site url
@@ -232,7 +233,12 @@ public class ConfigGuideForm
         return modifier.newStoredConfiguration();
     }
 
-    private static void modifySetting( final StoredConfigurationModifier modifier, final PwmSetting pwmSetting, final String profile, final StoredValue storedValue )
+    private static void modifySetting(
+            final StoredConfigurationModifier modifier,
+                                       final PwmSetting pwmSetting,
+            final ProfileID profile,
+            final StoredValue storedValue
+    )
             throws PwmUnrecoverableException
     {
         final StoredConfigKey key = StoredConfigKey.forSetting( pwmSetting, profile, DOMAIN_ID );

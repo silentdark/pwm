@@ -23,14 +23,14 @@ package password.pwm.config.value;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Value;
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
+import password.pwm.data.ImmutableByteArray;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.ImmutableByteArray;
 import password.pwm.util.java.LazySupplier;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.json.JsonFactory;
@@ -41,7 +41,6 @@ import password.pwm.util.secure.PwmSecurityKey;
 import password.pwm.util.secure.SecureEngine;
 
 import java.io.IOException;
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -61,26 +60,22 @@ public class FileValue extends AbstractValue implements StoredValue
     private final Map<FileInformation, FileContent> values;
 
     @Value
-    public static class FileInformation implements Serializable
+    public static class FileInformation
     {
-        private static final long serialVersionUID = 1L;
-
         private final String filename;
         private final String filetype;
     }
 
     @EqualsAndHashCode
-    public static class FileContent implements Serializable
+    public static class FileContent
     {
-        private static final long serialVersionUID = 1L;
-
         private final String b64EncodedContents;
         private final transient Supplier<ImmutableByteArray> byteContents;
 
         private FileContent( final String b64EncodedContents )
         {
             this.b64EncodedContents = b64EncodedContents;
-            this.byteContents = new LazySupplier<>( () -> b64decode( b64EncodedContents ) );
+            this.byteContents = LazySupplier.create( () -> b64decode( b64EncodedContents ) );
         }
 
         public static FileContent fromEncodedString( final String input )
@@ -171,7 +166,7 @@ public class FileValue extends AbstractValue implements StoredValue
             }
 
             @Override
-            public StoredValue fromJson( final String input )
+            public StoredValue fromJson( final PwmSetting pwmSetting, final String input )
             {
                 throw new IllegalStateException( "not implemented" );
             }
@@ -189,13 +184,13 @@ public class FileValue extends AbstractValue implements StoredValue
         {
             final FileValue.FileInformation fileInformation = entry.getKey();
             final FileContent fileContent = entry.getValue();
-            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
 
-            final XmlElement fileInformationElement = XmlChai.getFactory().newElement( XML_ELEMENT_FILE_INFORMATION );
+            final XmlElement fileInformationElement = XmlFactory.getFactory().newElement( XML_ELEMENT_FILE_INFORMATION );
             fileInformationElement.setText( JsonFactory.get().serialize( fileInformation ) );
             valueElement.attachElement( fileInformationElement );
 
-            final XmlElement fileContentElement = XmlChai.getFactory().newElement( XML_ELEMENT_FILE_CONTENT );
+            final XmlElement fileContentElement = XmlFactory.getFactory().newElement( XML_ELEMENT_FILE_CONTENT );
 
             try
             {
@@ -232,13 +227,13 @@ public class FileValue extends AbstractValue implements StoredValue
     )
     {
         final List<Map<String, Object>> output = asMetaData();
-        return JsonFactory.get().serialize( ( Serializable ) output, JsonProvider.Flag.PrettyPrint );
+        return JsonFactory.get().serialize( output, JsonProvider.Flag.PrettyPrint );
     }
 
     @Override
-    public Serializable toDebugJsonObject( final Locale locale )
+    public Object toDebugJsonObject( final Locale locale )
     {
-        return ( Serializable ) asMetaData();
+        return asMetaData();
     }
 
     List<Map<String, Object>> asMetaData( )
@@ -295,7 +290,7 @@ public class FileValue extends AbstractValue implements StoredValue
 
     @Value
     @Builder
-    public static class FileInfo implements Serializable
+    public static class FileInfo
     {
         private String name;
         private String type;

@@ -20,6 +20,7 @@
 
 package password.pwm.http;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import password.pwm.PwmConstants;
 import password.pwm.PwmDomain;
 import password.pwm.bean.DomainID;
@@ -37,10 +38,20 @@ public class PwmSessionFactory
 
     private PwmSessionFactory( )
     {
-
     }
 
+    private static PwmSession createSession( final PwmRequest pwmRequest, final PwmDomain pwmDomain )
+    {
+        final PwmSession pwmSession = PwmSession.createPwmSession( pwmDomain );
+
+        pwmSession.getSessionStateBean().setLocale( pwmRequest.getLocale() );
+
+        return pwmSession;
+    }
+
+    @SuppressFBWarnings( "J2EE_STORE_OF_NON_SERIALIZABLE_OBJECT_INTO_SESSION" )
     public static void sessionMerge(
+            final PwmRequest pwmRequest,
             final PwmDomain pwmDomain,
             final PwmSession pwmSession,
             final HttpSession httpSession
@@ -49,21 +60,14 @@ public class PwmSessionFactory
     {
         httpSession.setAttribute( PwmConstants.SESSION_ATTR_PWM_SESSION, pwmSession );
 
-        setHttpSessionIdleTimeout( pwmDomain, pwmSession, httpSession );
+        setHttpSessionIdleTimeout( pwmDomain, pwmRequest, httpSession );
     }
 
-    private static PwmSession createSession( final PwmDomain pwmDomain )
+    public static PwmSession readPwmSession( final PwmRequest pwmRequest, final PwmDomain pwmdomain )
     {
-        // handle pwmSession init and assignment.
-
-        return PwmSession.createPwmSession( pwmDomain );
-    }
-
-
-    public static PwmSession readPwmSession( final HttpSession httpSession, final PwmDomain pwmdomain )
-    {
+        final HttpSession httpSession = pwmRequest.getHttpServletRequest().getSession();
         final Map<DomainID, PwmSession> map = getDomainSessionMap( httpSession );
-        return map.computeIfAbsent( pwmdomain.getDomainID(), k -> createSession( pwmdomain ) );
+        return map.computeIfAbsent( pwmdomain.getDomainID(), k -> createSession( pwmRequest, pwmdomain ) );
     }
 
     public static Map<DomainID, PwmSession> getDomainSessionMap( final HttpSession httpSession )
@@ -79,16 +83,16 @@ public class PwmSessionFactory
 
     public static void setHttpSessionIdleTimeout(
             final PwmDomain pwmDomain,
-            final PwmSession pwmSession,
+            final PwmRequest pwmRequest,
             final HttpSession httpSession
     )
             throws PwmUnrecoverableException
     {
-        final IdleTimeoutCalculator.MaxIdleTimeoutResult result = IdleTimeoutCalculator.figureMaxSessionTimeout( pwmDomain, pwmSession );
+        final IdleTimeoutCalculator.MaxIdleTimeoutResult result = IdleTimeoutCalculator.figureMaxSessionTimeout( pwmDomain, pwmRequest );
         if ( httpSession.getMaxInactiveInterval() != result.getIdleTimeout().as( TimeDuration.Unit.SECONDS ) )
         {
             httpSession.setMaxInactiveInterval( ( int ) result.getIdleTimeout().as( TimeDuration.Unit.SECONDS ) );
-            LOGGER.trace( pwmSession.getLabel(), () -> "setting java servlet session timeout to " + result.getIdleTimeout().asCompactString()
+            LOGGER.trace( pwmRequest, () -> "setting java servlet session timeout to " + result.getIdleTimeout().asCompactString()
                     + " due to " + result.getReason() );
         }
     }

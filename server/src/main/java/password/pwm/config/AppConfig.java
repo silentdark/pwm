@@ -24,6 +24,7 @@ import password.pwm.AppProperty;
 import password.pwm.PwmConstants;
 import password.pwm.bean.DomainID;
 import password.pwm.bean.PrivateKeyCertificate;
+import password.pwm.bean.ProfileID;
 import password.pwm.config.option.CertificateMatchingMode;
 import password.pwm.config.option.DataStorageMethod;
 import password.pwm.config.profile.EmailServerProfile;
@@ -40,32 +41,26 @@ import password.pwm.i18n.PwmLocaleBundle;
 import password.pwm.util.PasswordData;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.CollectionUtil;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.CollectorUtil;
+import password.pwm.util.java.EnumUtil;
 import password.pwm.util.java.LazySupplier;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
-import password.pwm.util.logging.PwmLogLevel;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmRandom;
 import password.pwm.util.secure.PwmSecurityKey;
 
 import java.security.cert.X509Certificate;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.EnumMap;
-import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
+import java.util.SortedMap;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 public class AppConfig implements SettingReader
 {
@@ -80,13 +75,13 @@ public class AppConfig implements SettingReader
     private final Map<AppProperty, String> appPropertyOverrides;
     private final Map<Locale, String> localeFlagMap;
 
-    private static final Supplier<AppConfig> DEFAULT_CONFIG = new LazySupplier<>( AppConfig::makeDefaultConfig );
+    private static final Supplier<AppConfig> DEFAULT_CONFIG = LazySupplier.create( AppConfig::makeDefaultConfig );
 
     private static AppConfig makeDefaultConfig()
     {
         try
         {
-            return new AppConfig( StoredConfigurationFactory.newConfig() );
+            return forStoredConfig( StoredConfigurationFactory.newConfig() );
         }
         catch ( final PwmUnrecoverableException e )
         {
@@ -99,25 +94,27 @@ public class AppConfig implements SettingReader
         return DEFAULT_CONFIG.get();
     }
 
-    public AppConfig( final StoredConfiguration storedConfiguration )
+    private AppConfig( final StoredConfiguration storedConfiguration )
     {
         this.storedConfiguration = storedConfiguration;
         this.settingReader = new StoredSettingReader( storedConfiguration, null, DomainID.systemId() );
-
         this.appPropertyOverrides = makeAppPropertyOverrides( settingReader );
 
         this.applicationSecurityKey = makeAppSecurityKey( this );
 
         this.localeFlagMap = makeLocaleFlagMap( this );
 
-        this.domainIDs = Collections.unmodifiableSet(  new TreeSet<>(
-                settingReader.readSettingAsStringArray( PwmSetting.DOMAIN_LIST ).stream()
-                .collect( Collectors.toUnmodifiableSet() ) ) );
+        this.domainIDs = Set.copyOf( new TreeSet<>( settingReader.readSettingAsStringArray( PwmSetting.DOMAIN_LIST ) ) );
 
-        this.domainConfigMap = Collections.unmodifiableMap(  domainIDs.stream()
-                .collect( CollectionUtil.collectorToLinkedMap(
+        this.domainConfigMap = domainIDs.stream()
+                .collect( CollectorUtil.toUnmodifiableLinkedMap(
                         DomainID::create,
-                        ( domainID ) -> new DomainConfig( this, DomainID.create( domainID ) ) ) ) );
+                        ( domainID ) -> new DomainConfig( this, DomainID.create( domainID ) ) ) );
+    }
+
+    public static AppConfig forStoredConfig( final StoredConfiguration storedConfiguration )
+    {
+        return new AppConfig( storedConfiguration );
     }
 
     public Set<String> getDomainIDs()
@@ -188,12 +185,11 @@ public class AppConfig implements SettingReader
 
     public Map<AppProperty, String> readAllAppProperties()
     {
-          return Collections.unmodifiableMap( EnumSet.allOf( AppProperty.class ).stream()
-                  .collect( Collectors.toMap(
-                          Function.identity(),
-                          this::readAppProperty
-                  ) ) );
-
+        return EnumUtil.enumStream( AppProperty.class )
+                .collect( CollectorUtil.toLinkedMap(
+                        Function.identity(),
+                        this::readAppProperty
+                ) );
     }
 
     public StoredConfiguration getStoredConfiguration()
@@ -222,11 +218,6 @@ public class AppConfig implements SettingReader
     public List<String> readSettingAsStringArray( final PwmSetting pwmSetting )
     {
         return settingReader.readSettingAsStringArray( pwmSetting );
-    }
-
-    public PwmLogLevel getEventLogLocalDBLevel()
-    {
-        return readSettingAsEnum( PwmSetting.EVENTS_LOCALDB_LOG_LEVEL, PwmLogLevel.class );
     }
 
     public boolean isDevDebugMode()
@@ -303,7 +294,7 @@ public class AppConfig implements SettingReader
         return settingReader.readGenericStorageLocations( setting );
     }
 
-    public Map<String, EmailServerProfile> getEmailServerProfiles( )
+    public Map<ProfileID, EmailServerProfile> getEmailServerProfiles( )
     {
         return settingReader.getProfileMap( ProfileDefinition.EmailServers );
     }
@@ -324,6 +315,12 @@ public class AppConfig implements SettingReader
                 && readSettingAsPassword( PwmSetting.DATABASE_PASSWORD ) != null;
     }
 
+    public List<String> permittedPhotoMimeTypes()
+    {
+        final String permittedMimeTypesStr = readAppProperty( AppProperty.SECURITY_HTTP_USER_PHOTO_MIME_TYPES );
+        return List.copyOf( StringUtil.splitAndTrim( permittedMimeTypesStr, "," ) );
+    }
+
     @Override
     public PasswordData readSettingAsPassword( final PwmSetting setting )
     {
@@ -337,26 +334,45 @@ public class AppConfig implements SettingReader
 
     private static Map<AppProperty, String> makeAppPropertyOverrides( final SettingReader settingReader )
     {
-        final Map<String, String> stringMap =  StringUtil.convertStringListToNameValuePair(
-                settingReader.readSettingAsStringArray( PwmSetting.APP_PROPERTY_OVERRIDES ), "=" );
+        final List<String> settingValues = settingReader.readSettingAsStringArray( PwmSetting.APP_PROPERTY_OVERRIDES );
+
+        final Map<String, String> stringMap =  StringUtil.convertStringListToNameValuePair( settingValues, "=" );
 
         final Map<AppProperty, String> appPropertyMap = new EnumMap<>( AppProperty.class );
         for ( final Map.Entry<String, String> stringEntry : stringMap.entrySet() )
         {
-            JavaHelper.readEnumFromString( AppProperty.class, stringEntry.getKey() )
+            AppProperty.forKey( stringEntry.getKey() )
                     .ifPresent( appProperty ->
                     {
-                       final String defaultValue = appProperty.getDefaultValue();
-                       final String value = stringEntry.getValue();
-                       if ( !Objects.equals( defaultValue, value ) )
-                       {
-                           appPropertyMap.put( appProperty, value );
-                       }
+                        if ( !appProperty.isDefaultValue( stringEntry.getValue() ) )
+                        {
+                            appPropertyMap.put( appProperty, stringEntry.getValue() );
+                        }
                     } );
         }
 
-        return Collections.unmodifiableMap( appPropertyMap );
+        return CollectionUtil.unmodifiableEnumMap( appPropertyMap, AppProperty.class );
     }
+
+    public boolean isSmsConfigured()
+    {
+        final String gatewayUrl = readSettingAsString( PwmSetting.SMS_GATEWAY_URL );
+        final String gatewayUser = readSettingAsString( PwmSetting.SMS_GATEWAY_USER );
+        final PasswordData gatewayPass = readSettingAsPassword( PwmSetting.SMS_GATEWAY_PASSWORD );
+
+        if ( StringUtil.isEmpty( gatewayUrl ) )
+        {
+            return false;
+        }
+
+        if ( !StringUtil.isEmpty( gatewayUser ) && gatewayPass == null )
+        {
+            return false;
+        }
+
+        return true;
+    }
+
 
     private static PwmSecurityKey makeAppSecurityKey( final AppConfig appConfig )
     {
@@ -400,38 +416,16 @@ public class AppConfig implements SettingReader
         }
     }
 
-    private static Map<Locale, String> makeLocaleFlagMap( final AppConfig appConfig )
+    private static SortedMap<Locale, String> makeLocaleFlagMap( final AppConfig appConfig )
     {
-        final String defaultLocaleAsString = PwmConstants.DEFAULT_LOCALE.toString();
-
         final List<String> inputList = appConfig.readSettingAsStringArray( PwmSetting.KNOWN_LOCALES );
         final Map<String, String> inputMap = StringUtil.convertStringListToNameValuePair( inputList, "::" );
 
-        final Map<String, String> sortedMap = new TreeMap<>( inputMap.keySet().stream()
-                .collect( Collectors.toMap(
-                        str -> LocaleHelper.parseLocaleString( str ).getDisplayName(),
-                        Function.identity()
-                ) ) );
-
-        final List<String> returnList = new ArrayList<>( sortedMap.size() + 1 );
-
-        //ensure default is first.
-        returnList.add( defaultLocaleAsString );
-        returnList.addAll( sortedMap.values().stream()
-                .filter( str -> !Objects.equals( defaultLocaleAsString, str ) )
-                .collect( Collectors.toList() ) );
-
-        final Map<Locale, String> localeFlagMap = new LinkedHashMap<>( returnList.size() );
-        for ( final String localeString : returnList )
-        {
-            final Locale loopLocale = LocaleHelper.parseLocaleString( localeString );
-            if ( loopLocale != null )
-            {
-                final String flagCode = inputMap.getOrDefault( localeString, loopLocale.getCountry() );
-                localeFlagMap.put( loopLocale, flagCode );
-            }
-        }
-        return Collections.unmodifiableMap( localeFlagMap );
+        return inputMap.keySet().stream()
+                .collect( CollectorUtil.toUnmodifiableSortedMap(
+                        LocaleHelper::parseLocaleString,
+                        s -> inputMap.getOrDefault( s, LocaleHelper.parseLocaleString( s ).getCountry() ),
+                        LocaleHelper.localeDisplayComparator() ) );
     }
 
     @Override

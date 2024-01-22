@@ -44,6 +44,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Optional;
 
 public abstract class CommandServlet extends ControlledPwmServlet
 {
@@ -51,9 +52,15 @@ public abstract class CommandServlet extends ControlledPwmServlet
     private static final PwmLogger LOGGER = PwmLogger.forClass( CommandServlet.class );
 
     @Override
-    public Class<? extends ProcessAction> getProcessActionsClass( )
+    protected PwmLogger getLogger()
     {
-        return CommandAction.class;
+        return LOGGER;
+    }
+
+    @Override
+    public Optional<Class<? extends ProcessAction>> getProcessActionsClass( )
+    {
+        return Optional.of( CommandAction.class );
     }
 
     public enum CommandAction implements ProcessAction
@@ -101,11 +108,11 @@ public abstract class CommandServlet extends ControlledPwmServlet
         final String body = pwmRequest.readRequestBodyAsString();
         try
         {
-            LOGGER.trace( () -> "CSP Report: " + body );
+            LOGGER.trace( pwmRequest, () -> "CSP Report: " + body );
         }
         catch ( final Exception e )
         {
-            LOGGER.error( () -> "error processing csp report: " + e.getMessage() + ", body=" + body );
+            LOGGER.error( pwmRequest, () -> "error processing csp report: " + e.getMessage() + ", body=" + body );
         }
         return ProcessStatus.Halt;
     }

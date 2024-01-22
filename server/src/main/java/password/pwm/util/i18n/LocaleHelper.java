@@ -41,6 +41,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +60,17 @@ import java.util.stream.Collectors;
 public class LocaleHelper
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( LocaleHelper.class );
+
+    // sort placing 'default' first then alphabetically.
+    private static final Comparator<String> LOCALE_STRING_COMPARATOR = Comparator
+            .comparing( ( String s ) -> s.equals( PwmConstants.DEFAULT_LOCALE.toString() ) )
+            .reversed()
+            .thenComparing( str -> LocaleHelper.parseLocaleString( str ).getDisplayName() );
+
+    private static final Comparator<Locale> LOCALE_COMPARATOR = Comparator
+            .comparing( ( Locale s ) -> s.equals( PwmConstants.DEFAULT_LOCALE ) )
+            .reversed()
+            .thenComparing( ( Function<Locale, String> ) Locale::getDisplayName );
 
 
     public enum TextDirection
@@ -82,6 +94,16 @@ public class LocaleHelper
         {
             return Optional.empty();
         }
+    }
+
+    public static Comparator<String> localeDisplayStringComparator()
+    {
+        return LOCALE_STRING_COMPARATOR;
+    }
+
+    public static Comparator<Locale> localeDisplayComparator()
+    {
+        return LOCALE_COMPARATOR;
     }
 
     public static String getLocalizedMessage( final Locale locale, final PwmDisplayBundle key, final SettingReader config )
@@ -472,6 +494,25 @@ public class LocaleHelper
         return getLocalizedMessage( locale, Display.Value_NotApplicable, null );
     }
 
+    public static String orNotApplicable( final Object input )
+    {
+        return orNotApplicable( input, PwmConstants.DEFAULT_LOCALE );
+    }
+
+    public static String orNotApplicable( final Object input, final Locale locale )
+    {
+        if ( input == null )
+        {
+            return valueNotApplicable( locale );
+        }
+        final String stringValue = input.toString();
+        if ( StringUtil.isEmpty( stringValue ) )
+        {
+            return valueNotApplicable( locale );
+        }
+        return stringValue;
+    }
+
     public static TextDirection textDirectionForLocale( final PwmDomain pwmDomain, final Locale locale )
     {
         final String rtlRegex = pwmDomain.getConfig().readAppProperty( AppProperty.L10N_RTL_REGEX );
@@ -490,5 +531,29 @@ public class LocaleHelper
             returnMap.put( LocaleHelper.getBrowserLocaleString( entry.getKey() ), entry.getValue() );
         }
         return Collections.unmodifiableMap( returnMap );
+    }
+
+    public static class Factory
+    {
+        private final SettingReader settingReader;
+        private final Locale locale;
+        private final Class<? extends PwmDisplayBundle> bundle;
+
+        private Factory( final SettingReader settingReader, final Locale locale, final Class<? extends PwmDisplayBundle> bundle )
+        {
+            this.settingReader = settingReader;
+            this.locale = locale;
+            this.bundle = bundle;
+        }
+
+        public static Factory createFactory( final SettingReader settingReader, final Locale locale, final Class<? extends PwmDisplayBundle> bundle )
+        {
+            return new Factory( settingReader, locale, bundle );
+        }
+
+        public String get( final String key )
+        {
+            return getLocalizedMessage( locale, key, settingReader, bundle );
+        }
     }
 }

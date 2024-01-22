@@ -26,11 +26,10 @@ import password.pwm.AppProperty;
 import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.option.IntruderStorageMethod;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.EnumUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.secure.PwmHashAlgorithm;
 
-import java.io.Serializable;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
@@ -45,7 +44,7 @@ public class IntruderSettings
 
     public static IntruderSettings fromConfiguration( final DomainConfig config )
     {
-        final PwmHashAlgorithm storageHashAlgorithm = JavaHelper.readEnumFromString( PwmHashAlgorithm.class, config.readAppProperty( AppProperty.INTRUDER_STORAGE_HASH_ALGORITHM ) )
+        final PwmHashAlgorithm storageHashAlgorithm = EnumUtil.readEnumFromString( PwmHashAlgorithm.class, config.readAppProperty( AppProperty.INTRUDER_STORAGE_HASH_ALGORITHM ) )
                 .orElse( PwmHashAlgorithm.SHA256 );
 
         return IntruderSettings.builder()
@@ -103,7 +102,7 @@ public class IntruderSettings
 
     @Value
     @Builder
-    public static class TypeSettings implements Serializable
+    public static class TypeSettings
     {
         private TimeDuration checkDuration;
         private int checkCount;

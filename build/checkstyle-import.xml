@@ -52,8 +52,9 @@
     <!-- graylog2 -->
     <allow pkg="org.graylog2"/>
 
-    <!-- log4j -->
-    <allow pkg="org.apache.log4j"/>
+    <!-- logback -->
+    <allow pkg="org.slf4j"/>
+    <allow pkg="ch.qos.logback"/>
 
     <!-- testing -->
     <allow pkg="org.junit"/>
@@ -82,6 +83,7 @@
     <allow pkg="java.awt"/>
     <allow pkg="javax.security"/>
     <allow pkg="javax.servlet"/>
+    <allow pkg="jakarta.servlet"/>
     <allow pkg="javax.net"/>
     <allow pkg="javax.crypto"/>
     <allow pkg="jakarta.mail"/>
@@ -104,12 +106,14 @@
     <!--servlet -->
     <subpackage name="http.servlet">
         <allow pkg="javax.servlet"/>
+        <allow pkg="jakarta.servlet"/>
     </subpackage>
 
     <!-- web services -->
     <subpackage name="ws.server">
         <allow pkg="javax.ws"/>
         <allow pkg="javax.servlet"/>
+        <allow pkg="jakarta.servlet"/>
         <allow pkg="org.glassfish.jersey"/>
     </subpackage>
 
@@ -131,6 +135,7 @@
 
     <!-- database -->
     <subpackage name="svc.db">
+        <allow pkg="com.zaxxer.hikari"/>
         <allow pkg="java.sql"/>
     </subpackage>
 

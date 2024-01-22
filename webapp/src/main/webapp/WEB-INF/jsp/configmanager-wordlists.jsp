@@ -50,13 +50,13 @@
         <table class="noborder">
             <tr class="buttonrow">
                 <td class="buttoncell">
-                    <button class="menubutton" id="MenuItem_UploadWordlist" style="visibility: hidden;">
+                    <button class="hidden menubutton" id="MenuItem_UploadWordlist">
                         <pwm:if test="<%=PwmIfTest.showIcons%>"><span class="btn-icon pwm-icon pwm-icon-upload"></span></pwm:if>
                         Upload Word List
                     </button>
                 </td>
                 <td class="buttoncell">
-                    <button class="menubutton" id="MenuItem_ClearWordlist" style="visibility: hidden;">
+                    <button class="hidden menubutton" id="MenuItem_ClearWordlist">
                         <pwm:if test="<%=PwmIfTest.showIcons%>"><span class="btn-icon pwm-icon pwm-icon-trash"></span></pwm:if>
                         Clear Word List
                     </button>
@@ -64,28 +64,7 @@
             </tr>
         </table>
         <% } %>
-        <br/><br/><br/><br/><br/>
-        <% { %>
-        <table style="width:550px" id="table-seedlistInfo">
-        </table>
-        <br/>
-        <table class="noborder">
-            <tr class="buttonrow">
-                <td class="buttoncell">
-                    <button class="menubutton" id="MenuItem_UploadSeedlist" style="visibility: hidden;">
-                        <pwm:if test="<%=PwmIfTest.showIcons%>"><span class="btn-icon pwm-icon pwm-icon-upload"></span></pwm:if>
-                        Upload Seed List
-                    </button>
-                </td>
-                <td class="buttoncell">
-                    <button class="menubutton" id="MenuItem_ClearSeedlist" style="visibility: hidden;">
-                        <pwm:if test="<%=PwmIfTest.showIcons%>"><span class="btn-icon pwm-icon pwm-icon-trash"></span></pwm:if>
-                        Clear Seed List
-                    </button>
-                </td>
-            </tr>
-        </table>
-        <% } %>
+        <br/><br/>
         <div style="margin: 25px">
             <span class="footnote"><pwm:display key="Display_Wordlists_Description" bundle="Config"/></span>
         </div>

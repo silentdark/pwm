@@ -22,14 +22,14 @@ package password.pwm.http;
 
 public enum JspUrl
 {
-
     INIT( "init.jsp" ),
     ERROR( "error.jsp" ),
     SUCCESS( "success.jsp" ),
     APP_UNAVAILABLE( "application-unavailable.jsp" ),
     ADMIN_DASHBOARD( "admin-dashboard.jsp" ),
-    ADMIN_ANALYSIS( "admin-analysis.jsp" ),
     ADMIN_ACTIVITY( "admin-activity.jsp" ),
+    ADMIN_REPORTING( "admin-reporting.jsp" ),
+    ADMIN_STATISTICS( "admin-statistics.jsp" ),
     ADMIN_TOKEN_LOOKUP( "admin-tokenlookup.jsp" ),
     ADMIN_LOGVIEW_WINDOW( "admin-logview-window.jsp" ),
     ADMIN_LOGVIEW( "admin-logview.jsp" ),
@@ -96,7 +96,7 @@ public enum JspUrl
     CONFIG_MANAGER_PERMISSIONS( "configmanager-permissions.jsp" ),
     CONFIG_MANAGER_MODE_CONFIGURATION( "configmanager.jsp" ),
     CONFIG_MANAGER_WORDLISTS( "configmanager-wordlists.jsp" ),
-    CONFIG_MANAGER_CERTIFICATES( "configmanager-certificates.jsp" ),
+    ADMIN_SYSTEM_CERTIFICATES( "admin-system-certificates.jsp" ),
     CONFIG_MANAGER_LOCALDB( "configmanager-localdb.jsp" ),
     CONFIG_MANAGER_LOGIN( "configmanager-login.jsp" ),
     HELPDESK_SEARCH( "helpdesk.jsp" ),

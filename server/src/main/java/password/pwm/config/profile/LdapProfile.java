@@ -24,9 +24,10 @@ import com.novell.ldapchai.ChaiEntry;
 import com.novell.ldapchai.exception.ChaiOperationException;
 import com.novell.ldapchai.exception.ChaiUnavailableException;
 import com.novell.ldapchai.provider.ChaiProvider;
-import password.pwm.AppProperty;
+import password.pwm.DomainProperty;
 import password.pwm.PwmDomain;
 import password.pwm.bean.DomainID;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.PwmSetting;
@@ -37,13 +38,13 @@ import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.svc.cache.CacheKey;
 import password.pwm.svc.cache.CachePolicy;
+import password.pwm.util.java.EnumUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -56,7 +57,20 @@ public class LdapProfile extends AbstractProfile implements Profile
 
     private static final ProfileDefinition PROFILE_TYPE = ProfileDefinition.LdapProfile;
 
-    protected LdapProfile( final DomainID domainID, final String identifier, final StoredConfiguration storedValueMap )
+    private List<String> rootContextSupplier;
+    private Map<String, String> selectableContexts;
+
+    private Optional<UserIdentity> cachedTestUser;
+    private UserIdentity cachedProxyUser;
+
+    public enum GuidMode
+    {
+        DN,
+        VENDORGUID,
+        ATTRIBUTE,
+    }
+
+    protected LdapProfile( final DomainID domainID, final ProfileID identifier, final StoredConfiguration storedValueMap )
     {
         super( domainID, identifier, storedValueMap );
     }
@@ -67,17 +81,22 @@ public class LdapProfile extends AbstractProfile implements Profile
     )
             throws PwmUnrecoverableException
     {
-        final List<String> rawValues = readSettingAsStringArray( PwmSetting.LDAP_LOGIN_CONTEXTS );
-        final Map<String, String> configuredValues = StringUtil.convertStringListToNameValuePair( rawValues, ":::" );
-        final Map<String, String> canonicalValues = new LinkedHashMap<>( configuredValues.size() );
-        for ( final Map.Entry<String, String> entry : configuredValues.entrySet() )
+        if ( selectableContexts == null )
         {
-            final String dn = entry.getKey();
-            final String label = entry.getValue();
-            final String canonicalDN = readCanonicalDN( sessionLabel, pwmDomain, dn );
-            canonicalValues.put( canonicalDN, label );
+            final List<String> rawValues = readSettingAsStringArray( PwmSetting.LDAP_LOGIN_CONTEXTS );
+            final Map<String, String> configuredValues = StringUtil.convertStringListToNameValuePair( rawValues, ":::" );
+            final Map<String, String> canonicalValues = new LinkedHashMap<>( configuredValues.size() );
+            for ( final Map.Entry<String, String> entry : configuredValues.entrySet() )
+            {
+                final String dn = entry.getKey();
+                final String label = entry.getValue();
+                final String canonicalDN = readCanonicalDN( sessionLabel, pwmDomain, dn );
+                canonicalValues.put( canonicalDN, label );
+            }
+            selectableContexts = Map.copyOf( canonicalValues );
         }
-        return Collections.unmodifiableMap( canonicalValues );
+
+        return selectableContexts;
     }
 
     public List<String> getRootContexts(
@@ -86,14 +105,19 @@ public class LdapProfile extends AbstractProfile implements Profile
     )
             throws PwmUnrecoverableException
     {
-        final List<String> rawValues = readSettingAsStringArray( PwmSetting.LDAP_CONTEXTLESS_ROOT );
-        final List<String> canonicalValues = new ArrayList<>( rawValues.size() );
-        for ( final String dn : rawValues )
+        if ( rootContextSupplier == null )
         {
-            final String canonicalDN = readCanonicalDN( sessionLabel, pwmDomain, dn );
-            canonicalValues.add( canonicalDN );
+            final List<String> rawValues = readSettingAsStringArray( PwmSetting.LDAP_CONTEXTLESS_ROOT );
+            final List<String> canonicalValues = new ArrayList<>( rawValues.size() );
+            for ( final String dn : rawValues )
+            {
+                final String canonicalDN = readCanonicalDN( sessionLabel, pwmDomain, dn );
+                canonicalValues.add( canonicalDN );
+            }
+            rootContextSupplier = List.copyOf( canonicalValues );
         }
-        return Collections.unmodifiableList( canonicalValues );
+
+        return rootContextSupplier;
     }
 
     public List<String> getLdapUrls(
@@ -106,7 +130,7 @@ public class LdapProfile extends AbstractProfile implements Profile
     public String getDisplayName( final Locale locale )
     {
         final String displayName = readSettingAsLocalizedString( PwmSetting.LDAP_PROFILE_DISPLAY_NAME, locale );
-        return displayName == null || displayName.length() < 1 ? getIdentifier() : displayName;
+        return StringUtil.isTrimEmpty( displayName ) ? getId().stringValue() : displayName;
     }
 
     public String getUsernameAttribute( )
@@ -119,13 +143,13 @@ public class LdapProfile extends AbstractProfile implements Profile
     public ChaiProvider getProxyChaiProvider( final SessionLabel sessionLabel, final PwmDomain pwmDomain ) throws PwmUnrecoverableException
     {
         verifyIsEnabled();
-        return pwmDomain.getProxyChaiProvider( sessionLabel, this.getIdentifier() );
+        return pwmDomain.getProxyChaiProvider( sessionLabel, this.getId() );
     }
 
     @Override
     public ProfileDefinition profileType( )
     {
-        throw new UnsupportedOperationException();
+        return PROFILE_TYPE;
     }
 
     @Override
@@ -144,17 +168,17 @@ public class LdapProfile extends AbstractProfile implements Profile
         final Instant startTime = Instant.now();
 
         {
-            final boolean doCanonicalDnResolve = Boolean.parseBoolean( pwmDomain.getConfig().readAppProperty( AppProperty.LDAP_RESOLVE_CANONICAL_DN ) );
+            final boolean doCanonicalDnResolve = Boolean.parseBoolean( pwmDomain.getConfig().readDomainProperty( DomainProperty.LDAP_RESOLVE_CANONICAL_DN ) );
             if ( !doCanonicalDnResolve )
             {
                 return dnValue;
             }
         }
 
-        final boolean enableCanonicalCache = Boolean.parseBoolean( pwmDomain.getConfig().readAppProperty( AppProperty.LDAP_CACHE_CANONICAL_ENABLE ) );
+        final boolean enableCanonicalCache = Boolean.parseBoolean( pwmDomain.getConfig().readDomainProperty( DomainProperty.LDAP_CACHE_CANONICAL_ENABLE ) );
 
         String canonicalValue = null;
-        final CacheKey cacheKey = CacheKey.newKey( LdapProfile.class, null, "canonicalDN-" + this.getIdentifier() + "-" + dnValue );
+        final CacheKey cacheKey = CacheKey.newKey( LdapProfile.class, null, "canonicalDN-" + this.getId() + "-" + dnValue );
         if ( enableCanonicalCache )
         {
             final String cachedDN = pwmDomain.getCacheService().get( cacheKey, String.class );
@@ -174,20 +198,22 @@ public class LdapProfile extends AbstractProfile implements Profile
 
                 if ( enableCanonicalCache )
                 {
-                    final long cacheSeconds = Long.parseLong( pwmDomain.getConfig().readAppProperty( AppProperty.LDAP_CACHE_CANONICAL_SECONDS ) );
+                    final long cacheSeconds = Long.parseLong( pwmDomain.getConfig().readDomainProperty( DomainProperty.LDAP_CACHE_CANONICAL_SECONDS ) );
                     final CachePolicy cachePolicy = CachePolicy.makePolicyWithExpiration( TimeDuration.of( cacheSeconds, TimeDuration.Unit.SECONDS ) );
                     pwmDomain.getCacheService().put( cacheKey, cachePolicy, canonicalValue );
                 }
 
                 {
                     final String finalCanonical = canonicalValue;
-                    LOGGER.trace( () -> "read and cached canonical ldap DN value for input '" + dnValue + "' as '" + finalCanonical + "'",
-                            () -> TimeDuration.fromCurrent( startTime ) );
+                    LOGGER.trace( sessionLabel, () -> "read and cached canonical ldap DN value for input '"
+                                    + dnValue + "' as '" + finalCanonical + "'",
+                            TimeDuration.fromCurrent( startTime ) );
                 }
             }
             catch ( final ChaiUnavailableException | ChaiOperationException e )
             {
-                LOGGER.error( () -> "error while reading canonicalDN for dn value '" + dnValue + "', error: " + e.getMessage() );
+                LOGGER.error( sessionLabel, () -> "error while reading canonicalDN for dn value '"
+                        + dnValue + "', error: " + e.getMessage() );
                 return dnValue;
             }
         }
@@ -198,17 +224,27 @@ public class LdapProfile extends AbstractProfile implements Profile
     public Optional<UserIdentity> getTestUser( final SessionLabel sessionLabel, final PwmDomain pwmDomain )
             throws PwmUnrecoverableException
     {
-        return readUserIdentity( sessionLabel, pwmDomain, PwmSetting.LDAP_TEST_USER_DN );
+        if ( cachedTestUser == null )
+        {
+            cachedTestUser = readUserIdentity( sessionLabel, pwmDomain, PwmSetting.LDAP_TEST_USER_DN );
+        }
+
+        return cachedTestUser;
     }
 
     public UserIdentity getProxyUser( final SessionLabel sessionLabel, final PwmDomain pwmDomain )
             throws PwmUnrecoverableException
     {
-        return readUserIdentity( sessionLabel, pwmDomain, PwmSetting.LDAP_PROXY_USER_DN )
-                .orElseThrow( () ->
-                        new PwmUnrecoverableException( new ErrorInformation(
-                                PwmError.CONFIG_FORMAT_ERROR,
-                                "ldap proxy user is not defined" ) ) );
+        if ( cachedProxyUser == null )
+        {
+            cachedProxyUser = readUserIdentity( sessionLabel, pwmDomain, PwmSetting.LDAP_PROXY_USER_DN )
+                    .orElseThrow( () ->
+                            new PwmUnrecoverableException( new ErrorInformation(
+                                    PwmError.CONFIG_FORMAT_ERROR,
+                                    "ldap proxy user is not defined" ) ) );
+        }
+
+        return cachedProxyUser;
     }
 
     private Optional<UserIdentity> readUserIdentity(
@@ -222,7 +258,7 @@ public class LdapProfile extends AbstractProfile implements Profile
 
         if ( StringUtil.notEmpty( testUserDN ) )
         {
-            return Optional.of( UserIdentity.create( testUserDN, this.getIdentifier(), pwmDomain.getDomainID() ).canonicalized( sessionLabel, pwmDomain.getPwmApplication() ) );
+            return Optional.of( UserIdentity.create( testUserDN, this.getId(), pwmDomain.getDomainID() ).canonicalized( sessionLabel, pwmDomain.getPwmApplication() ) );
         }
 
         return Optional.empty();
@@ -231,7 +267,7 @@ public class LdapProfile extends AbstractProfile implements Profile
     public static class LdapProfileFactory implements ProfileFactory
     {
         @Override
-        public Profile makeFromStoredConfiguration( final StoredConfiguration storedConfiguration, final DomainID domainID, final String identifier )
+        public Profile makeFromStoredConfiguration( final StoredConfiguration storedConfiguration, final DomainID domainID, final ProfileID identifier )
         {
             return new LdapProfile( domainID, identifier, storedConfiguration );
         }
@@ -242,7 +278,7 @@ public class LdapProfile extends AbstractProfile implements Profile
     {
         if ( !isEnabled() )
         {
-            final String msg = "ldap profile '" + getIdentifier() + "' is not enabled";
+            final String msg = "ldap profile '" + getId() + "' is not enabled";
             throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_SERVICE_NOT_AVAILABLE, msg ) );
         }
     }
@@ -255,6 +291,35 @@ public class LdapProfile extends AbstractProfile implements Profile
     @Override
     public String toString()
     {
-        return "LDAPProfile:" + this.getIdentifier();
+        return "LDAPProfile:" + this.getId();
+    }
+
+    public void testIfDnIsContainedByRootContext( final SessionLabel sessionLabel, final PwmDomain pwmDomain, final String testDN )
+            throws PwmUnrecoverableException
+    {
+        if ( StringUtil.isEmpty( testDN ) )
+        {
+            return;
+        }
+
+        final List<String> rootContexts = getRootContexts( sessionLabel, pwmDomain );
+
+        final Optional<String> matchedDn = rootContexts.stream()
+                .filter( testDN::endsWith )
+                .findFirst();
+
+        if ( matchedDn.isPresent() )
+        {
+            return;
+        }
+
+        final String msg = "specified search context '" + testDN + "' is not contained by a configured root context";
+        throw new PwmUnrecoverableException( PwmError.CONFIG_FORMAT_ERROR, msg );
+    }
+
+    public GuidMode getGuidMode()
+    {
+        final String guidAttributeString = readSettingAsString( PwmSetting.LDAP_GUID_ATTRIBUTE );
+        return EnumUtil.readEnumFromString( GuidMode.class, guidAttributeString ).orElse( GuidMode.ATTRIBUTE );
     }
 }

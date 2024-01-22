@@ -21,12 +21,11 @@
 package password.pwm.util.localdb;
 
 import password.pwm.util.java.ClosableIterator;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.EnumUtil;
 
-import java.io.File;
-import java.io.Serializable;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
@@ -63,7 +62,7 @@ public interface LocalDB
     Optional<String> get( DB db, String key )
             throws LocalDBException;
 
-    LocalDBIterator<Map.Entry<String, String>> iterator( DB db )
+    LocalDBIterator iterator( DB db )
             throws LocalDBException;
 
     @WriteOperation
@@ -109,9 +108,9 @@ public interface LocalDB
     void truncate( DB db )
             throws LocalDBException;
 
-    File getFileLocation( );
+    Path getFileLocation( );
 
-    Map<String, Serializable> debugInfo( );
+    Map<String, Object> debugInfo( );
 
     enum DB
     {
@@ -121,9 +120,7 @@ public interface LocalDB
         PWM_META( Flag.Backup ),
         SHAREDHISTORY_META( Flag.Backup ),
         SHAREDHISTORY_WORDS( Flag.Backup ),
-        // WORDLIST_META(true), // @deprecated
         WORDLIST_WORDS( Flag.Backup ),
-        // SEEDLIST_META(true), // @deprecated
         SEEDLIST_WORDS( Flag.Backup ),
         PWM_STATS( Flag.Backup ),
         EVENTLOG_EVENTS( Flag.Backup ),
@@ -135,27 +132,46 @@ public interface LocalDB
         INTRUDER( Flag.Backup ),
         AUDIT_QUEUE( Flag.Backup ),
         AUDIT_EVENTS( Flag.Backup ),
-        USER_CACHE( Flag.Backup ),
-        TEMP(  ),
         SYSLOG_QUEUE( Flag.Backup ),
-        CACHE(  ),
-        REPORT_QUEUE( ),;
+
+        TEMP( Flag.Purge ),
+        CACHE( Flag.Purge ),
+
+        @Deprecated
+        WORDLIST_META( Flag.Purge ),
+
+        @Deprecated
+        SEEDLIST_META( Flag.Purge ),
+
+        @Deprecated
+        USER_CACHE( Flag.Purge ),
+
+        @Deprecated
+        REPORT_QUEUE( Flag.Purge ),;
 
         private final boolean backup;
+        private final boolean purge;
 
         private enum Flag
         {
             Backup,
+            Purge,
         }
 
         DB( final Flag... flag )
         {
-            this.backup = JavaHelper.enumArrayContainsValue( flag, Flag.Backup );
+            this.backup = EnumUtil.enumArrayContainsValue( flag, Flag.Backup );
+            this.purge = EnumUtil.enumArrayContainsValue( flag, Flag.Purge );
         }
 
         public boolean isBackup( )
         {
             return backup;
+        }
+
+        public boolean isPurge()
+        {
+            return purge;
         }
     }
 
@@ -173,7 +189,7 @@ public interface LocalDB
     }
 
 
-    interface LocalDBIterator<K> extends ClosableIterator<Map.Entry<String, String>>
+    interface LocalDBIterator extends ClosableIterator<Map.Entry<String, String>>
     {
     }
 }

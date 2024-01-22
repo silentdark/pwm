@@ -26,6 +26,7 @@ import lombok.Builder;
 import lombok.Value;
 import password.pwm.PwmConstants;
 import password.pwm.bean.DomainID;
+import password.pwm.bean.ProfileID;
 import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.StoredSettingReader;
@@ -35,16 +36,14 @@ import password.pwm.health.HealthMessage;
 import password.pwm.health.HealthRecord;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.CollectionUtil;
+import password.pwm.util.java.EnumUtil;
 import password.pwm.util.java.LazySupplier;
-import password.pwm.util.java.StringUtil;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.password.PasswordRuleReaderHelper;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,7 +51,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -62,23 +60,19 @@ import java.util.stream.Collectors;
 /**
  * @author Jason D. Rivard
  */
-public class PwmPasswordPolicy implements Profile, Serializable
+public class PwmPasswordPolicy implements Profile
 {
-    private static final long serialVersionUID = 1L;
-
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmPasswordPolicy.class );
 
     private static final PwmPasswordPolicy DEFAULT_POLICY = makeDefaultPolicy();
 
-    private final transient Supplier<List<HealthRecord>> healthChecker = new LazySupplier<>( () -> doHealthChecks( this ) );
+    private final transient Supplier<List<HealthRecord>> healthChecker = LazySupplier.create( () -> doHealthChecks( this ) );
     private final transient ChaiPasswordPolicy chaiPasswordPolicy;
 
-    private final DomainID domainID;
     private final Map<String, String> policyMap;
     private final PolicyMetaData policyMetaData;
 
     private PwmPasswordPolicy(
-            final DomainID domainID,
             final Map<String, String> policyMap,
             final ChaiPasswordPolicy chaiPasswordPolicy,
             final PolicyMetaData policyMetaData
@@ -101,10 +95,9 @@ public class PwmPasswordPolicy implements Profile, Serializable
             }
         }
 
-        this.domainID = domainID;
         this.chaiPasswordPolicy = chaiPasswordPolicy;
         this.policyMetaData = policyMetaData == null ? PolicyMetaData.builder().build() : policyMetaData;
-        this.policyMap = Map.copyOf( effectivePolicyMap );
+        this.policyMap = Collections.unmodifiableMap( new TreeMap<>( effectivePolicyMap ) );
     }
 
     public static PwmPasswordPolicy createPwmPasswordPolicy(
@@ -119,22 +112,22 @@ public class PwmPasswordPolicy implements Profile, Serializable
             final ChaiPasswordPolicy chaiPasswordPolicy
     )
     {
-        return new PwmPasswordPolicy( domainID, policyMap, chaiPasswordPolicy, null );
+        final PolicyMetaData policyMetaData = PolicyMetaData.builder().domainID( domainID ).build();
+        return new PwmPasswordPolicy( policyMap, chaiPasswordPolicy, policyMetaData );
     }
 
     public static PwmPasswordPolicy createPwmPasswordPolicy(
-            final DomainID domainID,
             final Map<String, String> policyMap,
             final ChaiPasswordPolicy chaiPasswordPolicy,
             final PolicyMetaData policyMetaData
     )
     {
-        return new PwmPasswordPolicy( domainID, policyMap, chaiPasswordPolicy, policyMetaData );
+        return new PwmPasswordPolicy( policyMap, chaiPasswordPolicy, policyMetaData );
     }
 
     public static PwmPasswordPolicy createPwmPasswordPolicy(
             final DomainConfig domainConfig,
-            final String profileID
+            final ProfileID profileID
     )
     {
         final StoredSettingReader settingReader = new StoredSettingReader( domainConfig.getStoredConfiguration(), profileID,  domainConfig.getDomainID() );
@@ -158,14 +151,15 @@ public class PwmPasswordPolicy implements Profile, Serializable
         }
 
         // set pwm-specific values
-        final PwmPasswordPolicy.PolicyMetaData policyMetaData = PwmPasswordPolicy.PolicyMetaData.builder()
+        final PwmPasswordPolicy.PolicyMetaData policyMetaData = PolicyMetaData.builder()
                 .profileID( profileID )
+                .domainID( domainConfig.getDomainID() )
                 .userPermissions( settingReader.readSettingAsUserPermission( PwmSetting.PASSWORD_POLICY_QUERY_MATCH ) )
                 .ruleText( readLocalizedSetting( PwmSetting.PASSWORD_POLICY_RULE_TEXT, domainConfig, settingReader ) )
                 .changePasswordText( readLocalizedSetting( PwmSetting.PASSWORD_POLICY_CHANGE_MESSAGE, domainConfig, settingReader ) )
                 .build();
 
-        return PwmPasswordPolicy.createPwmPasswordPolicy( domainConfig.getDomainID(), passwordPolicySettings, null, policyMetaData );
+        return PwmPasswordPolicy.createPwmPasswordPolicy( passwordPolicySettings, null, policyMetaData );
     }
 
 
@@ -194,7 +188,7 @@ public class PwmPasswordPolicy implements Profile, Serializable
     }
 
     @Override
-    public String getIdentifier( )
+    public ProfileID getId( )
     {
         return policyMetaData.getProfileID();
     }
@@ -202,12 +196,12 @@ public class PwmPasswordPolicy implements Profile, Serializable
     @Override
     public String getDisplayName( final Locale locale )
     {
-        return getIdentifier();
+        return getId() == null ? "[no-profile]" : getId().stringValue();
     }
 
     public DomainID getDomainID()
     {
-        return domainID;
+        return policyMetaData == null ? null : policyMetaData.getDomainID();
     }
 
     private static PwmPasswordPolicy makeDefaultPolicy()
@@ -215,9 +209,10 @@ public class PwmPasswordPolicy implements Profile, Serializable
         PwmPasswordPolicy newDefaultPolicy = null;
         try
         {
-            final Map<String, String> defaultPolicyMap = EnumSet.allOf( PwmPasswordRule.class ).stream().collect( Collectors.toUnmodifiableMap(
-                    PwmPasswordRule::getKey,
-                    PwmPasswordRule::getDefaultValue ) );
+            final Map<String, String> defaultPolicyMap = EnumUtil.enumStream( PwmPasswordRule.class )
+                    .collect( Collectors.toUnmodifiableMap(
+                            PwmPasswordRule::getKey,
+                            PwmPasswordRule::getDefaultValue ) );
 
             newDefaultPolicy = createPwmPasswordPolicy( DomainID.systemId(), defaultPolicyMap, null );
         }
@@ -244,7 +239,7 @@ public class PwmPasswordPolicy implements Profile, Serializable
         return chaiPasswordPolicy;
     }
 
-    public PasswordRuleReaderHelper getRuleHelper( )
+    public PasswordRuleReaderHelper ruleHelper( )
     {
         return new PasswordRuleReaderHelper( this );
     }
@@ -288,35 +283,35 @@ public class PwmPasswordPolicy implements Profile, Serializable
             return this;
         }
 
-        final Set<PwmPasswordRule> pwmPasswordRules = EnumSet.allOf( PwmPasswordRule.class );
-        final Map<String, String> newPasswordPolicies = new HashMap<>( pwmPasswordRules.size() );
-
-        for ( final PwmPasswordRule rule : pwmPasswordRules )
-        {
-            final String ruleKey = rule.getKey();
-            final String value1 = this.policyMap.get( ruleKey );
-            final String value2 = otherPolicy.policyMap.get( ruleKey );
-
-            if ( StringUtil.notEmpty( value1 ) || StringUtil.notEmpty( value2 ) )
-            {
-                final PwmPasswordRuleFunctions.RuleMergeFunction ruleMergeFunction
-                        = PwmPasswordRuleFunctions.RULE_MERGE_FUNCTIONS.getOrDefault( rule, PwmPasswordRuleFunctions.DEFAULT_RULE_MERGE_SINGLETON );
-                ruleMergeFunction.apply( rule, value1, value2 ).ifPresent( value -> newPasswordPolicies.put( ruleKey, value ) );
-            }
-        }
+        final Map<String, String> newPasswordPolicies = EnumUtil.enumStream( PwmPasswordRule.class )
+                .map( rule -> Map.entry( rule, mergeValue( otherPolicy, rule ) ) )
+                .filter( entry -> entry.getValue().isPresent() )
+                .collect( Collectors.toUnmodifiableMap( entry -> entry.getKey().getKey(), entry -> entry.getValue().get() ) );
 
         final ChaiPasswordPolicy backingPolicy = this.chaiPasswordPolicy != null ? chaiPasswordPolicy : otherPolicy.chaiPasswordPolicy;
         final PolicyMetaData metaData = getPolicyMetaData().merge( otherPolicy.getPolicyMetaData() );
-        return new PwmPasswordPolicy( domainID, newPasswordPolicies, backingPolicy, metaData );
+        return new PwmPasswordPolicy( newPasswordPolicies, backingPolicy, metaData );
+    }
+
+    private Optional<String> mergeValue( final PwmPasswordPolicy otherPolicy, final PwmPasswordRule rule )
+    {
+        final String ruleKey = rule.getKey();
+        final String thisValue = this.policyMap.get( ruleKey );
+        final String otherValue = otherPolicy.policyMap.get( ruleKey );
+
+        if ( thisValue != null || otherValue != null )
+        {
+            final PwmPasswordRuleFunctions.RuleMergeFunction ruleMergeFunction
+                    = PwmPasswordRuleFunctions.RULE_MERGE_FUNCTIONS.getOrDefault( rule, PwmPasswordRuleFunctions.DEFAULT_RULE_MERGE_SINGLETON );
+            return ruleMergeFunction.apply( rule, thisValue, otherValue );
+        }
+        return Optional.empty();
     }
 
     private PolicyMetaData getPolicyMetaData()
     {
         return policyMetaData;
     }
-
-
-
 
     public Map<String, String> getPolicyMap( )
     {
@@ -346,7 +341,7 @@ public class PwmPasswordPolicy implements Profile, Serializable
         final Locale locale = PwmConstants.DEFAULT_LOCALE;
         final PolicyMetaData policyMetaData = pwmPasswordPolicy.getPolicyMetaData();
 
-        final PasswordRuleReaderHelper ruleHelper = pwmPasswordPolicy.getRuleHelper();
+        final PasswordRuleReaderHelper ruleHelper = pwmPasswordPolicy.ruleHelper();
         final List<HealthRecord> returnList = new ArrayList<>();
         final Map<PwmPasswordRule, PwmPasswordRule> rulePairs = new LinkedHashMap<>();
         rulePairs.put( PwmPasswordRule.MinimumLength, PwmPasswordRule.MaximumLength );
@@ -372,7 +367,7 @@ public class PwmPasswordPolicy implements Profile, Serializable
                         + maxRule.getLabel( locale, null ) + " (" + maxValue + ")";
                 returnList.add( HealthRecord.forMessage(
                         pwmPasswordPolicy.getDomainID(),
-                        HealthMessage.Config_PasswordPolicyProblem, policyMetaData.getProfileID(), detailMsg ) );
+                        HealthMessage.Config_PasswordPolicyProblem, policyMetaData.getProfileID().stringValue(), detailMsg ) );
             }
         }
 
@@ -388,7 +383,7 @@ public class PwmPasswordPolicy implements Profile, Serializable
                         + PwmPasswordRule.CharGroupsMinMatch.getLabel( locale, null ) + " (" + maxValue + ")";
                 returnList.add( HealthRecord.forMessage(
                         pwmPasswordPolicy.getDomainID(),
-                        HealthMessage.Config_PasswordPolicyProblem, policyMetaData.getProfileID(), detailMsg ) );
+                        HealthMessage.Config_PasswordPolicyProblem, policyMetaData.getProfileID().stringValue(), detailMsg ) );
             }
         }
 
@@ -399,9 +394,11 @@ public class PwmPasswordPolicy implements Profile, Serializable
 
     @Value
     @Builder
-    public static class PolicyMetaData implements Serializable
+    public static class PolicyMetaData
     {
-        private final String profileID;
+        private final DomainID domainID;
+
+        private final ProfileID profileID;
 
         @Builder.Default
         private final List<UserPermission> userPermissions = Collections.emptyList();
@@ -417,7 +414,8 @@ public class PwmPasswordPolicy implements Profile, Serializable
                     .ruleText( CollectionUtil.isEmpty( ruleText ) ? otherPolicy.ruleText : ruleText )
                     .changePasswordText( CollectionUtil.isEmpty( changePasswordText ) ? otherPolicy.changePasswordText : changePasswordText )
                     .userPermissions( CollectionUtil.isEmpty( userPermissions ) ? otherPolicy.userPermissions : userPermissions )
-                    .profileID( StringUtil.isEmpty( profileID ) ? otherPolicy.profileID : profileID )
+                    .profileID( profileID == null ? otherPolicy.profileID : profileID )
+                    .domainID( domainID == null ? otherPolicy.domainID : domainID )
                     .build();
         }
     }

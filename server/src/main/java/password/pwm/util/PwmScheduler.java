@@ -24,6 +24,7 @@ import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
 import password.pwm.bean.SessionLabel;
 import password.pwm.error.PwmError;
+import password.pwm.error.PwmInternalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.java.AtomicLoopIntIncrementer;
 import password.pwm.util.java.StringUtil;
@@ -41,7 +42,6 @@ import java.util.TimeZone;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -50,12 +50,11 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import java.util.concurrent.TimeoutException;
 
-public class PwmScheduler
+public final class PwmScheduler
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmScheduler.class );
-    private static final AtomicLoopIntIncrementer THREAD_ID_COUNTER = new AtomicLoopIntIncrementer();
 
     private final PwmApplication pwmApplication;
 
@@ -83,7 +82,7 @@ public class PwmScheduler
         executor.submit( runnable );
     }
 
-    public void scheduleDailyZuluZeroStartJob(
+    public static void scheduleDailyZuluZeroStartJob(
             final Runnable runnable,
             final ScheduledExecutorService executorService,
             final TimeDuration zuluOffset
@@ -123,7 +122,7 @@ public class PwmScheduler
 
         final List<Future<T>> futures = callables.stream()
                 .map( executor::submit )
-                .collect( Collectors.toUnmodifiableList() );
+                .toList();
 
 
         final List<T> results = new ArrayList<>();
@@ -132,7 +131,7 @@ public class PwmScheduler
             results.add( awaitFutureCompletion( f ) );
         }
 
-        executor.shutdown();
+        executor.shutdownNow();
         return Collections.unmodifiableList( results );
     }
 
@@ -162,15 +161,13 @@ public class PwmScheduler
     }
 
 
-    public void scheduleFixedRateJob(
+    public static void scheduleFixedRateJob(
             final Runnable runnable,
             final ScheduledExecutorService executor,
             final TimeDuration initialDelay,
             final TimeDuration frequency
     )
     {
-        checkIfSchedulerClosed();
-
         executor.scheduleAtFixedRate( runnable, initialDelay.asMillis(), frequency.asMillis(), TimeUnit.MILLISECONDS );
     }
 
@@ -202,7 +199,6 @@ public class PwmScheduler
             final String instanceID,
             final Class<?> theClass,
             final String threadNameSuffix
-
     )
     {
         final StringBuilder output = new StringBuilder();
@@ -236,22 +232,19 @@ public class PwmScheduler
         return output.toString();
     }
 
-    public static ThreadFactory makePwmThreadFactory( final String namePrefix, final boolean daemon )
+    public static ThreadFactory makePwmThreadFactory( final String namePrefix )
     {
         return new ThreadFactory()
         {
-            private final ThreadFactory realThreadFactory = Executors.defaultThreadFactory();
+            private final AtomicLoopIntIncrementer counter = new AtomicLoopIntIncrementer();
 
             @Override
             public Thread newThread( final Runnable runnable )
             {
-                final Thread t = realThreadFactory.newThread( runnable );
-                t.setDaemon( daemon );
-                if ( namePrefix != null )
-                {
-                    final String newName = namePrefix + t.getName();
-                    t.setName( newName );
-                }
+                final String strippedNamePrefix = StringUtil.stripEdgeChars( namePrefix, '-' );
+                final Thread t = new Thread( runnable );
+                t.setDaemon( true );
+                t.setName( strippedNamePrefix + "-" + counter.next() );
                 return t;
             }
         };
@@ -287,14 +280,11 @@ public class PwmScheduler
     )
     {
         final ThreadPoolExecutor executor = new ThreadPoolExecutor(
-                1,
+                maxThreadCount,
                 maxThreadCount,
                 1, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(),
-                makePwmThreadFactory(
-                        makeThreadName( sessionLabel, instanceID, theClass, threadNameSuffix ) + "-",
-                        true
-                ) );
+                makePwmThreadFactory( makeThreadName( sessionLabel, instanceID, theClass, threadNameSuffix ) + "-" ) );
         executor.allowCoreThreadTimeOut( true );
         return executor;
     }
@@ -318,9 +308,7 @@ public class PwmScheduler
         final ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(
                 1,
                 makePwmThreadFactory(
-                        makeThreadName( sessionLabel, pwmApplication, clazz, threadNameSuffix ) + "-",
-                        true
-                ) );
+                        makeThreadName( sessionLabel, pwmApplication, clazz, threadNameSuffix ) + "-" ) );
         executor.setKeepAliveTime( 5, TimeUnit.SECONDS );
         executor.allowCoreThreadTimeOut( true );
         return executor;
@@ -339,4 +327,96 @@ public class PwmScheduler
         nextZuluMidnight.add( Calendar.HOUR, 24 );
         return nextZuluMidnight.toInstant();
     }
+
+    /**
+     * Execute a task within the time period specified by {@code maxWaitDuration}.  If the task exceeds the time allotted, it is
+     * cancelled and the results are discarded.  The calling thread will block until the callable returns
+     * a result or the {@code maxWaitDuration} is reached, whichever occurs first.
+     * @param pwmApplication application to use for thread naming and other housekeeping.
+     *
+     * @param label thread labels.
+     * @param maxWaitDuration maximum time to wait for result.
+     * @param callable task to execute.
+     * @param <T> return value of the callable.
+     * @return The {@code callable}'s return value.
+     * @throws PwmUnrecoverableException if the task times out.  Uses {@link PwmError#ERROR_TIMEOUT}.
+     * @throws Throwable any throwable generated by the {@code callable}
+     */
+    public static <T> T executeWithTimeout(
+            final PwmApplication pwmApplication,
+            final SessionLabel label,
+            final TimeDuration maxWaitDuration,
+            final Callable<T> callable
+    )
+            throws PwmUnrecoverableException, Throwable
+    {
+
+        final ThreadPoolExecutor executor = PwmScheduler.makeMultiThreadExecutor(
+                1, pwmApplication, label, callable.getClass() );
+
+        try
+        {
+            final Future<T> future = executor.submit( callable );
+
+            return future.get( maxWaitDuration.asMillis(), TimeUnit.MILLISECONDS );
+        }
+        catch ( final ExecutionException e )
+        {
+            throw e.getCause();
+        }
+        catch ( final TimeoutException e )
+        {
+            throw PwmUnrecoverableException.newException( PwmError.ERROR_TIMEOUT, "operation timed out: " + e.getMessage() );
+        }
+        catch ( final Exception e )
+        {
+            throw PwmInternalException.fromPwmException( e );
+        }
+        finally
+        {
+            executor.shutdownNow();
+        }
+    }
+
+    /**
+     * Close executor and wait up to the specified TimeDuration for all executor jobs to terminate.  There is no guarantee that either all jobs will
+     * terminate or the entire duration will be waited for, though the duration should not be exceeded.
+     * @param executor Executor to close
+     * @param timeDuration TimeDuration to wait for
+     * @param pwmLogger log errors or failed closures to.
+     */
+    public static void closeAndWaitExecutor(
+            final ExecutorService executor,
+            final TimeDuration timeDuration,
+            final PwmLogger pwmLogger,
+            final SessionLabel sessionLabel
+    )
+    {
+        if ( executor == null )
+        {
+            return;
+        }
+
+        executor.shutdownNow();
+
+        try
+        {
+            executor.awaitTermination( timeDuration.asMillis(), TimeUnit.MILLISECONDS );
+        }
+        catch ( final InterruptedException e )
+        {
+            pwmLogger.error( sessionLabel, () -> "attempted to shutdown thread '" + executor + "' however shutdown was interrupted: " + e.getMessage() );
+        }
+
+        if ( pwmLogger != null && !executor.isShutdown() )
+        {
+            pwmLogger.error( sessionLabel, () -> "attempted to shutdown thread '" + executor + "' however thread is not shutdown" );
+        }
+
+        if ( pwmLogger != null && !executor.isTerminated() )
+        {
+            pwmLogger.error( sessionLabel, () -> "attempted to shutdown thread '" + executor + "' however thread is not terminated" );
+        }
+    }
+
 }

@@ -20,14 +20,14 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlDocument;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.PwmConstants;
 import password.pwm.config.stored.StoredConfigXmlConstants;
 import password.pwm.config.stored.XmlOutputProcessData;
+import password.pwm.data.ImmutableByteArray;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.ImmutableByteArray;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.LazySupplier;
 import password.pwm.util.java.StringUtil;
@@ -38,7 +38,6 @@ import password.pwm.util.secure.PwmSecurityKey;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.Serializable;
 import java.security.DigestOutputStream;
 import java.util.List;
 import java.util.Locale;
@@ -59,7 +58,7 @@ public abstract class AbstractValue implements StoredValue
         }
     }
 
-    private final transient LazySupplier<String> valueHashSupplier = new LazySupplier<>( () -> valueHashComputer( AbstractValue.this ) );
+    private final transient LazySupplier<String> valueHashSupplier = LazySupplier.create( () -> valueHashComputer( AbstractValue.this ) );
 
     public String toString()
     {
@@ -69,13 +68,13 @@ public abstract class AbstractValue implements StoredValue
     @Override
     public String toDebugString( final Locale locale )
     {
-        return JsonFactory.get().serialize( ( Serializable ) this.toNativeObject(), JsonProvider.Flag.PrettyPrint );
+        return JsonFactory.get().serialize( this.toNativeObject(), JsonProvider.Flag.PrettyPrint );
     }
 
     @Override
-    public Serializable toDebugJsonObject( final Locale locale )
+    public Object toDebugJsonObject( final Locale locale )
     {
-        return ( Serializable ) this.toNativeObject();
+        return this.toNativeObject();
     }
 
     @Override
@@ -119,13 +118,13 @@ public abstract class AbstractValue implements StoredValue
                     .storedValueEncoderMode( StoredValueEncoder.Mode.PLAIN )
                     .build();
             final List<XmlElement> xmlValues = storedValue.toXmlValues( StoredConfigXmlConstants.XML_ELEMENT_VALUE, xmlOutputProcessData );
-            final XmlDocument document = XmlChai.getFactory().newDocument( "root" );
+            final XmlDocument document = XmlFactory.getFactory().newDocument( "root" );
             document.getRootElement().attachElement( xmlValues );
 
             final DigestOutputStream digestOutputStream = new DigestOutputStream(
                     OutputStream.nullOutputStream(),
                     PwmHashAlgorithm.SHA512.newMessageDigest() );
-            XmlChai.getFactory().output( document, digestOutputStream );
+            XmlFactory.getFactory().output( document, digestOutputStream );
             return JavaHelper.binaryArrayToHex( digestOutputStream.getMessageDigest().digest() );
         }
         catch ( final IOException e )

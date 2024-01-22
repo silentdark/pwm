@@ -30,11 +30,8 @@ import password.pwm.util.BasicAuthInfo;
 import password.pwm.util.PasswordData;
 import password.pwm.util.json.JsonFactory;
 
-import java.io.Serializable;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Set;
 
 
@@ -44,7 +41,7 @@ import java.util.Set;
  * <p>Short serialized names are used to shrink the effective size of the login cookie.</p>
  */
 @Data
-public class LoginInfoBean implements Serializable
+public class LoginInfoBean
 {
     public enum LoginFlag
     {
@@ -55,7 +52,12 @@ public class LoginInfoBean implements Serializable
         // bypass sso
         noSso,
         authRecordSet,
-        forcePwChange
+        forcePwChange,
+
+        /**
+         * Indicate if this particular session ahs been audited.
+         */
+        audit,
     }
 
     @SerializedName( "u" )
@@ -71,7 +73,7 @@ public class LoginInfoBean implements Serializable
     private AuthenticationType type = AuthenticationType.UNAUTHENTICATED;
 
     @SerializedName( "af" )
-    private List<AuthenticationType> authFlags = new ArrayList<>();
+    private Set<AuthenticationType> authFlags = EnumSet.noneOf( AuthenticationType.class );
 
     @SerializedName( "as" )
     private PwmAuthenticationSource authSource;
@@ -82,6 +84,9 @@ public class LoginInfoBean implements Serializable
     @SerializedName( "rq" )
     private Instant reqTime;
 
+    /**
+     * PWM's own session GUID.  This will move with the user 'session' from node to node.
+     */
     @SerializedName( "g" )
     private String guid;
 

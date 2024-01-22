@@ -26,6 +26,7 @@ import password.pwm.Permission;
 import password.pwm.PwmApplicationMode;
 import password.pwm.PwmConstants;
 import password.pwm.PwmDomain;
+import password.pwm.bean.ProfileID;
 import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.profile.HelpdeskProfile;
@@ -34,8 +35,7 @@ import password.pwm.config.profile.ProfileDefinition;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.servlet.PwmServletDefinition;
-import password.pwm.ldap.UserInfo;
-import password.pwm.util.java.StringUtil;
+import password.pwm.user.UserInfo;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
@@ -51,7 +51,7 @@ public class IdleTimeoutCalculator
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( IdleTimeoutCalculator.class );
 
-    public static MaxIdleTimeoutResult figureMaxSessionTimeout( final PwmDomain pwmDomain, final PwmSession pwmSession )
+    public static MaxIdleTimeoutResult figureMaxSessionTimeout( final PwmDomain pwmDomain, final PwmRequest pwmRequest )
             throws PwmUnrecoverableException
     {
         final DomainConfig domainConfig = pwmDomain.getConfig();
@@ -63,7 +63,7 @@ public class IdleTimeoutCalculator
                     TimeDuration.of( idleSetting, TimeDuration.Unit.SECONDS ) ) );
         }
 
-        if ( !pwmSession.isAuthenticated() )
+        if ( !pwmRequest.isAuthenticated() )
         {
             if ( pwmDomain.getApplicationMode() == PwmApplicationMode.NEW )
             {
@@ -83,7 +83,7 @@ public class IdleTimeoutCalculator
                     if ( peopleSearchIdleTimeout > 0 )
                     {
                         results.add( new MaxIdleTimeoutResult(
-                                MaxIdleTimeoutResult.reasonFor( PwmSetting.PEOPLE_SEARCH_IDLE_TIMEOUT_SECONDS, publicProfile.getIdentifier() ),
+                                MaxIdleTimeoutResult.reasonFor( PwmSetting.PEOPLE_SEARCH_IDLE_TIMEOUT_SECONDS, publicProfile.getId() ),
                                 TimeDuration.of( peopleSearchIdleTimeout, TimeDuration.Unit.SECONDS ) ) );
                     }
                 }
@@ -91,9 +91,8 @@ public class IdleTimeoutCalculator
         }
         else
         {
-            final UserInfo userInfo = pwmSession.getUserInfo();
-            final boolean userIsAdmin = pwmSession.isAuthenticated()
-                    && pwmSession.getSessionManager().checkPermission( pwmDomain, Permission.PWMADMIN );
+            final UserInfo userInfo = pwmRequest.getPwmSession().getUserInfo();
+            final boolean userIsAdmin = pwmRequest.isAuthenticated() && pwmRequest.checkPermission( Permission.PWMADMIN );
             final Set<MaxIdleTimeoutResult> loggedInResults = figureMaxAuthUserTimeout( domainConfig, userInfo, userIsAdmin );
             results.addAll( loggedInResults );
         }
@@ -118,8 +117,8 @@ public class IdleTimeoutCalculator
 
         if ( domainConfig.readSettingAsBoolean( PwmSetting.HELPDESK_ENABLE ) )
         {
-            final String helpdeskProfileID = userInfo.getProfileIDs().get( ProfileDefinition.Helpdesk );
-            if ( StringUtil.notEmpty( helpdeskProfileID ) )
+            final ProfileID helpdeskProfileID = userInfo.getProfileIDs().get( ProfileDefinition.Helpdesk );
+            if ( helpdeskProfileID != null )
             {
                 final HelpdeskProfile helpdeskProfile = domainConfig.getHelpdeskProfiles().get( helpdeskProfileID );
                 final long helpdeskIdleTimeout = helpdeskProfile.readSettingAsLong( PwmSetting.HELPDESK_IDLE_TIMEOUT_SECONDS );
@@ -131,8 +130,8 @@ public class IdleTimeoutCalculator
 
         if ( domainConfig.readSettingAsBoolean( PwmSetting.PEOPLE_SEARCH_ENABLE ) )
         {
-            final String peopleSearchID = userInfo.getProfileIDs().get( ProfileDefinition.PeopleSearch );
-            if ( StringUtil.notEmpty( peopleSearchID ) )
+            final ProfileID peopleSearchID = userInfo.getProfileIDs().get( ProfileDefinition.PeopleSearch );
+            if ( peopleSearchID != null )
             {
                 final PeopleSearchProfile peopleSearchProfile = domainConfig.getPeopleSearchProfiles().get( peopleSearchID );
                 final long peopleSearchIdleTimeout = peopleSearchProfile.readSettingAsLong( PwmSetting.PEOPLE_SEARCH_IDLE_TIMEOUT_SECONDS );
@@ -168,7 +167,7 @@ public class IdleTimeoutCalculator
             return this.idleTimeout.compareTo( o.getIdleTimeout() );
         }
 
-        static Supplier<String> reasonFor( final PwmSetting pwmSetting, final String profileID )
+        static Supplier<String> reasonFor( final PwmSetting pwmSetting, final ProfileID profileID )
         {
             return () -> "Setting " + pwmSetting.toMenuLocationDebug( profileID, PwmConstants.DEFAULT_LOCALE );
         }
@@ -178,12 +177,17 @@ public class IdleTimeoutCalculator
             throws PwmUnrecoverableException
     {
         final PwmURL pwmURL = pwmRequest.getURL();
+        return idleTimeoutForRequest( pwmRequest, pwmURL );
+    }
+
+    public static TimeDuration idleTimeoutForRequest( final PwmRequest pwmRequest, final PwmURL pwmURL )
+            throws PwmUnrecoverableException
+    {
         final PwmDomain pwmDomain = pwmRequest.getPwmDomain();
-        final PwmSession pwmSession = pwmRequest.getPwmSession();
 
         if ( pwmURL.isResourceURL() )
         {
-            return figureMaxSessionTimeout( pwmDomain, pwmSession ).getIdleTimeout();
+            return figureMaxSessionTimeout( pwmDomain, pwmRequest ).getIdleTimeout();
         }
 
         for ( final IdleTimeoutCalculatorModule module : SERVLET_IDLE_CALCULATORS )

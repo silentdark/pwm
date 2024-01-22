@@ -23,21 +23,19 @@ package password.pwm.ldap.search;
 import com.novell.ldapchai.provider.ChaiProvider;
 import lombok.Builder;
 import lombok.Value;
+import password.pwm.bean.ProfileID;
 import password.pwm.config.value.data.FormConfiguration;
 import password.pwm.util.java.TimeDuration;
 
-import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
 
 @Value
 @Builder( toBuilder = true )
-public class SearchConfiguration implements Serializable
+public class SearchConfiguration
 {
-    private static final long serialVersionUID = 1L;
-
     private String filter;
-    private String ldapProfile;
+    private ProfileID ldapProfile;
     private String username;
     private String groupDN;
     private List<String> contexts;

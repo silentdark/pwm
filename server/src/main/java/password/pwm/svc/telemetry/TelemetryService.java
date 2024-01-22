@@ -46,7 +46,6 @@ import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
 import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsBundle;
-import password.pwm.svc.stats.StatisticsService;
 import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
@@ -67,6 +66,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -102,7 +102,7 @@ public class TelemetryService extends AbstractPwmService implements PwmService
             return STATUS.CLOSED;
         }
 
-        if ( pwmApplication.getStatisticsManager().status() != STATUS.OPEN )
+        if ( pwmApplication.getStatisticsService().status() != STATUS.OPEN )
         {
             LOGGER.trace( getSessionLabel(), () -> "will remain closed, statistics manager is not enabled" );
             return STATUS.CLOSED;
@@ -164,7 +164,7 @@ public class TelemetryService extends AbstractPwmService implements PwmService
 
     private void executePublishJob( ) throws PwmUnrecoverableException, IOException, URISyntaxException
     {
-        final String authValue = getPwmApplication().getStatisticsManager().getStatBundleForKey( StatisticsService.KEY_CUMULATIVE ).getStatistic( Statistic.AUTHENTICATIONS );
+        final String authValue = getPwmApplication().getStatisticsService().getCumulativeBundle().getStatistic( Statistic.AUTHENTICATIONS );
         if ( StringUtil.isEmpty( authValue ) || Integer.parseInt( authValue ) < settings.getMinimumAuthentications() )
         {
             LOGGER.trace( getSessionLabel(), () -> "skipping telemetry send, authentication count is too low" );
@@ -192,7 +192,7 @@ public class TelemetryService extends AbstractPwmService implements PwmService
     private void scheduleNextJob( )
     {
         final TimeDuration durationUntilNextPublish = durationUntilNextPublish();
-        getPwmApplication().getPwmScheduler().scheduleJob( new PublishJob(), getExecutorService(), durationUntilNextPublish );
+        scheduleJob( new PublishJob(), durationUntilNextPublish );
         LOGGER.trace( getSessionLabel(), () -> "next publish time: " + durationUntilNextPublish().asCompactString() );
     }
 
@@ -207,11 +207,11 @@ public class TelemetryService extends AbstractPwmService implements PwmService
             }
             catch ( final PwmException e )
             {
-                LOGGER.error( e.getErrorInformation() );
+                LOGGER.error( getSessionLabel(), e.getErrorInformation() );
             }
             catch ( final Exception e )
             {
-                LOGGER.error( () -> "unexpected error during telemetry publish job: " + e.getMessage() );
+                LOGGER.error( getSessionLabel(), () -> "unexpected error during telemetry publish job: " + e.getMessage() );
             }
         }
     }
@@ -231,6 +231,11 @@ public class TelemetryService extends AbstractPwmService implements PwmService
     @Override
     public ServiceInfoBean serviceInfo( )
     {
+        if ( status() != STATUS.OPEN )
+        {
+            return null;
+        }
+
         final Map<String, String> debugMap = new LinkedHashMap<>();
         debugMap.put( "lastPublishTime", StringUtil.toIsoDate( lastPublishTime ) );
         if ( lastError != null )
@@ -244,7 +249,7 @@ public class TelemetryService extends AbstractPwmService implements PwmService
     public TelemetryPublishBean generatePublishableBean( )
             throws PwmUnrecoverableException
     {
-        final StatisticsBundle bundle = getPwmApplication().getStatisticsManager().getStatBundleForKey( StatisticsService.KEY_CUMULATIVE );
+        final StatisticsBundle bundle = getPwmApplication().getStatisticsService().getCumulativeBundle();
         final AppConfig config = getPwmApplication().getConfig();
         final Map<PwmAboutProperty, String> aboutPropertyStringMap = PwmAboutProperty.makeInfoBean( getPwmApplication() );
 
@@ -259,31 +264,7 @@ public class TelemetryService extends AbstractPwmService implements PwmService
                 .sorted()
                 .collect( Collectors.toUnmodifiableList() );
 
-        String ldapVendorName = null;
-
-        domainConfigLoop:
-        for ( final PwmDomain pwmDomain : getPwmApplication().domains().values() )
-        {
-            for ( final LdapProfile ldapProfile : pwmDomain.getConfig().getLdapProfiles().values() )
-            {
-                try
-                {
-                    final DirectoryVendor directoryVendor = ldapProfile.getProxyChaiProvider( getSessionLabel(), pwmDomain ).getDirectoryVendor();
-                    final PwmLdapVendor pwmLdapVendor = PwmLdapVendor.fromChaiVendor( directoryVendor );
-                    if ( pwmLdapVendor != null )
-                    {
-                        ldapVendorName = pwmLdapVendor.name();
-                        break domainConfigLoop;
-
-                    }
-                }
-                catch ( final Exception e )
-                {
-                    LOGGER.trace( getSessionLabel(), () -> "unable to read ldap vendor type for stats publication: " + e.getMessage() );
-                }
-            }
-        }
-
+        final Optional<String> ldapVendorName = determineLdapVendorName();
 
         final Map<String, String> aboutStrings = new TreeMap<>();
         {
@@ -306,11 +287,36 @@ public class TelemetryService extends AbstractPwmService implements PwmService
                 .siteDescription( config.readSettingAsString( PwmSetting.PUBLISH_STATS_SITE_DESCRIPTION ) )
                 .versionBuild( PwmConstants.BUILD_NUMBER )
                 .versionVersion( PwmConstants.BUILD_VERSION )
-                .ldapVendorName( ldapVendorName )
+                .ldapVendorName( ldapVendorName.orElse( null ) )
                 .statistics( statData )
                 .configuredSettings( configuredSettings )
                 .about( aboutStrings )
                 .build();
+    }
+
+    private Optional<String> determineLdapVendorName()
+    {
+        for ( final PwmDomain pwmDomain : getPwmApplication().domains().values() )
+        {
+            for ( final LdapProfile ldapProfile : pwmDomain.getConfig().getLdapProfiles().values() )
+            {
+                try
+                {
+                    final DirectoryVendor directoryVendor = ldapProfile.getProxyChaiProvider( getSessionLabel(), pwmDomain ).getDirectoryVendor();
+                    final PwmLdapVendor pwmLdapVendor = PwmLdapVendor.fromChaiVendor( directoryVendor );
+                    if ( pwmLdapVendor != null )
+                    {
+                        return Optional.of( pwmLdapVendor.name() );
+                    }
+                }
+                catch ( final Exception e )
+                {
+                    LOGGER.trace( getSessionLabel(), () -> "unable to read ldap vendor type for stats publication: " + e.getMessage() );
+                }
+            }
+        }
+
+        return Optional.empty();
     }
 
     private static String makeId( final PwmApplication pwmApplication ) throws PwmUnrecoverableException

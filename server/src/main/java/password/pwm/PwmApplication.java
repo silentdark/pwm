@@ -20,15 +20,13 @@
 
 package password.pwm;
 
-import lombok.Value;
 import password.pwm.bean.DomainID;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.config.AppConfig;
 import password.pwm.config.PwmSetting;
-import password.pwm.config.PwmSettingMetaDataReader;
 import password.pwm.config.PwmSettingScope;
 import password.pwm.error.ErrorInformation;
-import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthService;
@@ -36,7 +34,6 @@ import password.pwm.http.state.SessionStateService;
 import password.pwm.svc.PwmService;
 import password.pwm.svc.PwmServiceEnum;
 import password.pwm.svc.PwmServiceManager;
-import password.pwm.svc.cache.CacheService;
 import password.pwm.svc.db.DatabaseAccessor;
 import password.pwm.svc.db.DatabaseService;
 import password.pwm.svc.email.EmailService;
@@ -47,7 +44,6 @@ import password.pwm.svc.httpclient.HttpClientService;
 import password.pwm.svc.intruder.IntruderRecordType;
 import password.pwm.svc.intruder.IntruderSystemService;
 import password.pwm.svc.node.NodeService;
-import password.pwm.svc.report.ReportService;
 import password.pwm.svc.secure.SystemSecureService;
 import password.pwm.svc.sessiontrack.SessionTrackService;
 import password.pwm.svc.sessiontrack.UserAgentUtils;
@@ -56,25 +52,20 @@ import password.pwm.svc.sms.SmsQueueService;
 import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.svc.stats.StatisticsService;
-import password.pwm.svc.wordlist.SeedlistService;
 import password.pwm.svc.wordlist.SharedHistoryService;
 import password.pwm.svc.wordlist.WordlistService;
 import password.pwm.util.MBeanUtility;
 import password.pwm.util.PwmScheduler;
-import password.pwm.util.java.FileSystemUtility;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.localdb.LocalDB;
 import password.pwm.util.logging.LocalDBLogger;
-import password.pwm.util.logging.PwmLogLevel;
 import password.pwm.util.logging.PwmLogManager;
 import password.pwm.util.logging.PwmLogger;
-import password.pwm.util.secure.PwmRandom;
 
-import java.io.File;
-import java.io.Serializable;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -88,7 +79,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -96,12 +86,10 @@ public class PwmApplication
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmApplication.class );
 
-    static final int DOMAIN_STARTUP_THREADS = 10;
+    static final int DOMAIN_STARTUP_THREAD_COUNT = 10;
 
-    private final AtomicInteger activeServletRequests = new AtomicInteger( 0 );
-
-    private volatile Map<DomainID, PwmDomain> domains = new HashMap<>();
-    private String runtimeNonce = PwmRandom.getInstance().randomUUID().toString();
+    private volatile Map<DomainID, PwmDomain> domains = Map.of();
+    private String runtimeNonce = PwmApplicationUtil.makeRuntimeNonce();
 
     private final SessionLabel sessionLabel;
     private final PwmServiceManager pwmServiceManager;
@@ -116,14 +104,13 @@ public class PwmApplication
     private String instanceID = PwmApplicationUtil.DEFAULT_INSTANCE_ID;
     private LocalDB localDB;
     private LocalDBLogger localDBLogger;
+    private Path tempDirectory;
 
     public PwmApplication( final PwmEnvironment pwmEnvironment )
             throws PwmUnrecoverableException
     {
         this.pwmEnvironment = Objects.requireNonNull( pwmEnvironment );
-        this.sessionLabel = pwmEnvironment.isInternalRuntimeInstance()
-                ? SessionLabel.RUNTIME_LABEL
-                : SessionLabel.SYSTEM_LABEL;
+        this.sessionLabel = SessionLabel.forSystem( pwmEnvironment, DomainID.systemId() );
 
         this.pwmServiceManager = new PwmServiceManager(
                 sessionLabel, this, DomainID.systemId(), PwmServiceEnum.forScope( PwmSettingScope.SYSTEM ) );
@@ -146,7 +133,7 @@ public class PwmApplication
 
     private void initRuntimeNonce()
     {
-        runtimeNonce = PwmRandom.getInstance().randomUUID().toString();
+        runtimeNonce = PwmApplicationUtil.makeRuntimeNonce();
     }
 
     private void initialize()
@@ -166,28 +153,14 @@ public class PwmApplication
             fileLocker.waitForFileLock();
         }
 
-        // clear temp dir
-        if ( !pwmEnvironment.isInternalRuntimeInstance() )
-        {
-            final File tempFileDirectory = getTempDirectory();
-            try
-            {
-                LOGGER.debug( sessionLabel, () -> "deleting directory (and sub-directory) contents in " + tempFileDirectory );
-                FileSystemUtility.deleteDirectoryContentsRecursively( tempFileDirectory.toPath() );
-            }
-            catch ( final Exception e )
-            {
-                throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_STARTUP_ERROR,
-                        "unable to clear temp file directory '" + tempFileDirectory.getAbsolutePath() + "', error: " + e.getMessage()
-                ) );
-            }
-        }
+        // init temp dir
+        tempDirectory = PwmApplicationUtil.initTempDirectory( sessionLabel, pwmEnvironment );
 
         if ( getApplicationMode() != PwmApplicationMode.READ_ONLY )
         {
             LOGGER.info( sessionLabel, () -> "initializing, application mode=" + getApplicationMode()
-                    + ", applicationPath=" + ( pwmEnvironment.getApplicationPath() == null ? "null" : pwmEnvironment.getApplicationPath().getAbsolutePath() )
-                    + ", configFile=" + ( pwmEnvironment.getConfigurationFile() == null ? "null" : pwmEnvironment.getConfigurationFile().getAbsolutePath() )
+                    + ", applicationPath=" + ( pwmEnvironment.getApplicationPath() == null ? "null" : pwmEnvironment.getApplicationPath() )
+                    + ", configFile=" + ( pwmEnvironment.getConfigurationFile() == null ? "null" : pwmEnvironment.getConfigurationFile() )
             );
         }
 
@@ -219,10 +192,6 @@ public class PwmApplication
         installTime = fetchInstallDate( startupTime );
         LOGGER.debug( sessionLabel, () -> "this application instance first installed on " + StringUtil.toIsoDate( installTime ) );
 
-        LOGGER.debug( sessionLabel, () -> "application environment flags: " + JsonFactory.get().serializeCollection( pwmEnvironment.getFlags() ) );
-        LOGGER.debug( sessionLabel, () -> "application environment parameters: "
-                + JsonFactory.get().serializeMap( pwmEnvironment.getParameters(), PwmEnvironment.ApplicationParameter.class, String.class ) );
-
         pwmScheduler = new PwmScheduler( this );
 
         domains = PwmDomainUtil.createDomainInstances( this );
@@ -232,7 +201,7 @@ public class PwmApplication
         PwmDomainUtil.initDomains( this, domains().values() );
 
         final boolean skipPostInit = pwmEnvironment.isInternalRuntimeInstance()
-                || pwmEnvironment.getFlags().contains( PwmEnvironment.ApplicationFlag.CommandLineInstance );
+                || pwmEnvironment.readPropertyAsBoolean( EnvironmentProperty.CommandLineInstance );
 
         if ( !skipPostInit )
         {
@@ -243,34 +212,52 @@ public class PwmApplication
 
             pwmScheduler.immediateExecuteRunnableInNewThread( this::postInitTasks, sessionLabel, this.getClass().getSimpleName() + " postInit tasks" );
         }
-
     }
 
     public void reInit( final PwmEnvironment pwmEnvironment )
             throws PwmException
     {
         final Instant startTime = Instant.now();
-        LOGGER.debug( sessionLabel, () -> "beginning application restart" );
+        LOGGER.trace( sessionLabel, () -> "beginning application restart" );
         final AppConfig oldConfig = this.pwmEnvironment.getConfig();
         this.pwmEnvironment = pwmEnvironment;
         final AppConfig newConfig = this.pwmEnvironment.getConfig();
+
+        warnOnOlderNewConfig( oldConfig, newConfig );
 
         if ( !Objects.equals( oldConfig.getValueHash(), newConfig.getValueHash() ) )
         {
             processPwmAppRestart( );
         }
+        else
+        {
+            LOGGER.debug( sessionLabel, () -> "no system-level settings have been changed"
+                    + ", restart of system services is not required" );
+        }
 
-        domains = PwmDomainUtil.reInitDomains( this, newConfig, oldConfig );
+        PwmDomainUtil.reInitDomains( this, newConfig, oldConfig );
 
-        runtimeNonce = PwmRandom.getInstance().randomUUID().toString();
+        runtimeNonce = PwmApplicationUtil.makeRuntimeNonce();
 
-        LOGGER.debug( sessionLabel, () -> "completed application restart", () -> TimeDuration.fromCurrent( startTime ) );
+        LOGGER.debug( sessionLabel, () -> "completed application restart with " + domains().size()
+                + " domains", TimeDuration.fromCurrent( startTime ) );
     }
+
+    private void warnOnOlderNewConfig( final AppConfig oldConfig, final AppConfig newConfig )
+    {
+        final Instant newInstant = newConfig.getStoredConfiguration().modifyTime();
+        final Instant oldInstant = oldConfig.getStoredConfiguration().modifyTime();
+        if ( newInstant != null && oldInstant != null && newInstant.isBefore( oldInstant ) )
+        {
+            LOGGER.warn( sessionLabel, () -> " oldConfig (" + oldInstant + ") "
+                    + "is newer than new config (" + newInstant + ") by "
+                    + TimeDuration.between( oldInstant, newInstant ).asCompactString() );
+        }
+    }
+
 
     private void postInitTasks()
     {
-        System.out.println( JavaHelper.stackTraceToString( new Throwable() ) );
-
         final Instant startTime = Instant.now();
 
         // send system audit event
@@ -288,21 +275,18 @@ public class PwmApplication
         PwmApplicationUtil.outputKeystore( this );
         PwmApplicationUtil.outputTomcatConf( this );
 
-        if ( LOGGER.isEnabled( PwmLogLevel.TRACE )
-                && Boolean.parseBoolean( getConfig().readAppProperty( AppProperty.LOGGING_OUTPUT_CONFIGURATION ) ) )
-        {
-            PwmApplicationUtil.outputApplicationInfoToLog( this );
-            PwmApplicationUtil.outputConfigurationToLog( this, DomainID.systemId() );
-            PwmApplicationUtil.outputNonDefaultPropertiesToLog( this );
-        }
+        LOGGER.debug( sessionLabel, () -> "application environment parameters: "
+                + StringUtil.mapToString( pwmEnvironment.readProperties() ) );
+
+        PwmApplicationUtil.outputApplicationInfoToLog( this );
+        PwmApplicationUtil.outputConfigurationToLog( this, DomainID.systemId() );
+        PwmApplicationUtil.outputNonDefaultPropertiesToLog( this );
 
         MBeanUtility.registerMBean( this );
 
-        UserAgentUtils.initializeCache();
+        UserAgentUtils.initializeCache( sessionLabel );
 
-        PwmSettingMetaDataReader.initCache();
-
-        LOGGER.trace( sessionLabel, () -> "completed post init tasks", () -> TimeDuration.fromCurrent( startTime ) );
+        LOGGER.trace( sessionLabel, () -> "completed post init tasks", TimeDuration.fromCurrent( startTime ) );
     }
 
     public static PwmApplication createPwmApplication( final PwmEnvironment pwmEnvironment )
@@ -321,6 +305,11 @@ public class PwmApplication
         return domains;
     }
 
+    protected void setDomains( final Map<DomainID, PwmDomain> domains )
+    {
+        this.domains = Map.copyOf( domains );
+    }
+
     public AppConfig getConfig()
     {
         return pwmEnvironment.getConfig();
@@ -331,9 +320,10 @@ public class PwmApplication
         return pwmEnvironment;
     }
 
-    public AtomicInteger getActiveServletRequests( )
+    public int getTotalActiveServletRequests( )
     {
-        return activeServletRequests;
+        return domains().values().stream().map( domain -> domain.getActiveServletRequests().get() )
+                .reduce( 0, Integer::sum );
     }
 
     public PwmApplicationMode getApplicationMode( )
@@ -392,8 +382,8 @@ public class PwmApplication
 
             final Instant startDomainShutdown = Instant.now();
             LOGGER.trace( sessionLabel, () -> "beginning shutdown of " + callables.size() + " running domains" );
-            pwmScheduler.executeImmediateThreadPerJobAndAwaitCompletion( DOMAIN_STARTUP_THREADS, callables, sessionLabel, PwmApplication.class );
-            LOGGER.trace( sessionLabel, () -> "shutdown of " + callables.size() + " running domains completed", () -> TimeDuration.fromCurrent( startDomainShutdown ) );
+            pwmScheduler.executeImmediateThreadPerJobAndAwaitCompletion( DOMAIN_STARTUP_THREAD_COUNT, callables, sessionLabel, PwmApplication.class );
+            LOGGER.trace( sessionLabel, () -> "shutdown of " + callables.size() + " running domains completed", TimeDuration.fromCurrent( startDomainShutdown ) );
         }
         catch ( final PwmUnrecoverableException e )
         {
@@ -425,7 +415,7 @@ public class PwmApplication
                 final TimeDuration closeLocalDbDuration = TimeDuration.fromCurrent( startCloseDbTime );
                 if ( closeLocalDbDuration.isLongerThan( TimeDuration.SECONDS_10 ) )
                 {
-                    LOGGER.info( sessionLabel, () -> "completed close of LocalDB", () -> closeLocalDbDuration );
+                    LOGGER.info( sessionLabel, () -> "completed close of LocalDB", closeLocalDbDuration );
                 }
             }
             catch ( final Exception e )
@@ -443,7 +433,12 @@ public class PwmApplication
         pwmScheduler.shutdown();
 
         LOGGER.info( sessionLabel, () -> PwmConstants.PWM_APP_NAME + " " + PwmConstants.SERVLET_VERSION
-                + " closed for bidness, cya!", () -> TimeDuration.fromCurrent( startTime ) );
+                + " closed for bidness, cya!", TimeDuration.fromCurrent( startTime ) );
+
+        if ( !pwmEnvironment.isInternalRuntimeInstance() )
+        {
+            PwmLogManager.disableLogging();
+        }
     }
 
     public String getInstanceID( )
@@ -452,13 +447,12 @@ public class PwmApplication
     }
 
 
-    public <T extends Serializable> Optional<T> readAppAttribute( final AppAttribute appAttribute, final Class<T> returnClass )
+    public <T> Optional<T> readAppAttribute( final AppAttribute appAttribute, final Class<T> returnClass )
     {
         final LocalDB localDB = getLocalDB();
 
         if ( localDB == null || localDB.status() != LocalDB.Status.OPEN )
         {
-            LOGGER.debug( () -> "error retrieving key '" + appAttribute.getKey() + "', localDB unavailable: " );
             return Optional.empty();
         }
 
@@ -482,7 +476,7 @@ public class PwmApplication
         return Optional.empty();
     }
 
-    public void writeLastLdapFailure( final DomainID domainID, final Map<String, ErrorInformation> errorInformationMap )
+    public void writeLastLdapFailure( final DomainID domainID, final Map<ProfileID, ErrorInformation> errorInformationMap )
     {
         try
         {
@@ -496,9 +490,9 @@ public class PwmApplication
         }
     }
 
-    public Map<String, ErrorInformation> readLastLdapFailure( final DomainID domainID )
+    public Map<ProfileID, ErrorInformation> readLastLdapFailure( final DomainID domainID )
     {
-        return readLastLdapFailure().getRecords().getOrDefault( domainID, Collections.emptyMap() );
+        return readLastLdapFailure().records().getOrDefault( domainID, Collections.emptyMap() );
     }
 
     private StoredErrorRecords readLastLdapFailure()
@@ -523,34 +517,27 @@ public class PwmApplication
         return new StoredErrorRecords( Collections.emptyMap() );
     }
 
-    @Value
-    private static class StoredErrorRecords
+    private record StoredErrorRecords(
+            Map<DomainID, Map<ProfileID, ErrorInformation>> records
+    )
     {
-        private final Map<DomainID, Map<String, ErrorInformation>> records;
-
-        StoredErrorRecords( final Map<DomainID, Map<String, ErrorInformation>> records )
+        private StoredErrorRecords( final Map<DomainID, Map<ProfileID, ErrorInformation>> records )
         {
-            this.records = records == null ? Collections.emptyMap() : Map.copyOf( records );
-        }
-
-        public Map<DomainID, Map<String, ErrorInformation>> getRecords()
-        {
-            // required because json deserialization can still set records == null
-            return records == null ? Collections.emptyMap() : records;
+            this.records = CollectionUtil.stripNulls( records );
         }
 
         StoredErrorRecords addDomainErrorMap(
                 final DomainID domainID,
-                final Map<String, ErrorInformation> errorInformationMap )
+                final Map<ProfileID, ErrorInformation> errorInformationMap )
         {
-            final Map<DomainID, Map<String, ErrorInformation>> newRecords = new HashMap<>( getRecords() );
+            final Map<DomainID, Map<ProfileID, ErrorInformation>> newRecords = new HashMap<>( records );
             newRecords.put( domainID, Map.copyOf( errorInformationMap ) );
             return new StoredErrorRecords( newRecords );
         }
 
         StoredErrorRecords stripOutdatedLdapErrors( final TimeDuration maxAge )
         {
-            return new StoredErrorRecords( getRecords().entrySet().stream()
+            return new StoredErrorRecords( records.entrySet().stream()
                     // outer map
                     .collect( Collectors.toUnmodifiableMap(
                             Map.Entry::getKey,
@@ -567,13 +554,12 @@ public class PwmApplication
     }
 
 
-    public void writeAppAttribute( final AppAttribute appAttribute, final Serializable value )
+    public void writeAppAttribute( final AppAttribute appAttribute, final Object value )
     {
         final LocalDB localDB = getLocalDB();
 
         if ( localDB == null || localDB.status() != LocalDB.Status.OPEN )
         {
-            LOGGER.error( () -> "error writing key '" + appAttribute.getKey() + "', localDB unavailable: " );
             return;
         }
 
@@ -596,7 +582,7 @@ public class PwmApplication
         }
         catch ( final Exception e )
         {
-            LOGGER.error( () -> "error retrieving key '" + appAttribute.getKey() + "' installation date from localDB: " + e.getMessage() );
+            LOGGER.error( () -> "error retrieving key '" + appAttribute.getKey() + "' from localDB: " + e.getMessage() );
             try
             {
                 localDB.remove( LocalDB.DB.PWM_META, appAttribute.getKey() );
@@ -690,16 +676,6 @@ public class PwmApplication
         return ( WordlistService ) pwmServiceManager.getService( PwmServiceEnum.WordlistService );
     }
 
-    public SeedlistService getSeedlistManager( )
-    {
-        return ( SeedlistService ) pwmServiceManager.getService( PwmServiceEnum.SeedlistService );
-    }
-
-    public ReportService getReportService( )
-    {
-        return ( ReportService ) pwmServiceManager.getService( PwmServiceEnum.ReportService );
-    }
-
     public EmailService getEmailQueue( )
     {
         return ( EmailService ) pwmServiceManager.getService( PwmServiceEnum.EmailService );
@@ -752,7 +728,7 @@ public class PwmApplication
         return ( DatabaseService ) pwmServiceManager.getService( PwmServiceEnum.DatabaseService );
     }
 
-    public StatisticsService getStatisticsManager( )
+    public StatisticsService getStatisticsService( )
     {
         return ( StatisticsService ) pwmServiceManager.getService( PwmServiceEnum.StatisticsService );
     }
@@ -760,12 +736,6 @@ public class PwmApplication
     public SessionStateService getSessionStateService( )
     {
         return ( SessionStateService ) pwmServiceManager.getService( PwmServiceEnum.SessionStateSvc );
-    }
-
-
-    public CacheService getCacheService( )
-    {
-        return ( CacheService ) pwmServiceManager.getService( PwmServiceEnum.CacheService );
     }
 
     public SystemSecureService getSecureService( )
@@ -793,37 +763,11 @@ public class PwmApplication
         return this.getConfig().isMultiDomain();
     }
 
-    public File getTempDirectory( ) throws PwmUnrecoverableException
+    public Optional<Path> getTempDirectory( )
+            throws PwmUnrecoverableException
     {
-        if ( pwmEnvironment.getApplicationPath() == null )
-        {
-            final ErrorInformation errorInformation = new ErrorInformation(
-                    PwmError.ERROR_STARTUP_ERROR,
-                    "unable to establish temp work directory: application path unavailable"
-            );
-            throw new PwmUnrecoverableException( errorInformation );
-        }
-        final File tempDirectory = new File( pwmEnvironment.getApplicationPath() + File.separator + "temp" );
-        if ( !tempDirectory.exists() )
-        {
-            LOGGER.trace( () -> "preparing to create temporary directory " + tempDirectory.getAbsolutePath() );
-            if ( tempDirectory.mkdir() )
-            {
-                LOGGER.debug( () -> "created " + tempDirectory.getAbsolutePath() );
-            }
-            else
-            {
-                LOGGER.debug( () -> "unable to create temporary directory " + tempDirectory.getAbsolutePath() );
-                final ErrorInformation errorInformation = new ErrorInformation(
-                        PwmError.ERROR_STARTUP_ERROR,
-                        "unable to establish create temp work directory " + tempDirectory.getAbsolutePath()
-                );
-                throw new PwmUnrecoverableException( errorInformation );
-            }
-        }
-        return tempDirectory;
+        return Optional.ofNullable( tempDirectory );
     }
-
 
     public PwmScheduler getPwmScheduler()
     {
@@ -878,5 +822,6 @@ public class PwmApplication
 
         return conditions.stream().allMatch( ( c ) -> c.matches( this ) );
     }
+
 
 }

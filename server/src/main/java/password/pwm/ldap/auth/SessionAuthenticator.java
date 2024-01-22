@@ -31,6 +31,7 @@ import password.pwm.PwmConstants;
 import password.pwm.PwmDomain;
 import password.pwm.bean.LocalSessionStateBean;
 import password.pwm.bean.LoginInfoBean;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.PwmSetting;
@@ -42,9 +43,9 @@ import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmRequestContext;
 import password.pwm.http.PwmSession;
 import password.pwm.ldap.LdapOperationsHelper;
-import password.pwm.ldap.UserInfo;
+import password.pwm.user.UserInfo;
 import password.pwm.ldap.UserInfoFactory;
-import password.pwm.ldap.search.UserSearchEngine;
+import password.pwm.ldap.search.UserSearchService;
 import password.pwm.svc.intruder.IntruderDomainService;
 import password.pwm.svc.intruder.IntruderRecordType;
 import password.pwm.svc.intruder.IntruderServiceClient;
@@ -85,7 +86,7 @@ public class SessionAuthenticator
             final String username,
             final PasswordData password,
             final String context,
-            final String ldapProfile
+            final ProfileID ldapProfile
     )
             throws ChaiUnavailableException, PwmUnrecoverableException, PwmOperationalException
     {
@@ -93,8 +94,8 @@ public class SessionAuthenticator
         UserIdentity userIdentity = null;
         try
         {
-            final UserSearchEngine userSearchEngine = pwmDomain.getUserSearchEngine();
-            userIdentity = userSearchEngine.resolveUsername( username, context, ldapProfile, sessionLabel );
+            final UserSearchService userSearchService = pwmDomain.getUserSearchEngine();
+            userIdentity = userSearchService.resolveUsername( username, context, ldapProfile, sessionLabel );
 
             final AuthenticationRequest authEngine = LDAPAuthenticationRequest.createLDAPAuthenticationRequest(
                     pwmDomain,
@@ -196,8 +197,8 @@ public class SessionAuthenticator
         UserIdentity userIdentity = null;
         try
         {
-            final UserSearchEngine userSearchEngine = pwmDomain.getUserSearchEngine();
-            userIdentity = userSearchEngine.resolveUsername( username, null, null, sessionLabel );
+            final UserSearchService userSearchService = pwmDomain.getUserSearchEngine();
+            userIdentity = userSearchService.resolveUsername( username, null, null, sessionLabel );
 
             final AuthenticationRequest authEngine = LDAPAuthenticationRequest.createLDAPAuthenticationRequest(
                     pwmDomain,
@@ -341,7 +342,7 @@ public class SessionAuthenticator
         final IntruderDomainService intruderManager = pwmDomain.getIntruderService();
         if ( intruderManager != null )
         {
-            IntruderServiceClient.markAddressAndSession( pwmRequest.getPwmDomain(), pwmRequest.getPwmSession() );
+            IntruderServiceClient.markAddressAndSession( pwmRequest );
 
             if ( username != null )
             {
@@ -371,7 +372,7 @@ public class SessionAuthenticator
         loginInfoBean.setUserIdentity( userIdentity );
 
         //update the session connection
-        pwmSession.getSessionManager().setChaiProvider( authenticationResult.getUserProvider() );
+        pwmSession.updateLdapAuthentication( sessionLabel, pwmRequest.getPwmApplication(), userIdentity, authenticationResult );
 
         // update the actor user info bean
         {

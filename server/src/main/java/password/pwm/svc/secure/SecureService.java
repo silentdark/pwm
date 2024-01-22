@@ -22,13 +22,16 @@ package password.pwm.svc.secure;
 
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.util.secure.PwmHashAlgorithm;
+import password.pwm.util.secure.PwmSecurityKey;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 
 public interface SecureService
 {
+    <T> T decryptObject( String value, PwmSecurityKey securityKey, Class<T> returnClass ) throws PwmUnrecoverableException;
+
     String hash(
             PwmHashAlgorithm pwmHashAlgorithm,
             String input
@@ -38,15 +41,30 @@ public interface SecureService
     String hash(
             byte[] input
     )
-                    throws PwmUnrecoverableException;
+            throws PwmUnrecoverableException;
 
     String hash(
             InputStream input
     )
-                            throws PwmUnrecoverableException;
+            throws PwmUnrecoverableException;
 
     String hash(
-            File file
+            Path file
     )
-                                    throws IOException, PwmUnrecoverableException;
+            throws IOException, PwmUnrecoverableException;
+
+    String encryptObjectToString(
+            Object object
+    )
+            throws PwmUnrecoverableException;
+
+    String encryptObjectToString( Object object, PwmSecurityKey securityKey )
+            throws PwmUnrecoverableException;
+
+    <T> T decryptObject(
+            String value,
+            Class<T> returnClass
+    )
+            throws PwmUnrecoverableException;
+
 }

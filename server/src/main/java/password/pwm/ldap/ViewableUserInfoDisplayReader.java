@@ -21,6 +21,7 @@
 package password.pwm.ldap;
 
 import password.pwm.bean.LocalSessionStateBean;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.ResponseInfoBean;
 import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
@@ -28,6 +29,7 @@ import password.pwm.config.option.ViewStatusFields;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.bean.DisplayElement;
 import password.pwm.i18n.Display;
+import password.pwm.user.UserInfo;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.PwmTimeUtil;
 import password.pwm.util.java.StringUtil;
@@ -73,7 +75,7 @@ public final class ViewableUserInfoDisplayReader
 
         if ( config.getLdapProfiles().size() > 1 )
         {
-            final String ldapProfileID = userInfo.getUserIdentity().getLdapProfileID();
+            final ProfileID ldapProfileID = userInfo.getUserIdentity().getLdapProfileID();
             final String value = config.getLdapProfiles().get( ldapProfileID ).getDisplayName( locale );
             maker.add(
                     ViewStatusFields.UserDN,

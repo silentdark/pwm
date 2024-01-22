@@ -25,15 +25,14 @@ import password.pwm.PwmConstants;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmOperationalException;
-import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StringUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmBlockAlgorithm;
 import password.pwm.util.secure.PwmRandom;
 import password.pwm.util.secure.PwmSecurityKey;
 import password.pwm.util.secure.SecureEngine;
 
-import java.io.Serializable;
 import java.util.List;
 import java.util.Optional;
 
@@ -51,6 +50,7 @@ public abstract class StoredValueEncoder
         ENCODED( new EncodedModeEngine(), "ENC-PW" + DELIMITER, "ENCODED" + DELIMITER ),;
 
         private final List<String> prefixes;
+
         private final SecureOutputEngine secureOutputEngine;
 
         Mode( final SecureOutputEngine secureOutputEngine, final String... prefixes )
@@ -257,7 +257,7 @@ public abstract class StoredValueEncoder
     }
 
     @Value
-    private static class StoredPwData implements Serializable
+    private static class StoredPwData
     {
         private String salt;
         private String value;

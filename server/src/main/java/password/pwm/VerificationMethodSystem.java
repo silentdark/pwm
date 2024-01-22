@@ -23,9 +23,8 @@ package password.pwm;
 import password.pwm.bean.SessionLabel;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.ldap.UserInfo;
+import password.pwm.user.UserInfo;
 
-import java.io.Serializable;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -46,7 +45,7 @@ public interface VerificationMethodSystem
         String getIdentifier( );
     }
 
-    class UserPromptBean implements Serializable, UserPrompt
+    class UserPromptBean implements UserPrompt
     {
         private String displayPrompt;
         private String identifier;

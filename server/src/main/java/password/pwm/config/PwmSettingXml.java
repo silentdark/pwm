@@ -21,11 +21,12 @@
 package password.pwm.config;
 
 import org.jrivard.xmlchai.AccessMode;
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlDocument;
 import org.jrivard.xmlchai.XmlElement;
-import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.LazySoftReference;
+import org.jrivard.xmlchai.XmlFactory;
+import password.pwm.util.PwmScheduler;
+import password.pwm.util.java.EnumUtil;
+import password.pwm.util.java.LazySupplier;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
@@ -34,7 +35,11 @@ import java.io.InputStream;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class PwmSettingXml
@@ -42,7 +47,8 @@ public class PwmSettingXml
     public static final String SETTING_XML_FILENAME = ( PwmSetting.class.getPackage().getName()
             + "." + PwmSetting.class.getSimpleName() ).replace( '.', '/' ) + ".xml";
 
-    static final String XML_ELEMENT_LDAP_PERMISSION = "ldapPermission";
+    static final String XML_ELEMENT_PERMISSION = "permission";
+    static final String XML_ELEMENT_LDAP = "ldap";
     static final String XML_ELEMENT_EXAMPLE = "example";
     static final String XML_ELEMENT_DEFAULT = "default";
 
@@ -55,15 +61,21 @@ public class PwmSettingXml
     static final String XML_ELEMENT_LEVEL = "level";
     static final String XML_ELEMENT_PROPERTIES = "properties";
     static final String XML_ELEMENT_PROPERTY = "property";
+    static final String XML_ELEMENT_FLAG = "flag";
+    static final String XML_ELEMENT_FLAGS = "flags";
+
     static final String XML_ATTRIBUTE_KEY = "key";
     static final String XML_ELEMENT_VALUE = "value";
     static final String XML_ELEMENT_OPTION = "option";
     static final String XML_ELEMENT_OPTIONS = "options";
     static final String XML_ELEMENT_SCOPE = "scope";
+    static final String XML_ELEMENT_SETTING = "setting";
 
     private static final PwmLogger LOGGER = PwmLogger.forClass( PwmSettingXml.class );
 
-    private static final LazySoftReference<XmlDocument> XML_DOC_CACHE = new LazySoftReference<>( PwmSettingXml::readXml );
+    private static final LazySupplier<XmlDocument> XML_DOC_CACHE = LazySupplier.createSynchronized(
+            PwmSettingXml::readXml );
+
     private static final AtomicInteger LOAD_COUNTER = new AtomicInteger( 0 );
 
     private static XmlDocument readXml( )
@@ -71,9 +83,19 @@ public class PwmSettingXml
         try ( InputStream inputStream = PwmSetting.class.getClassLoader().getResourceAsStream( SETTING_XML_FILENAME ) )
         {
             final Instant startTime = Instant.now();
-            final XmlDocument newDoc = XmlChai.getFactory().parse( inputStream, AccessMode.IMMUTABLE );
+            final XmlDocument newDoc = XmlFactory.getFactory().parse( inputStream, AccessMode.IMMUTABLE );
             final TimeDuration parseDuration = TimeDuration.fromCurrent( startTime );
             LOGGER.trace( () -> "parsed PwmSettingXml in " + parseDuration.asCompactString() + ", loads=" + LOAD_COUNTER.getAndIncrement() );
+
+            final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(
+                    PwmScheduler.makePwmThreadFactory( "pwmSetting-xml-cache-timeout-thread" ) );
+
+            scheduledExecutorService.schedule( () ->
+            {
+                XML_DOC_CACHE.clear();
+                scheduledExecutorService.shutdownNow();
+            }, 30, TimeUnit.SECONDS );
+
             return newDoc;
         }
         catch ( final IOException e )
@@ -82,25 +104,10 @@ public class PwmSettingXml
         }
     }
 
-    /*
-    private static void validateXmlSchema( )
+    static List<XmlElement> readAllSettingXmlElements()
     {
-        try
-        {
-            final InputStream xsdInputStream = PwmSetting.class.getClassLoader().getResourceAsStream( "password/pwm/config/PwmSetting.xsd" );
-            final InputStream xmlInputStream = PwmSetting.class.getClassLoader().getResourceAsStream( "password/pwm/config/PwmSetting.xml" );
-            final SchemaFactory factory = SchemaFactory.newInstance( XMLConstants.W3C_XML_SCHEMA_NS_URI );
-            final Schema schema = factory.newSchema( new StreamSource( xsdInputStream ) );
-            final Validator validator = schema.newValidator();
-            validator.validate( new StreamSource( xmlInputStream ) );
-        }
-        catch ( final Exception e )
-        {
-            throw new IllegalStateException( "error validating PwmSetting.xml schema using PwmSetting.xsd definition: " + e.getMessage() );
-        }
+        return XML_DOC_CACHE.get().getRootElement().getChildren( XML_ELEMENT_SETTING );
     }
-
-     */
 
     static XmlElement readSettingXml( final PwmSetting setting )
     {
@@ -134,11 +141,8 @@ public class PwmSettingXml
         final Set<PwmSettingTemplate> definedTemplates = new LinkedHashSet<>();
         for ( final String templateStrValue : templateSplitValues )
         {
-            final PwmSettingTemplate template = JavaHelper.readEnumFromString( PwmSettingTemplate.class, null, templateStrValue );
-            if ( template != null )
-            {
-                definedTemplates.add( template );
-            }
+            EnumUtil.readEnumFromString( PwmSettingTemplate.class, templateStrValue )
+                    .ifPresent( definedTemplates::add );
         }
         return Collections.unmodifiableSet( definedTemplates );
     }

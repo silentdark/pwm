@@ -21,6 +21,7 @@
 package password.pwm.util.java;
 
 import org.apache.commons.io.IOUtils;
+import password.pwm.data.ImmutableByteArray;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -35,110 +36,41 @@ import java.io.Writer;
 import java.lang.management.LockInfo;
 import java.lang.management.MonitorInfo;
 import java.lang.management.ThreadInfo;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.EnumSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAccumulator;
+import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
-public class JavaHelper
+public final class JavaHelper
 {
-    private static final char[] HEX_CHAR_ARRAY = "0123456789ABCDEF".toCharArray();
+    private static final HexFormat HEX_FORMAT = HexFormat.of().withUpperCase();
 
-    private JavaHelper( )
+    private JavaHelper()
     {
     }
 
     public static String binaryArrayToHex( final byte[] buf )
     {
-        final char[] chars = new char[2 * buf.length];
-        for ( int i = 0; i < buf.length; ++i )
-        {
-            chars[2 * i] = HEX_CHAR_ARRAY[( buf[i] & 0xF0 ) >>> 4];
-            chars[2 * i + 1] = HEX_CHAR_ARRAY[buf[i] & 0x0F];
-        }
-        return new String( chars );
-    }
-
-    public static <E extends Enum<E>> E readEnumFromString( final Class<E> enumClass, final E defaultValue, final String input )
-    {
-        return readEnumFromString( enumClass, input ).orElse( defaultValue );
-    }
-
-    public static <E extends Enum<E>> Optional<E> readEnumFromCaseIgnoreString( final Class<E> enumClass, final String input )
-    {
-        return JavaHelper.readEnumFromPredicate( enumClass, loopValue -> loopValue.name().equalsIgnoreCase( input ) );
-    }
-
-    public static <E extends Enum<E>> Optional<E> readEnumFromPredicate( final Class<E> enumClass, final Predicate<E> match )
-    {
-        if ( match == null )
-        {
-            return Optional.empty();
-        }
-
-        if ( enumClass == null || !enumClass.isEnum() )
-        {
-            return Optional.empty();
-        }
-
-        return EnumSet.allOf( enumClass ).stream().filter( match ).findFirst();
-    }
-
-    public static <E extends Enum<E>> Set<E> readEnumsFromPredicate( final Class<E> enumClass, final Predicate<E> match )
-    {
-        if ( match == null )
-        {
-            return Collections.emptySet();
-        }
-
-        if ( enumClass == null || !enumClass.isEnum() )
-        {
-            return Collections.emptySet();
-        }
-
-        return EnumSet.allOf( enumClass ).stream().filter( match ).collect( Collectors.toUnmodifiableSet() );
-    }
-
-    public static <E extends Enum<E>> Optional<E> readEnumFromString( final Class<E> enumClass, final String input )
-    {
-        if ( StringUtil.isEmpty( input ) )
-        {
-            return Optional.empty();
-        }
-
-        if ( enumClass == null || !enumClass.isEnum() )
-        {
-            return Optional.empty();
-        }
-
-        try
-        {
-            return Optional.of( Enum.valueOf( enumClass, input ) );
-        }
-        catch ( final IllegalArgumentException e )
-        {
-            /* noop */
-        }
-
-        return Optional.empty();
+        return HEX_FORMAT.formatHex( buf );
     }
 
     public static String throwableToString( final Throwable throwable )
@@ -182,28 +114,10 @@ public class JavaHelper
         return errorMsg.toString();
     }
 
-    public static <E extends Enum<E>> boolean enumArrayContainsValue( final E[] enumArray, final E enumValue )
-    {
-        if ( enumArray == null || enumArray.length == 0 )
-        {
-            return false;
-        }
-
-        for ( final E loopValue : enumArray )
-        {
-            if ( loopValue == enumValue )
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     public static long copy( final InputStream input, final OutputStream output )
             throws IOException
     {
-        return IOUtils.copyLarge( input, output, 0, -1 );
+        return input.transferTo( output );
     }
 
 
@@ -215,12 +129,14 @@ public class JavaHelper
             return Optional.empty();
         }
         final StringWriter stringWriter = new StringWriter();
-        final InputStreamReader reader = new InputStreamReader( input, charset );
-        IOUtils.copyLarge( reader, stringWriter, 0, maximumLength );
-        final String value = stringWriter.toString();
-        return ( value.length() > 0 )
-                ? Optional.of( value )
-                : Optional.empty();
+        try ( InputStreamReader reader = new InputStreamReader( ThresholdInputStream.newThresholdInputStream( input, maximumLength ), charset ) )
+        {
+            IOUtils.copyLarge( reader, stringWriter, 0, maximumLength );
+            final String value = stringWriter.toString();
+            return ( value.length() > 0 )
+                    ? Optional.of( value )
+                    : Optional.empty();
+        }
     }
 
     public static void closeQuietly( final Closeable closable )
@@ -231,15 +147,20 @@ public class JavaHelper
     public static ImmutableByteArray copyToBytes( final InputStream inputStream, final int maxLength )
             throws IOException
     {
-        final byte[] bytes = IOUtils.toByteArray( inputStream, maxLength );
-        return ImmutableByteArray.of( bytes );
+        try ( InputStream limitedInputStream = ThresholdInputStream.newThresholdInputStream( inputStream, maxLength ) )
+        {
+            final byte[] bytes = IOUtils.toByteArray( limitedInputStream );
+            return ImmutableByteArray.of( bytes );
+        }
     }
 
     public static void copy( final String input, final OutputStream output, final Charset charset )
             throws IOException
     {
-        final ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream( input.getBytes( charset ) );
-        JavaHelper.copy( byteArrayInputStream, output );
+        try ( ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream( input.getBytes( charset ) ) )
+        {
+            byteArrayInputStream.transferTo( output );
+        }
     }
 
     public static long copyWhilePredicate(
@@ -305,6 +226,7 @@ public class JavaHelper
 
     /**
      * Copy of {@link ThreadInfo#toString()} but with the MAX_FRAMES changed from 8 to 256.
+     *
      * @param threadInfo thread information
      * @return a stacktrace string with newline formatting
      */
@@ -417,30 +339,26 @@ public class JavaHelper
         return returnValue;
     }
 
-    public static <T> Optional<T> extractNestedExceptionType( final Exception inputException, final Class<T> exceptionType )
+    public static <T> Optional<T> extractNestedExceptionType( final Throwable inputException, final Class<T> exceptionType )
     {
         if ( inputException == null )
         {
             return Optional.empty();
         }
 
-        if ( inputException.getClass().isAssignableFrom( exceptionType ) )
+        if ( inputException.getClass().isInstance( exceptionType ) )
         {
             return Optional.of( ( T ) inputException );
         }
 
-        Throwable nextException = inputException.getCause();
-        while ( nextException != null )
-        {
-            if ( nextException.getClass().isAssignableFrom( exceptionType ) )
-            {
-                return Optional.of( ( T ) inputException );
-            }
+        final Throwable nextException = inputException.getCause();
 
-            nextException = nextException.getCause();
+        if ( nextException == null )
+        {
+            return Optional.empty();
         }
 
-        return Optional.empty();
+        return extractNestedExceptionType( nextException, exceptionType );
     }
 
     public static Map<String, String> propertiesToStringMap( final Properties properties )
@@ -515,7 +433,7 @@ public class JavaHelper
     public static byte[] gunzip( final byte[] bytes )
             throws IOException
     {
-        try (  GZIPInputStream inputGzipStream = new GZIPInputStream( new ByteArrayInputStream( bytes ) ) )
+        try ( GZIPInputStream inputGzipStream = new GZIPInputStream( new ByteArrayInputStream( bytes ) ) )
         {
             return inputGzipStream.readAllBytes();
         }
@@ -542,6 +460,7 @@ public class JavaHelper
 
     /**
      * Append multiple byte array values into a single array.
+     *
      * @param byteArrays two or more byte arrays.
      * @return A new array with the contents of all byteArrays appended
      */
@@ -569,35 +488,46 @@ public class JavaHelper
         return newByteArray;
     }
 
-    /**
-     * Close executor and wait up to the specified TimeDuration for all executor jobs to terminate.  There is no guarantee that either all jobs will
-     * terminate or the entire duration will be waited for, though the duration should not be exceeded.
-     * @param executor Executor close
-     * @param timeDuration TimeDuration to wait for
-     */
-    public static void closeAndWaitExecutor( final ExecutorService executor, final TimeDuration timeDuration )
-    {
-        if ( executor == null )
-        {
-            return;
-        }
-
-        executor.shutdown();
-        try
-        {
-            executor.awaitTermination( timeDuration.asMillis(), TimeUnit.MILLISECONDS );
-        }
-        catch ( final InterruptedException e )
-        {
-            /* ignore */
-        }
-    }
-
     public static String stackTraceToString( final Throwable e )
     {
         final Writer stackTraceOutput = new StringWriter();
         e.printStackTrace( new PrintWriter( stackTraceOutput ) );
         return stackTraceOutput.toString();
 
+    }
+
+    public static long nextPositiveLong( final long input )
+    {
+        final long next = input + 1;
+        return next > 0 ? next : 0;
+    }
+    
+    public static <T> List<T> instancesOfSealedInterface( final Class<T> sealedInterface )
+    {
+        if ( !Objects.requireNonNull( sealedInterface ).isSealed() )
+        {
+            throw new IllegalArgumentException( "sealedInterface argument is required to be marked as sealed" );
+        }
+
+        final Function<Class<T>, T> f = theClass ->
+        {
+            try
+            {
+                final Constructor<T> constructor = theClass.getDeclaredConstructor();
+                constructor.setAccessible( true );
+                return ( T ) constructor.newInstance();
+            }
+            catch ( final InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e )
+            {
+                throw new RuntimeException( e );
+            }
+        };
+
+        final List<T> list = new ArrayList<>();
+        for ( final Class<?> loopClass : sealedInterface.getPermittedSubclasses() )
+        {
+            list.add( f.apply( (Class<T> ) loopClass ) );
+        }
+        return List.copyOf( list );
     }
 }

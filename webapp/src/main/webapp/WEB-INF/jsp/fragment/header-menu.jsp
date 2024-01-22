@@ -64,7 +64,7 @@
                 <pwm:display key="MenuItem_ConfigEditor" bundle="Admin"/>
             </a>
             <pwm:if test="<%=PwmIfTest.permission%>" permission="<%=Permission.PWMADMIN%>">
-                <a class="header-warning-button" id="header_administrationButton" href="<pwm:url url="/private/admin"/>">
+            <a class="header-warning-button" id="header_administrationButton" href="<pwm:url url='<%=PwmServletDefinition.AdminMenu.servletUrl()%>' addContext="true"/>">
                     <pwm:if test="<%=PwmIfTest.showIcons%>"><span class="btn-icon pwm-icon pwm-icon-list-alt"></span></pwm:if>
                     <pwm:display key="Title_Admin"/>
                 </a>
@@ -76,7 +76,7 @@
                 </pwm:if>
             </pwm:if>
         </div>
-        <div id="panel-header-healthData" class="header-warning-row header-warning-healthDat display-none">
+        <div id="panel-header-healthData" class="header-warning-row header-warning-healthDat nodisplay">
             <div id="panel-healthHeaderErrors" class="header-error">
                 <span class="pwm-icon pwm-icon-warning"></span><pwm:display key="Header_HealthWarningsPresent" bundle="Admin"/>
             </div>

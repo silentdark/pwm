@@ -32,14 +32,13 @@ import password.pwm.config.profile.HelpdeskProfile;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.servlet.peoplesearch.PhotoDataReader;
-import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.UserInfoFactory;
-import password.pwm.util.json.JsonFactory;
+import password.pwm.user.UserInfo;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
 
-import java.io.Serializable;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,7 +47,7 @@ import java.util.Optional;
 
 @Value
 @Builder
-public class HelpdeskCardInfoBean implements Serializable
+public class HelpdeskCardInfoBean
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( HelpdeskCardInfoBean.class );
 
@@ -82,7 +81,7 @@ public class HelpdeskCardInfoBean implements Serializable
                 theUser.getChaiProvider()
         );
 
-        builder.userKey( userIdentity.toObfuscatedKey( pwmRequest.getPwmApplication() ) );
+        builder.userKey( HelpdeskServletUtil.obfuscateUserIdentity( pwmRequest, userIdentity ) );
 
         final PhotoDataReader photoDataReader = HelpdeskServlet.photoDataReader( pwmRequest, helpdeskProfile, userIdentity );
         final Optional<String> optionalPhotoUrl = photoDataReader.figurePhotoURL();

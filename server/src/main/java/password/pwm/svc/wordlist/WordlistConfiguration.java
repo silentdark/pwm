@@ -30,7 +30,7 @@ import password.pwm.config.AppConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.LazySupplier;
-import password.pwm.util.java.MiscUtil;
+import password.pwm.util.java.PwmUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.json.JsonFactory;
@@ -38,17 +38,14 @@ import password.pwm.util.localdb.LocalDB;
 import password.pwm.util.secure.PwmHashAlgorithm;
 import password.pwm.util.secure.SecureEngine;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.function.Supplier;
 
 @Value
 @Builder( toBuilder = true )
-public class WordlistConfiguration implements Serializable
+public class WordlistConfiguration
 {
-    private static final long serialVersionUID = 1L;
-
     static final int STREAM_BUFFER_SIZE = 1_1024_1024;
     static final PwmHashAlgorithm HASH_ALGORITHM = PwmHashAlgorithm.SHA256;
 
@@ -88,17 +85,6 @@ public class WordlistConfiguration implements Serializable
     {
         switch ( type )
         {
-            case SEEDLIST:
-            {
-                return commonBuilder( appConfig ).toBuilder()
-                        .autoImportUrl( readAutoImportUrl( appConfig, PwmSetting.SEEDLIST_FILENAME ) )
-                        .metaDataAppAttribute( AppAttribute.SEEDLIST_METADATA )
-                        .builtInWordlistLocationProperty( AppProperty.SEEDLIST_BUILTIN_PATH )
-                        .db( LocalDB.DB.SEEDLIST_WORDS )
-                        .wordlistFilenameSetting( PwmSetting.SEEDLIST_FILENAME )
-                        .build();
-            }
-
             case WORDLIST:
             {
                 return commonBuilder( appConfig ).toBuilder()
@@ -113,7 +99,7 @@ public class WordlistConfiguration implements Serializable
             }
 
             default:
-                MiscUtil.unhandledSwitchStatement( type );
+                PwmUtil.unhandledSwitchStatement( type );
         }
 
         throw new IllegalStateException( "unreachable switch statement" );
@@ -163,7 +149,7 @@ public class WordlistConfiguration implements Serializable
     }
 
     @Getter( AccessLevel.PRIVATE )
-    private final transient Supplier<String> configHash = new LazySupplier<>( () ->
+    private final transient Supplier<String> configHash = LazySupplier.create( () ->
             SecureEngine.hash( JsonFactory.get().serialize( WordlistConfiguration.this ), HASH_ALGORITHM ) );
 
     public boolean isAutoImportUrlConfigured()

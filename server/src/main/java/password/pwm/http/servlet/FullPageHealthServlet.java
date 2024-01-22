@@ -39,6 +39,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 
 @WebServlet(
@@ -50,6 +51,12 @@ import java.util.Set;
 public class FullPageHealthServlet extends ControlledPwmServlet
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( FullPageHealthServlet.class );
+
+    @Override
+    protected PwmLogger getLogger()
+    {
+        return LOGGER;
+    }
 
     public enum FullPageHealthAction implements AbstractPwmServlet.ProcessAction
     {
@@ -70,9 +77,9 @@ public class FullPageHealthServlet extends ControlledPwmServlet
     }
 
     @Override
-    public Class<? extends ProcessAction> getProcessActionsClass( )
+    public Optional<Class<? extends ProcessAction>> getProcessActionsClass( )
     {
-        return FullPageHealthAction.class;
+        return Optional.of( FullPageHealthAction.class );
     }
 
     @Override
@@ -87,7 +94,7 @@ public class FullPageHealthServlet extends ControlledPwmServlet
             throws PwmUnrecoverableException, IOException, ServletException
     {
         forwardToJSP( pwmRequest );
-        pwmRequest.getPwmSession().unauthenticateUser( pwmRequest );
+        pwmRequest.getPwmSession().unAuthenticateUser( pwmRequest );
     }
 
     @Override

@@ -152,14 +152,14 @@ public class Validator
     }
 
 
-    public static String sanitizeHeaderValue( final AppConfig domainConfig, final String input )
+    public static String sanitizeHeaderValue( final AppConfig appConfig, final String input )
     {
         if ( input == null )
         {
             return null;
         }
 
-        final String regexStripPatternStr = domainConfig.readAppProperty( AppProperty.SECURITY_HTTP_STRIP_HEADER_REGEX );
+        final String regexStripPatternStr = appConfig.readAppProperty( AppProperty.SECURITY_HTTP_STRIP_HEADER_REGEX );
         if ( regexStripPatternStr != null && !regexStripPatternStr.isEmpty() )
         {
             final Pattern pattern = Pattern.compile( regexStripPatternStr );

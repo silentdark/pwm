@@ -27,6 +27,7 @@ import password.pwm.PwmApplication;
 import password.pwm.PwmApplicationMode;
 import password.pwm.bean.DomainID;
 import password.pwm.bean.EmailItemBean;
+import password.pwm.bean.SessionLabel;
 import password.pwm.config.AppConfig;
 import password.pwm.config.option.DataStorageMethod;
 import password.pwm.error.ErrorInformation;
@@ -36,7 +37,7 @@ import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthMessage;
 import password.pwm.health.HealthRecord;
-import password.pwm.ldap.UserInfo;
+import password.pwm.user.UserInfo;
 import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
 import password.pwm.svc.stats.Statistic;
@@ -92,7 +93,14 @@ public class EmailService extends AbstractPwmService implements PwmService
             throws PwmException
     {
         this.emailServiceSettings = EmailServiceSettings.fromConfiguration( this.getPwmApplication().getConfig() );
-        LOGGER.trace( () -> "initializing with settings: " + JsonFactory.get().serialize( emailServiceSettings ) );
+
+        if ( this.getPwmApplication().getLocalDB() == null || this.getPwmApplication().getLocalDB().status() != LocalDB.Status.OPEN )
+        {
+            LOGGER.debug( getSessionLabel(), () -> "localDB is not open, EmailService will remain closed" );
+            return STATUS.CLOSED;
+        }
+
+        LOGGER.trace( getSessionLabel(), () -> "initializing with settings: " + JsonFactory.get().serialize( emailServiceSettings ) );
 
         final List<EmailServer> servers;
         try
@@ -102,24 +110,17 @@ public class EmailService extends AbstractPwmService implements PwmService
         catch ( final PwmUnrecoverableException e )
         {
             setStartupError( e.getErrorInformation() );
-            LOGGER.error( () -> "unable to startup email service: " + e.getMessage() );
+            LOGGER.error( getSessionLabel(), () -> "unable to startup email service: " + e.getMessage() );
             return STATUS.CLOSED;
         }
 
         if ( servers.isEmpty() )
         {
-            LOGGER.debug( () -> "no email servers configured, will remain closed" );
+            LOGGER.debug( getSessionLabel(), () -> "no email servers configured, will remain closed" );
             return STATUS.CLOSED;
         }
 
-        if ( this.getPwmApplication().getLocalDB() == null || this.getPwmApplication().getLocalDB().status() != LocalDB.Status.OPEN )
-        {
-            LOGGER.debug( () -> "localDB is not open, EmailService will remain closed" );
-            return STATUS.CLOSED;
-
-        }
-
-        LOGGER.debug( () -> "starting with settings: " + JsonFactory.get().serialize( emailServiceSettings ) );
+        LOGGER.debug( getSessionLabel(), () -> "starting with settings: " + JsonFactory.get().serialize( emailServiceSettings ) );
 
         final WorkQueueProcessor.Settings settings = WorkQueueProcessor.Settings.builder()
                 .maxEvents( emailServiceSettings.getQueueMaxItems() )
@@ -132,7 +133,7 @@ public class EmailService extends AbstractPwmService implements PwmService
 
         workQueueProcessor = new WorkQueueProcessor<>( this.getPwmApplication(), this.getSessionLabel(), localDBStoredQueue, settings, new EmailItemProcessor(), this.getClass() );
 
-        connectionPool = new EmailConnectionPool( servers, emailServiceSettings );
+        connectionPool = new EmailConnectionPool( servers, emailServiceSettings, getSessionLabel() );
 
         statsLogger.conditionallyExecuteTask();
 
@@ -196,7 +197,7 @@ public class EmailService extends AbstractPwmService implements PwmService
             }
         }
 
-        records.addAll( EmailServerUtil.checkAllConfiguredServers( connectionPool.getServers() ) );
+        records.addAll( EmailServerUtil.checkAllConfiguredServers( connectionPool.getServers(), getSessionLabel() ) );
 
         return Collections.unmodifiableList( records );
     }
@@ -248,7 +249,7 @@ public class EmailService extends AbstractPwmService implements PwmService
 
     private void logStats()
     {
-        LOGGER.trace( () -> "stats: " + StringUtil.mapToString( stats() ) );
+        LOGGER.trace( getSessionLabel(), () -> "stats: " + StringUtil.mapToString( stats() ) );
     }
 
 
@@ -290,7 +291,7 @@ public class EmailService extends AbstractPwmService implements PwmService
     {
         if ( status() != STATUS.OPEN )
         {
-            LOGGER.debug( () -> "discarding email send event, no service is not running" );
+            LOGGER.debug( getSessionLabel(), () -> "discarding email send event, no service is not running" );
             return false;
         }
 
@@ -301,7 +302,7 @@ public class EmailService extends AbstractPwmService implements PwmService
         }
         catch ( final PwmOperationalException e )
         {
-            LOGGER.debug( () -> "discarding email send event: " + e.getMessage() );
+            LOGGER.debug( getSessionLabel(), () -> "discarding email send event: " + e.getMessage() );
         }
         return false;
     }
@@ -309,27 +310,25 @@ public class EmailService extends AbstractPwmService implements PwmService
     private static void validateEmailItem( final EmailItemBean emailItem )
             throws PwmOperationalException
     {
-
-
-        if ( StringUtil.isEmpty( emailItem.getFrom() ) )
+        if ( StringUtil.isEmpty( emailItem.from() ) )
         {
             throw new PwmOperationalException( new ErrorInformation( PwmError.ERROR_EMAIL_SEND_FAILURE,
                     "missing from address in email item" ) );
         }
 
-        if ( StringUtil.isEmpty( emailItem.getTo() ) )
+        if ( StringUtil.isEmpty( emailItem.to() ) )
         {
             throw new PwmOperationalException( new ErrorInformation( PwmError.ERROR_EMAIL_SEND_FAILURE,
                     "missing to address in email item" ) );
         }
 
-        if ( StringUtil.isEmpty( emailItem.getSubject() ) )
+        if ( StringUtil.isEmpty( emailItem.subject() ) )
         {
             throw new PwmOperationalException( new ErrorInformation( PwmError.ERROR_EMAIL_SEND_FAILURE,
                     "missing subject in email item" ) );
         }
 
-        if ( StringUtil.isEmpty( emailItem.getBodyPlain() ) && StringUtil.isEmpty( emailItem.getBodyHtml() ) )
+        if ( StringUtil.isEmpty( emailItem.bodyPlain() ) && StringUtil.isEmpty( emailItem.bodyHtml() ) )
         {
             throw new PwmOperationalException( new ErrorInformation( PwmError.ERROR_EMAIL_SEND_FAILURE,
                     "missing body in email item" ) );
@@ -371,7 +370,7 @@ public class EmailService extends AbstractPwmService implements PwmService
 
         if ( status() != STATUS.OPEN )
         {
-            LOGGER.trace( () -> "email service is closed, discarding email job: " + emailItem.toDebugString() );
+            LOGGER.trace( getSessionLabel(), () -> "email service is closed, discarding email job: " + emailItem.toDebugString() );
             return;
         }
 
@@ -381,7 +380,7 @@ public class EmailService extends AbstractPwmService implements PwmService
             final EmailItemBean finalBean;
             {
                 EmailItemBean workingItemBean = emailItem;
-                if ( ( emailItem.getTo() == null || emailItem.getTo().isEmpty() ) && userInfo != null )
+                if ( StringUtil.isEmpty( emailItem.to() ) && userInfo != null )
                 {
                     final String toAddress = userInfo.getUserEmailAddress();
                     workingItemBean = EmailServerUtil.newEmailToAddress( workingItemBean, toAddress );
@@ -392,9 +391,9 @@ public class EmailService extends AbstractPwmService implements PwmService
                     workingItemBean = EmailServerUtil.applyMacrosToEmail( workingItemBean, macroRequest );
                 }
 
-                if ( StringUtil.isEmpty( workingItemBean.getTo() ) )
+                if ( StringUtil.isEmpty( workingItemBean.to() ) )
                 {
-                    LOGGER.error( () -> "no destination address available for email, skipping; email: " + emailItem.toDebugString() );
+                    LOGGER.error( getSessionLabel(), () -> "no destination address available for email, skipping; email: " + emailItem.toDebugString() );
                 }
 
                 if ( !determineIfItemCanBeDelivered( emailItem ) )
@@ -417,7 +416,7 @@ public class EmailService extends AbstractPwmService implements PwmService
             }
             catch ( final PwmOperationalException e )
             {
-                LOGGER.warn( () -> "unable to add email to queue: " + e.getMessage() );
+                LOGGER.warn( getSessionLabel(), () -> "unable to add email to queue: " + e.getMessage() );
             }
         }
         finally
@@ -433,10 +432,10 @@ public class EmailService extends AbstractPwmService implements PwmService
             final EmailServer emailServer,
             final AppConfig domainConfig,
             final EmailItemBean emailItem,
-            final MacroRequest macroRequest
+            final MacroRequest macroRequest,
+            final SessionLabel sessionLabel
     )
             throws PwmOperationalException, PwmUnrecoverableException
-
     {
         try
         {
@@ -446,11 +445,12 @@ public class EmailService extends AbstractPwmService implements PwmService
             {
                 workingItemBean = EmailServerUtil.applyMacrosToEmail( workingItemBean, macroRequest );
             }
-            final Transport transport = EmailServerUtil.makeSmtpTransport( emailServer );
+            final Transport transport = EmailServerUtil.makeSmtpTransport( emailServer, sessionLabel );
             final List<Message> messages = EmailServerUtil.convertEmailItemToMessages(
                     workingItemBean,
                     domainConfig,
-                    emailServer
+                    emailServer,
+                    sessionLabel
             );
 
             for ( final Message message : messages )
@@ -477,15 +477,17 @@ public class EmailService extends AbstractPwmService implements PwmService
         }
         catch ( final MessagingException | PwmException e )
         {
-            if ( EmailServerUtil.examineSendFailure( e, emailServiceSettings.getRetryableStatusResponses() ) )
+            if ( EmailServerUtil.examineSendFailure( e, emailServiceSettings.getRetryableStatusResponses(), getSessionLabel() ) )
             {
-                LOGGER.error( () -> "error sending email (" + e.getMessage() + ") " + emailItemBean.toDebugString() + ", will retry" );
+                LOGGER.error( getSessionLabel(), () -> "error sending email (" + e.getMessage() + ") "
+                        + emailItemBean.toDebugString() + ", will retry" );
                 StatisticsClient.incrementStat( getPwmApplication(), Statistic.EMAIL_SEND_FAILURES );
                 return WorkQueueProcessor.ProcessResult.RETRY;
             }
             else
             {
-                LOGGER.error( () -> "error sending email (" + e.getMessage() + ") " + emailItemBean.toDebugString() + ", permanent failure, discarding message" );
+                LOGGER.error( getSessionLabel(), () -> "error sending email (" + e.getMessage() + ") "
+                        + emailItemBean.toDebugString() + ", permanent failure, discarding message" );
                 StatisticsClient.incrementStat( getPwmApplication(), Statistic.EMAIL_SEND_DISCARDS );
                 return WorkQueueProcessor.ProcessResult.FAILED;
             }
@@ -506,7 +508,8 @@ public class EmailService extends AbstractPwmService implements PwmService
             final List<Message> messages = EmailServerUtil.convertEmailItemToMessages(
                     emailItemBean,
                     this.getPwmApplication().getConfig(),
-                    emailConnection.getEmailServer()
+                    emailConnection.getEmailServer(),
+                    getSessionLabel()
             );
 
             for ( final Message message : messages )
@@ -521,7 +524,7 @@ public class EmailService extends AbstractPwmService implements PwmService
             emailConnection.getEmailServer().getAverageSendTime().update( sendTime.asMillis() );
             lastSendError.set( null );
 
-            LOGGER.debug( () -> "sent email: " + emailItemBean.toDebugString(), () -> sendTime );
+            LOGGER.debug( getSessionLabel(), () -> "sent email: " + emailItemBean.toDebugString(), sendTime );
             StatisticsClient.incrementStat( getPwmApplication(), Statistic.EMAIL_SEND_SUCCESSES );
         }
         catch ( final MessagingException | PwmException e )
@@ -540,7 +543,7 @@ public class EmailService extends AbstractPwmService implements PwmService
                         new String[] {
                                 emailItemBean.toDebugString(),
                                 JavaHelper.readHostileExceptionMessage( e ),
-                                }
+                        }
                 );
             }
 
@@ -550,7 +553,7 @@ public class EmailService extends AbstractPwmService implements PwmService
                 emailConnection.getEmailServer().getConnectionStats().increment( EmailServer.ServerStat.sendFailures );
 
             }
-            LOGGER.error( errorInformation );
+            LOGGER.error( getSessionLabel(), errorInformation );
             throw e;
         }
         finally

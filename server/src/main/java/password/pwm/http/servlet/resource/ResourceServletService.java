@@ -33,30 +33,33 @@ import password.pwm.health.HealthRecord;
 import password.pwm.http.PwmRequest;
 import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
-import password.pwm.util.java.CrcChecksumOutputStream;
+import password.pwm.util.Percent;
 import password.pwm.util.java.FileSystemUtility;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.Percent;
 import password.pwm.util.java.StatisticAverageBundle;
 import password.pwm.util.java.StatisticCounterBundle;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
+import password.pwm.util.secure.PwmHashAlgorithm;
 
 import javax.servlet.ServletContext;
-import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.DigestOutputStream;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -164,7 +167,7 @@ public class ResourceServletService extends AbstractPwmService implements PwmSer
         {
             final Instant start = Instant.now();
             resourceNonce = makeResourcePathNonce();
-            LOGGER.trace( getSessionLabel(), () -> "calculated nonce", () -> TimeDuration.fromCurrent( start ) );
+            LOGGER.trace( getSessionLabel(), () -> "calculated nonce", TimeDuration.fromCurrent( start ) );
         }
         catch ( final Exception e )
         {
@@ -192,7 +195,7 @@ public class ResourceServletService extends AbstractPwmService implements PwmSer
     {
         final Map<String, String> debugInfo = new HashMap<>();
         debugInfo.putAll( averageStats.debugStats() );
-        debugInfo.putAll( countingStats.debugStats() );
+        debugInfo.putAll( countingStats.debugStats( PwmConstants.DEFAULT_LOCALE ) );
         return ServiceInfoBean.builder()
                 .debugProperties( debugInfo )
                 .build();
@@ -214,7 +217,7 @@ public class ResourceServletService extends AbstractPwmService implements PwmSer
 
         final Instant startTime = Instant.now();
         final String nonce = checksumAllResources( pwmDomain );
-        LOGGER.debug( getSessionLabel(), () -> "completed generation of nonce '" + nonce + "'", () ->  TimeDuration.fromCurrent( startTime ) );
+        LOGGER.debug( getSessionLabel(), () -> "completed generation of nonce '" + nonce + "'", TimeDuration.fromCurrent( startTime ) );
 
         final String noncePrefix = pwmDomain.getConfig().readAppProperty( AppProperty.HTTP_RESOURCES_NONCE_PATH_PREFIX );
         return "/" + noncePrefix + nonce;
@@ -269,7 +272,7 @@ public class ResourceServletService extends AbstractPwmService implements PwmSer
     private String checksumAllResources( final PwmDomain pwmDomain )
             throws IOException
     {
-        try ( CrcChecksumOutputStream checksumStream = CrcChecksumOutputStream.newChecksumOutputStream( OutputStream.nullOutputStream() ) )
+        try ( DigestOutputStream checksumStream = new DigestOutputStream( OutputStream.nullOutputStream(), PwmHashAlgorithm.SHA1.newMessageDigest() ) )
         {
             checksumResourceFilePath( pwmDomain, checksumStream );
 
@@ -291,43 +294,42 @@ public class ResourceServletService extends AbstractPwmService implements PwmSer
                     }
                 }
             }
-            return Long.toString( checksumStream.checksum(), 36 );
+            return JavaHelper.binaryArrayToHex( checksumStream.getMessageDigest().digest() ).toLowerCase();
         }
     }
 
-    private static void checksumResourceFilePath( final PwmDomain pwmDomain, final CrcChecksumOutputStream checksumStream )
+    private static void checksumResourceFilePath( final PwmDomain pwmDomain, final DigestOutputStream checksumStream )
     {
-        if ( pwmDomain.getPwmApplication().getPwmEnvironment().getContextManager() != null )
+        if ( pwmDomain.getPwmApplication().getPwmEnvironment().getContextManager() == null )
+        {
+            return;
+        }
+
+        final Consumer<FileSystemUtility.FileSummaryInformation> consumer = fileSummaryInformation ->
         {
             try
             {
-                final Optional<File> webInfPath = pwmDomain.getPwmApplication().getPwmEnvironment().getContextManager().locateWebInfFilePath();
-                if ( webInfPath.isPresent() && webInfPath.get().exists() )
-                {
-                    final File basePath = webInfPath.get().getParentFile();
-                    if ( basePath != null && basePath.exists() )
-                    {
-                        final File resourcePath = new File( basePath.getAbsolutePath() + File.separator + "public" + File.separator + "resources" );
-                        if ( resourcePath.exists() )
-                        {
-                            final Iterator<FileSystemUtility.FileSummaryInformation> iter =
-                                    FileSystemUtility.readFileInformation( Collections.singletonList( resourcePath ) );
-                            {
-                                while ( iter.hasNext()  )
-                                {
-                                    final FileSystemUtility.FileSummaryInformation fileSummaryInformation = iter.next();
-                                    checksumStream.write( JavaHelper.longToBytes( fileSummaryInformation.getChecksum() ) );
-                                }
-
-                            }
-                        }
-                    }
-                }
+                checksumStream.write( fileSummaryInformation.sha512Hash().getBytes( StandardCharsets.UTF_8 ) );
             }
             catch ( final Exception e )
             {
                 LOGGER.error( () -> "unable to generate resource path nonce: " + e.getMessage() );
             }
-        }
+
+        };
+
+        pwmDomain.getPwmApplication().getPwmEnvironment().getContextManager().locateWebInfFilePath().ifPresent( webInfPath ->
+        {
+            final Path basePath = webInfPath.getParent();
+            if ( basePath != null && Files.exists( basePath ) )
+            {
+                final Path resourcePath = basePath.resolve( "public" ).resolve( "resources" );
+                if ( Files.exists( resourcePath ) )
+                {
+                    FileSystemUtility.readFileInformation( Collections.singletonList( resourcePath ) )
+                            .forEach( consumer::accept );
+                }
+            }
+        } );
     }
 }

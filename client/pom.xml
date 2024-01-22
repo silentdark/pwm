@@ -9,12 +9,13 @@
 
     <modelVersion>4.0.0</modelVersion>
 
+    <url>https://github.com/pwm-project/pwm</url>
     <artifactId>pwm-client</artifactId>
     <packaging>jar</packaging>
 
     <properties>
-        <node.version>v14.18.3</node.version>
-        <npm.version>6.14.15</npm.version>
+        <node.version>v16.17.1</node.version>
+        <npm.version>8.19.2</npm.version>
     </properties>
 
     <name>PWM Password Self Service: Angular Client JAR</name>
@@ -32,7 +33,7 @@
         <plugins>
             <plugin>
                 <artifactId>maven-resources-plugin</artifactId>
-                <version>3.2.0</version>
+                <version>3.3.1</version>
                 <executions>
                     <execution>
                         <id>copy-client-files</id>
@@ -41,6 +42,7 @@
                             <goal>copy-resources</goal>
                         </goals>
                         <configuration>
+                            <propertiesEncoding>ISO-8859-1</propertiesEncoding>
                             <outputDirectory>${project.build.outputDirectory}/META-INF/resources/webjars/${project.artifactId}/${project.version}</outputDirectory>
                             <resources>
                                 <resource>
@@ -53,7 +55,7 @@
             </plugin>
             <plugin>
                 <artifactId>maven-clean-plugin</artifactId>
-                <version>3.2.0</version>
+                <version>3.3.1</version>
                 <executions>
                     <execution>
                         <id>remove-client-files</id>
@@ -89,7 +91,7 @@
             <plugin>
                 <groupId>com.github.eirslett</groupId>
                 <artifactId>frontend-maven-plugin</artifactId>
-                <version>1.12.1</version>
+                <version>1.14.0</version>
                 <configuration>
                     <nodeVersion>${node.version}</nodeVersion>
                     <npmVersion>${npm.version}</npmVersion>
@@ -109,7 +111,7 @@
                             <goal>npm</goal>
                         </goals>
                         <configuration>
-                            <arguments>install</arguments>
+                            <arguments>install --legacy-peer-deps</arguments>
                         </configuration>
                     </execution>
                     <execution>
@@ -126,23 +128,27 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>3.2.2</version>
+                <version>3.3.0</version>
                 <configuration>
                     <archive>
+                        <manifest>
+                            <addDefaultEntries>false</addDefaultEntries>
+                            <addDefaultImplementationEntries>false</addDefaultImplementationEntries>
+                        </manifest>
                         <manifestEntries>
+                            <Artifact-ID>${project.artifactId}</Artifact-ID>
                             <Implementation-Title>${project.name}</Implementation-Title>
                             <Implementation-Version>${project.version}</Implementation-Version>
                             <Implementation-Vendor>${project.organization.name}</Implementation-Vendor>
                             <Implementation-URL>${project.organization.url}</Implementation-URL>
-                            <Implementation-Build>${build.number}</Implementation-Build>
-                            <Implementation-Revision>${build.revision}</Implementation-Revision>
-                            <Implementation-Version-Display>v${project.version} b${build.number} r${build.revision}</Implementation-Version-Display>
+                            <Implementation-Build-Java-Version>${maven.compiler.target}</Implementation-Build-Java-Version>
                             <SCM-Git-Branch>${git.branch}</SCM-Git-Branch>
                             <SCM-Git-Commit-ID>${git.commit.id}</SCM-Git-Commit-ID>
                             <SCM-Git-Commit-ID-Abbrev>${git.commit.id.abbrev}</SCM-Git-Commit-ID-Abbrev>
                             <SCM-Git-Commit-ID-Description>${git.commit.id.describe}</SCM-Git-Commit-ID-Description>
                             <SCM-Git-Commit-Timestamp>${git.commit.time}</SCM-Git-Commit-Timestamp>
                             <SCM-Git-Commit-Dirty>${git.dirty}</SCM-Git-Commit-Dirty>
+                            <SCM-Git-Remote-Origin-URL>${git.remote.origin.url}</SCM-Git-Remote-Origin-URL>
                         </manifestEntries>
                     </archive>
                 </configuration>

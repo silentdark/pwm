@@ -32,16 +32,15 @@ import password.pwm.bean.TelemetryPublishBean;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.MiscUtil;
-import password.pwm.util.json.JsonProvider;
-import password.pwm.util.json.JsonFactory;
+import password.pwm.util.java.PwmUtil;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
+import password.pwm.util.json.JsonProvider;
 import password.pwm.util.logging.PwmLogger;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.Serializable;
 import java.time.Instant;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -80,7 +79,7 @@ public class FtpTelemetrySender implements TelemetrySender
                 break;
 
             default:
-                MiscUtil.unhandledSwitchStatement( settings.getFtpMode() );
+                PwmUtil.unhandledSwitchStatement( settings.getFtpMode() );
                 throw new UnsupportedOperationException();
         }
 
@@ -172,7 +171,7 @@ public class FtpTelemetrySender implements TelemetrySender
                 throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_TELEMETRY_SEND_ERROR, msg ) );
             }
 
-            LOGGER.trace( sessionLabel, () -> "completed transfer of " + fileBytes.length + " in ", () -> TimeDuration.fromCurrent( startTime ) );
+            LOGGER.trace( sessionLabel, () -> "completed transfer of " + fileBytes.length + " in ", TimeDuration.fromCurrent( startTime ) );
         }
         catch ( final IOException e )
         {
@@ -199,7 +198,7 @@ public class FtpTelemetrySender implements TelemetrySender
     }
 
     @Value
-    private static class Settings implements Serializable
+    private static class Settings
     {
         private FtpMode ftpMode;
         private String host;

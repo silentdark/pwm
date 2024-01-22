@@ -31,7 +31,7 @@ import password.pwm.bean.UserIdentity;
 import password.pwm.error.PwmOperationalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.ldap.search.SearchConfiguration;
-import password.pwm.ldap.search.UserSearchEngine;
+import password.pwm.ldap.search.UserSearchService;
 import password.pwm.util.cli.CliException;
 import password.pwm.util.cli.CliParameters;
 import password.pwm.util.java.TimeDuration;
@@ -39,10 +39,10 @@ import password.pwm.util.json.JsonFactory;
 import password.pwm.ws.server.rest.RestChallengesServer;
 
 import java.io.BufferedWriter;
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.Writer;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
@@ -58,11 +58,11 @@ public class ExportResponsesCommand extends AbstractCliCommand
         final PwmApplication pwmApplication = cliEnvironment.getPwmApplication();
 
         final Instant startTime = Instant.now();
-        final File outputFile = ( File ) cliEnvironment.getOptions().get( CliParameters.REQUIRED_NEW_OUTPUT_FILE.getName() );
+        final Path outputFile = ( Path ) cliEnvironment.getOptions().get( CliParameters.REQUIRED_NEW_OUTPUT_FILE.getName() );
 
         long counter = 0;
 
-        try ( Writer writer = new BufferedWriter( new PrintWriter( outputFile, PwmConstants.DEFAULT_CHARSET.toString() ) ); )
+        try ( Writer writer = new BufferedWriter( new PrintWriter( outputFile.toFile(), PwmConstants.DEFAULT_CHARSET.toString() ) ); )
         {
             for ( final PwmDomain pwmDomain : pwmApplication.domains().values() )
             {
@@ -86,18 +86,18 @@ public class ExportResponsesCommand extends AbstractCliCommand
     )
             throws PwmUnrecoverableException, PwmOperationalException, IOException, ChaiValidationException
     {
-        final UserSearchEngine userSearchEngine = pwmDomain.getUserSearchEngine();
+        final UserSearchService userSearchService = pwmDomain.getUserSearchEngine();
         final SearchConfiguration searchConfiguration = SearchConfiguration.builder()
                 .searchTimeout( TimeDuration.MINUTE )
                 .enableValueEscaping( false )
                 .username( "*" )
                 .build();
 
-        final Map<UserIdentity, Map<String, String>> results = userSearchEngine.performMultiUserSearch(
+        final Map<UserIdentity, Map<String, String>> results = userSearchService.performMultiUserSearch(
                 searchConfiguration,
                 Integer.MAX_VALUE,
                 Collections.emptyList(),
-                SessionLabel.SYSTEM_LABEL
+                SessionLabel.CLI_SESSION_LABEL
         );
         out( "searching " + results.size() + " users for stored responses...." );
         int counter = 0;

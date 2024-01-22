@@ -20,8 +20,8 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingSyntax;
@@ -31,14 +31,13 @@ import password.pwm.config.value.data.ActionConfiguration;
 import password.pwm.error.PwmInternalException;
 import password.pwm.error.PwmOperationalException;
 import password.pwm.util.java.CollectionUtil;
-import password.pwm.util.java.MiscUtil;
+import password.pwm.util.java.PwmUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmSecurityKey;
 import password.pwm.util.secure.X509Utils;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -67,7 +66,7 @@ public class ActionValue extends AbstractValue implements StoredValue
     private static class ActionStoredValueFactory implements StoredValueFactory
     {
         @Override
-        public ActionValue fromJson( final String input )
+        public ActionValue fromJson( final PwmSetting pwmSetting, final String input )
         {
             return input == null
                     ? new ActionValue( Collections.emptyList() )
@@ -195,7 +194,7 @@ public class ActionValue extends AbstractValue implements StoredValue
                     .webActions( clonedWebActions )
                     .build();
 
-            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
 
             valueElement.setText( JsonFactory.get().serialize( clonedAction ) );
             returnList.add( valueElement );
@@ -277,7 +276,7 @@ public class ActionValue extends AbstractValue implements StoredValue
     }
 
     @Override
-    public Serializable toDebugJsonObject( final Locale locale )
+    public Object toDebugJsonObject( final Locale locale )
     {
         final ArrayList<ActionConfiguration> output = new ArrayList<>( values.size() );
         for ( final ActionConfiguration actionConfiguration : values )
@@ -427,7 +426,7 @@ public class ActionValue extends AbstractValue implements StoredValue
             break;
 
             default:
-                MiscUtil.unhandledSwitchStatement( oldAction.getType() );
+                PwmUtil.unhandledSwitchStatement( oldAction.getType() );
 
         }
 

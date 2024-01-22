@@ -24,17 +24,19 @@ import password.pwm.config.AppConfig;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
+import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.io.StringWriter;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Properties;
 
 class FileLocker
@@ -43,18 +45,18 @@ class FileLocker
 
     private final PwmEnvironment pwmEnvironment;
     private FileLock lock;
-    private final File lockfile;
+    private final Path lockfile;
 
     FileLocker( final PwmEnvironment pwmEnvironment )
     {
         this.pwmEnvironment = pwmEnvironment;
         final String lockfileName = pwmEnvironment.getConfig().readAppProperty( AppProperty.APPLICATION_FILELOCK_FILENAME );
-        lockfile = new File( pwmEnvironment.getApplicationPath(), lockfileName );
+        lockfile = Objects.requireNonNull( pwmEnvironment.getApplicationPath().resolve( lockfileName ) );
     }
 
     private boolean lockingAllowed( )
     {
-        return !pwmEnvironment.isInternalRuntimeInstance() && !pwmEnvironment.getFlags().contains( PwmEnvironment.ApplicationFlag.NoFileLock );
+        return !pwmEnvironment.isInternalRuntimeInstance() && !pwmEnvironment.readPropertyAsBoolean( EnvironmentProperty.NoFileLock );
     }
 
     public boolean isLocked( )
@@ -66,24 +68,25 @@ class FileLocker
     {
         if ( lockingAllowed() && !isLocked() )
         {
+            final String lockFileDebugName = lockfile.toString();
             try
             {
-                final RandomAccessFile file = new RandomAccessFile( lockfile, "rw" );
-                final FileChannel f = file.getChannel();
-                lock = f.tryLock();
+                final RandomAccessFile file = new RandomAccessFile( lockfile.toFile(), "rw" );
+                final FileChannel fileChannel = file.getChannel();
+                lock = fileChannel.tryLock();
                 if ( lock != null )
                 {
-                    LOGGER.debug( () -> "obtained file lock on file " + lockfile.getAbsolutePath() + " lock is valid=" + lock.isValid() );
+                    LOGGER.debug( () -> "obtained file lock on file " + lockFileDebugName + " lock is valid=" + lock.isValid() );
                     writeLockFileContents( file );
                 }
                 else
                 {
-                    LOGGER.debug( () -> "unable to obtain file lock on file " + lockfile.getAbsolutePath() );
+                    LOGGER.debug( () -> "unable to obtain file lock on file " + lockFileDebugName );
                 }
             }
             catch ( final Exception e )
             {
-                LOGGER.error( () -> "unable to obtain file lock on file " + lockfile.getAbsolutePath() + " due to error: " + e.getMessage() );
+                LOGGER.error( () -> "unable to obtain file lock on file " + lockFileDebugName + " due to error: " + e.getMessage() );
             }
         }
     }
@@ -94,8 +97,8 @@ class FileLocker
         {
             final Properties props = new Properties();
             props.put( "timestamp", StringUtil.toIsoDate( Instant.now() ) );
-            props.put( "applicationPath", pwmEnvironment.getApplicationPath() == null ? "n/a" : pwmEnvironment.getApplicationPath().getAbsolutePath() );
-            props.put( "configurationFile", pwmEnvironment.getConfigurationFile() == null ? "n/a" : pwmEnvironment.getConfigurationFile().getAbsolutePath() );
+            props.put( "applicationPath", LocaleHelper.orNotApplicable( pwmEnvironment.getApplicationPath() ) );
+            props.put( "configurationFile", LocaleHelper.orNotApplicable( pwmEnvironment.getConfigurationFile() ) );
             final String comment = PwmConstants.PWM_APP_NAME + " file lock";
             final StringWriter stringWriter = new StringWriter();
             props.store( stringWriter, comment );
@@ -121,7 +124,7 @@ class FileLocker
                 LOGGER.error( () -> "error releasing file lock: " + e.getMessage() );
             }
 
-            LOGGER.debug( () -> "released file lock on file " + lockfile.getAbsolutePath() );
+            LOGGER.debug( () -> "released file lock on file " + lockfile );
         }
     }
 
@@ -129,7 +132,7 @@ class FileLocker
             throws PwmUnrecoverableException
     {
         final AppConfig domainConfig = pwmEnvironment.getConfig();
-        final int maxWaitSeconds = pwmEnvironment.getFlags().contains( PwmEnvironment.ApplicationFlag.CommandLineInstance )
+        final int maxWaitSeconds = pwmEnvironment.readPropertyAsBoolean( EnvironmentProperty.CommandLineInstance )
                 ? 1
                 : Integer.parseInt( domainConfig.readAppProperty( AppProperty.APPLICATION_FILELOCK_WAIT_SECONDS ) );
         final Instant startTime = Instant.now();

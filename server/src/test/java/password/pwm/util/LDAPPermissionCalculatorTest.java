@@ -20,13 +20,14 @@
 
 package password.pwm.util;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import password.pwm.config.AppConfig;
 import password.pwm.config.DomainConfig;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.stored.StoredConfigurationFactory;
 import password.pwm.error.PwmUnrecoverableException;
+import password.pwm.ldap.LdapPermissionCalculator;
 
 import java.util.List;
 
@@ -37,9 +38,9 @@ public class LDAPPermissionCalculatorTest
             throws PwmUnrecoverableException
     {
         final StoredConfiguration defaultConfig = StoredConfigurationFactory.newConfig();
-        final DomainConfig domainConfig = new AppConfig( defaultConfig ).getDomainConfigs().values().stream().findFirst().orElseThrow();
-        final LDAPPermissionCalculator ldapPermissionCalculator = new LDAPPermissionCalculator( domainConfig );
-        final List<LDAPPermissionCalculator.PermissionRecord> records = ldapPermissionCalculator.getPermissionRecords();
-        Assert.assertFalse( records.isEmpty() );
+        final DomainConfig domainConfig = AppConfig.forStoredConfig( defaultConfig ).getDomainConfigs().values().stream().findFirst().orElseThrow();
+        final LdapPermissionCalculator ldapPermissionCalculator = new LdapPermissionCalculator( domainConfig );
+        final List<LdapPermissionCalculator.PermissionRecord> records = ldapPermissionCalculator.getPermissionRecords();
+        Assertions.assertFalse( records.isEmpty() );
     }
 }

@@ -24,6 +24,7 @@ import password.pwm.PwmConstants;
 import password.pwm.bean.DomainID;
 import password.pwm.bean.EmailItemBean;
 import password.pwm.bean.PrivateKeyCertificate;
+import password.pwm.bean.ProfileID;
 import password.pwm.config.option.DataStorageMethod;
 import password.pwm.config.profile.Profile;
 import password.pwm.config.profile.ProfileDefinition;
@@ -42,13 +43,15 @@ import password.pwm.config.value.data.NamedSecretData;
 import password.pwm.config.value.data.RemoteWebServiceConfiguration;
 import password.pwm.config.value.data.UserPermission;
 import password.pwm.error.PwmError;
+import password.pwm.error.PwmInternalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.i18n.PwmLocaleBundle;
 import password.pwm.util.PasswordData;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.CollectionUtil;
+import password.pwm.util.java.CollectorUtil;
+import password.pwm.util.java.EnumUtil;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmHashAlgorithm;
 
@@ -57,8 +60,6 @@ import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -73,13 +74,13 @@ public class StoredSettingReader implements SettingReader
     private static final PwmLogger LOGGER = PwmLogger.forClass( StoredSettingReader.class );
 
     private final StoredConfiguration storedConfiguration;
-    private final String profileID;
+    private final ProfileID profileID;
     private final DomainID domainID;
 
     private final Map<ProfileDefinition, Map> profileCache;
     private final String valueHash;
 
-    public StoredSettingReader( final StoredConfiguration storedConfiguration, final String profileID, final DomainID domainID )
+    public StoredSettingReader( final StoredConfiguration storedConfiguration, final ProfileID profileID, final DomainID domainID )
     {
         this.storedConfiguration = Objects.requireNonNull( storedConfiguration );
         this.profileID = profileID;
@@ -143,7 +144,14 @@ public class StoredSettingReader implements SettingReader
 
     public <E extends Enum<E>> E readSettingAsEnum( final PwmSetting setting, final Class<E> enumClass )
     {
-        return ValueTypeConverter.valueToEnum( setting, readSetting( setting ), enumClass );
+        return ValueTypeConverter.valueToEnum( setting, readSetting( setting ), enumClass )
+                .orElseGet( () ->
+                {
+                    final PwmSettingTemplateSet templateSet = this.storedConfiguration.getTemplateSets().get( domainID );
+                    final StoredValue defaultValue = setting.getDefaultValue( templateSet );
+                    return ValueTypeConverter.valueToEnum( setting, defaultValue, enumClass )
+                            .orElseThrow( () -> new PwmInternalException( "error reading default enum value for setting " + setting.getKey() ) );
+                } );
     }
 
     public List<ActionConfiguration> readSettingAsAction( final PwmSetting setting )
@@ -192,7 +200,7 @@ public class StoredSettingReader implements SettingReader
         final String input = readSettingAsString( setting );
 
         return Arrays.stream( input.split( "-" ) )
-                .map( s ->  JavaHelper.readEnumFromString( DataStorageMethod.class, s ) )
+                .map( s ->  EnumUtil.readEnumFromString( DataStorageMethod.class, s ) )
                 .flatMap( Optional::stream )
                 .collect( Collectors.toUnmodifiableList() );
     }
@@ -223,7 +231,7 @@ public class StoredSettingReader implements SettingReader
     }
 
 
-    public <T extends Profile> Map<String, T> getProfileMap( final ProfileDefinition profileDefinition )
+    public <T extends Profile> Map<ProfileID, T> getProfileMap( final ProfileDefinition profileDefinition )
     {
         if ( profileID != null )
         {
@@ -240,17 +248,15 @@ public class StoredSettingReader implements SettingReader
                 final DomainID domainID
         )
         {
-            final Map<ProfileDefinition, Map<String, Profile>> returnMap = new EnumMap<>( ProfileDefinition.class );
-            returnMap.putAll( EnumSet.allOf( ProfileDefinition.class ).stream()
+            return EnumUtil.enumStream( ProfileDefinition.class )
                     .filter( profileDefinition -> domainID.inScope( profileDefinition.getCategory().getScope() ) )
-                    .collect( CollectionUtil.collectorToLinkedMap(
+                    .collect( CollectorUtil.toUnmodifiableLinkedMap(
                             profileDefinition -> profileDefinition,
                             profileDefinition -> profileMap( profileDefinition, storedConfiguration, domainID )
-                    ) ) );
-            return Collections.unmodifiableMap( returnMap );
+                    ) );
         }
 
-        private static <T extends Profile> Map<String, T> profileMap(
+        private static <T extends Profile> Map<ProfileID, T> profileMap(
                 final ProfileDefinition profileDefinition,
                 final StoredConfiguration storedConfiguration,
                 final DomainID domainID
@@ -262,7 +268,7 @@ public class StoredSettingReader implements SettingReader
             }
 
             return ProfileUtility.profileIDsForCategory( storedConfiguration, domainID, profileDefinition.getCategory() ).stream()
-                    .collect( CollectionUtil.collectorToLinkedMap(
+                    .collect( CollectorUtil.toUnmodifiableLinkedMap(
                             Function.identity(),
                             profileID -> newProfileForID( profileDefinition, storedConfiguration, domainID, profileID )
                     ) );
@@ -272,7 +278,7 @@ public class StoredSettingReader implements SettingReader
                 final ProfileDefinition profileDefinition,
                 final StoredConfiguration storedConfiguration,
                 final DomainID domainID,
-                final String profileID
+                final ProfileID profileID
         )
         {
             Objects.requireNonNull( profileDefinition );
@@ -324,7 +330,7 @@ public class StoredSettingReader implements SettingReader
             LOGGER.warn( () -> "attempt to read deprecated config setting: " + setting.toMenuLocationDebug( profileID, null ) );
         }
 
-        if ( StringUtil.isEmpty( profileID ) )
+        if ( profileID == null )
         {
             if ( setting.getCategory().hasProfiles() )
             {

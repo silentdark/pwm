@@ -20,8 +20,8 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.StoredConfigXmlConstants;
@@ -34,7 +34,6 @@ import password.pwm.util.secure.PwmSecurityKey;
 import password.pwm.util.secure.X509CertInfo;
 import password.pwm.util.secure.X509Utils;
 
-import java.io.Serializable;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -47,8 +46,6 @@ import java.util.stream.Collectors;
 
 public class X509CertificateValue extends AbstractValue implements StoredValue
 {
-    private static final long serialVersionUID = 1L;
-
     private static final PwmLogger LOGGER = PwmLogger.forClass( X509CertificateValue.class );
 
     // native object;
@@ -74,7 +71,7 @@ public class X509CertificateValue extends AbstractValue implements StoredValue
             }
 
             @Override
-            public X509CertificateValue fromJson( final String input )
+            public X509CertificateValue fromJson( final PwmSetting pwmSetting, final String input )
             {
                 return new X509CertificateValue( Collections.emptyList() );
             }
@@ -95,7 +92,7 @@ public class X509CertificateValue extends AbstractValue implements StoredValue
         this.b64certificates = b64certificates.stream()
                 .map( StringUtil::stripAllWhitespace )
                 .collect( Collectors.toUnmodifiableList() );
-        this.certs = new LazySupplier<>( () -> X509Utils.certificatesFromBase64s( b64certificates ) );
+        this.certs = LazySupplier.create( () -> X509Utils.certificatesFromBase64s( b64certificates ) );
     }
 
     public static X509CertificateValue fromX509( final Collection<X509Certificate> x509Certificate )
@@ -109,7 +106,7 @@ public class X509CertificateValue extends AbstractValue implements StoredValue
         final List<XmlElement> returnList = new ArrayList<>( b64certificates.size() );
         for ( final String b64value : b64certificates )
         {
-            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
             final String splitValue = StringUtil.insertRepeatedLineBreaks( b64value, PwmConstants.XML_OUTPUT_LINE_WRAP_LENGTH );
             valueElement.setText( splitValue );
 
@@ -152,9 +149,9 @@ public class X509CertificateValue extends AbstractValue implements StoredValue
     }
 
     @Override
-    public Serializable toDebugJsonObject( final Locale locale )
+    public Object toDebugJsonObject( final Locale locale )
     {
-        return ( Serializable ) toInfoMap( false );
+        return toInfoMap( false );
     }
 
     public List<Map<String, String>> toInfoMap( final boolean includeDetail )
@@ -166,7 +163,7 @@ public class X509CertificateValue extends AbstractValue implements StoredValue
 
         return certs.get().stream()
                 .map( cert -> X509CertInfo.makeDebugInfoMap( cert, X509Utils.DebugInfoFlag.IncludeCertificateDetail ) )
-                .collect( Collectors.toUnmodifiableList() );
+                .toList();
 
     }
 

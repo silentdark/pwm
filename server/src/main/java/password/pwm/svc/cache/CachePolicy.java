@@ -22,10 +22,9 @@ package password.pwm.svc.cache;
 
 import password.pwm.util.java.TimeDuration;
 
-import java.io.Serializable;
 import java.time.Instant;
 
-public class CachePolicy implements Serializable
+public class CachePolicy
 {
     private Instant expiration;
 

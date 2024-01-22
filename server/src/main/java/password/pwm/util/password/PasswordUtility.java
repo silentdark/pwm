@@ -26,6 +26,7 @@ import com.novell.ldapchai.exception.ChaiException;
 import com.novell.ldapchai.exception.ChaiOperationException;
 import com.novell.ldapchai.exception.ChaiPasswordPolicyException;
 import com.novell.ldapchai.exception.ChaiUnavailableException;
+import com.novell.ldapchai.exception.ImpossiblePasswordPolicyException;
 import com.novell.ldapchai.impl.oracleds.entry.OracleDSEntries;
 import com.novell.ldapchai.provider.ChaiConfiguration;
 import com.novell.ldapchai.provider.ChaiProvider;
@@ -35,11 +36,13 @@ import com.novell.ldapchai.util.ChaiUtility;
 import com.nulabinc.zxcvbn.Strength;
 import com.nulabinc.zxcvbn.Zxcvbn;
 import password.pwm.AppProperty;
+import password.pwm.DomainProperty;
 import password.pwm.PwmDomain;
 import password.pwm.bean.EmailItemBean;
 import password.pwm.bean.LocalSessionStateBean;
 import password.pwm.bean.LoginInfoBean;
 import password.pwm.bean.PasswordStatus;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.DomainConfig;
@@ -68,7 +71,6 @@ import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmRequestContext;
 import password.pwm.http.PwmSession;
 import password.pwm.ldap.LdapOperationsHelper;
-import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.auth.AuthenticationType;
 import password.pwm.ldap.auth.PwmAuthenticationSource;
 import password.pwm.ldap.permission.UserPermissionUtility;
@@ -84,17 +86,17 @@ import password.pwm.svc.stats.AvgStatistic;
 import password.pwm.svc.stats.EpsStatistic;
 import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsClient;
+import password.pwm.user.UserInfo;
 import password.pwm.util.PasswordData;
 import password.pwm.util.java.CollectionUtil;
-import password.pwm.util.java.MiscUtil;
-import password.pwm.util.json.JsonFactory;
+import password.pwm.util.java.PwmUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
 import password.pwm.util.operations.ActionExecutor;
 
-import java.io.Serializable;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -217,6 +219,41 @@ public class PasswordUtility
         return null;
     }
 
+    /**
+     * <p>Creates a new password that satisfies the password rules.  All rules are checked for.  If for some
+     * reason the pwmRandom algorithm can not generate a valid password, null will be returned.</p>
+     *
+     * <p>If there is an identifiable reason the password can not be created (such as mis-configured rules) then
+     * an {@link com.novell.ldapchai.exception.ImpossiblePasswordPolicyException} will be thrown.</p>
+     *
+     * @param sessionLabel          A valid pwmSession
+     * @param randomGeneratorConfig Policy to be used during generation
+     * @param pwmDomain        Used to read configuration, seedmanager and other services.
+     * @return A randomly generated password value that meets the requirements of this {@code PasswordPolicy}
+     * @throws ImpossiblePasswordPolicyException If there is no way to create a password using the configured rules and
+     *                                        default seed phrase
+     * @throws PwmUnrecoverableException if the operation can not be completed
+     */
+    public static PasswordData generateRandom(
+            final SessionLabel sessionLabel,
+            final RandomGeneratorConfig randomGeneratorConfig,
+            final PwmDomain pwmDomain
+    )
+            throws PwmUnrecoverableException
+    {
+        return RandomPasswordGenerator.generate( RandomGeneratorRequest.create( sessionLabel, randomGeneratorConfig, pwmDomain ) );
+    }
+
+    public static PasswordData generateRandom(
+            final SessionLabel sessionLabel,
+            final PwmPasswordPolicy passwordPolicy,
+            final PwmDomain pwmDomain
+    )
+            throws PwmUnrecoverableException
+    {
+        return RandomPasswordGenerator.generate( RandomGeneratorRequest.create( sessionLabel, passwordPolicy, pwmDomain ) );
+    }
+
 
     enum PasswordPolicySource
     {
@@ -287,7 +324,7 @@ public class PasswordUtility
         try
         {
             final PwmPasswordRuleValidator pwmPasswordRuleValidator = PwmPasswordRuleValidator.create( pwmRequest.getLabel(), pwmDomain, userInfo.getPasswordPolicy() );
-            pwmPasswordRuleValidator.testPassword( newPassword, null, userInfo, pwmSession.getSessionManager().getActor( ) );
+            pwmPasswordRuleValidator.testPassword( pwmRequest.getLabel(), newPassword, null, userInfo, pwmRequest.getClientConnectionHolder().getActor( ) );
         }
         catch ( final PwmDataValidationException e )
         {
@@ -302,7 +339,7 @@ public class PasswordUtility
         boolean setPasswordWithoutOld = false;
         if ( oldPassword == null )
         {
-            if ( pwmSession.getSessionManager().getActor( ).getChaiProvider().getDirectoryVendor() == DirectoryVendor.ACTIVE_DIRECTORY )
+            if ( pwmRequest.getClientConnectionHolder().getActor( ).getChaiProvider().getDirectoryVendor() == DirectoryVendor.ACTIVE_DIRECTORY )
             {
                 setPasswordWithoutOld = true;
             }
@@ -319,7 +356,7 @@ public class PasswordUtility
             }
         }
 
-        final ChaiProvider provider = pwmSession.getSessionManager().getChaiProvider();
+        final ChaiProvider provider = pwmRequest.getClientConnectionHolder().getActorChaiProvider();
 
         setPassword( pwmDomain, pwmRequest.getLabel(), provider, userInfo, setPasswordWithoutOld ? null : oldPassword, newPassword );
 
@@ -330,7 +367,7 @@ public class PasswordUtility
         pwmSession.getLoginInfoBean().setUserCurrentPassword( newPassword );
 
         //close any outstanding ldap connections (since they cache the old password)
-        pwmSession.getSessionManager().updateUserPassword( userInfo.getUserIdentity(), newPassword );
+        pwmRequest.getClientConnectionHolder().updateUserLdapPassword( userInfo.getUserIdentity(), newPassword );
 
         // clear the "requires new password flag"
         pwmSession.getLoginInfoBean().getLoginFlags().remove( LoginInfoBean.LoginFlag.forcePwChange );
@@ -342,7 +379,7 @@ public class PasswordUtility
         pwmSession.reloadUserInfoBean( pwmRequest );
 
         // create a proxy user object for pwm to update/read the user.
-        final ChaiUser proxiedUser = pwmSession.getSessionManager().getActor();
+        final ChaiUser proxiedUser = pwmRequest.getClientConnectionHolder().getActor();
 
         // update statistics
         {
@@ -415,7 +452,7 @@ public class PasswordUtility
                     PwmPasswordRuleValidator.Flag.BypassLdapRuleCheck
             );
 
-            pwmPasswordRuleValidator.testPassword( newPassword, null, userInfo, theUser );
+            pwmPasswordRuleValidator.testPassword( sessionLabel, newPassword, null, userInfo, theUser );
         }
         catch ( final ChaiUnavailableException e )
         {
@@ -439,7 +476,7 @@ public class PasswordUtility
 
             LOGGER.trace( sessionLabel, () -> "preparing to setActorPassword for '" + theUser.getEntryDN() + "', using bind DN: " + bindDN );
 
-            final boolean settingEnableChange = Boolean.parseBoolean( pwmDomain.getConfig().readAppProperty( AppProperty.LDAP_PASSWORD_CHANGE_SELF_ENABLE ) );
+            final boolean settingEnableChange = Boolean.parseBoolean( pwmDomain.getConfig().readDomainProperty( DomainProperty.LDAP_PASSWORD_CHANGE_SELF_ENABLE ) );
             if ( settingEnableChange )
             {
                 if ( oldPassword == null )
@@ -454,7 +491,7 @@ public class PasswordUtility
             else
             {
                 LOGGER.debug( sessionLabel, () -> "skipping actual ldap password change operation due to app property "
-                        + AppProperty.LDAP_PASSWORD_CHANGE_SELF_ENABLE.getKey() + "=false" );
+                        + DomainProperty.LDAP_PASSWORD_CHANGE_SELF_ENABLE.getKey() + "=false" );
             }
         }
         catch ( final ChaiPasswordPolicyException e )
@@ -483,10 +520,10 @@ public class PasswordUtility
         }
 
         // update stats
-        pwmDomain.getStatisticsManager().updateEps( EpsStatistic.PASSWORD_CHANGES, 1 );
+        pwmDomain.getStatisticsService().updateEps( EpsStatistic.PASSWORD_CHANGES, 1 );
 
         final int passwordStrength = PasswordUtility.judgePasswordStrength( pwmDomain.getConfig(), newPassword.getStringValue() );
-        pwmDomain.getStatisticsManager().updateAverageValue( AvgStatistic.AVG_PASSWORD_STRENGTH, passwordStrength );
+        pwmDomain.getStatisticsService().updateAverageValue( AvgStatistic.AVG_PASSWORD_STRENGTH, passwordStrength );
 
         // at this point the password has been changed, so log it.
         final String msg = ( bindIsSelf
@@ -509,7 +546,7 @@ public class PasswordUtility
         final SessionLabel sessionLabel = pwmRequest.getLabel();
         final UserIdentity userIdentity = userInfo.getUserIdentity();
 
-        final String changePasswordProfileID = userInfo.getProfileIDs().get( ProfileDefinition.ChangePassword );
+        final ProfileID changePasswordProfileID = userInfo.getProfileIDs().get( ProfileDefinition.ChangePassword );
         final ChangePasswordProfile changePasswordProfile = pwmRequest.getDomainConfig().getChangePasswordProfile().get( changePasswordProfileID );
 
         if ( changePasswordProfile == null )
@@ -591,8 +628,7 @@ public class PasswordUtility
 
         if ( settingClearResponses == HelpdeskClearResponseMode.yes )
         {
-            final String userGUID = LdapOperationsHelper.readLdapGuidValue( pwmDomain, sessionLabel, userIdentity, false );
-            pwmDomain.getCrService().clearResponses( pwmRequest.getLabel(), userIdentity, proxiedUser, userGUID );
+            pwmDomain.getCrService().clearResponses( pwmRequest.getLabel(), userIdentity, proxiedUser );
 
             // mark the event log
             final HelpdeskAuditRecord auditRecord = AuditRecordFactory.make( pwmRequest ).createHelpdeskAuditRecord(
@@ -627,7 +663,7 @@ public class PasswordUtility
         final boolean sendPassword = helpdeskProfile.readSettingAsBoolean( PwmSetting.HELPDESK_SEND_PASSWORD );
         if ( sendPassword )
         {
-            final Optional<String> profileID = ProfileUtility.discoverProfileIDForUser( pwmDomain, sessionLabel, userIdentity, ProfileDefinition.ForgottenPassword );
+            final Optional<ProfileID> profileID = ProfileUtility.discoverProfileIDForUser( pwmDomain, sessionLabel, userIdentity, ProfileDefinition.ForgottenPassword );
             if ( profileID.isPresent() )
             {
                 final ForgottenPasswordProfile forgottenPasswordProfile = pwmDomain.getConfig().getForgottenPasswordProfiles().get( profileID.get() );
@@ -663,7 +699,7 @@ public class PasswordUtility
             ChaiProvider loopProvider = null;
             try
             {
-                loopProvider = pwmDomain.getLdapConnectionService().getChaiProviderFactory().newProvider( loopConfiguration );
+                loopProvider = pwmDomain.getLdapService().getChaiProviderFactory().newProvider( loopConfiguration );
                 final Instant lastModifiedDate = determinePwdLastModified( pwmDomain, sessionLabel, userIdentity );
                 returnValue.put( loopReplicaUrl, lastModifiedDate );
             }
@@ -733,7 +769,7 @@ public class PasswordUtility
 
                 final ActionExecutor actionExecutor = new ActionExecutor.ActionExecutorSettings( pwmDomain, userIdentity )
                         .setExpandPwmMacros( true )
-                        .setMacroMachine( pwmRequest.getPwmSession().getSessionManager().getMacroMachine( ) )
+                        .setMacroMachine( pwmRequest.getMacroMachine() )
                         .createActionExecutor();
                 actionExecutor.executeActions( configValues, pwmRequest.getLabel() );
             }
@@ -828,7 +864,7 @@ public class PasswordUtility
                 return judgePasswordStrengthUsingTraditionalAlgorithm( password );
 
             default:
-                MiscUtil.unhandledSwitchStatement( strengthMeterType );
+                PwmUtil.unhandledSwitchStatement( strengthMeterType );
         }
 
         return -1;
@@ -854,19 +890,14 @@ public class PasswordUtility
         final int zxcvbnScore = strength.getScore();
 
         // zxcvbn returns a score of 0-4 (see: https://github.com/nulab/zxcvbn4j)
-        switch ( zxcvbnScore )
-        {
-            case 4:
-                return Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_VERY_STRONG ) );
-            case 3:
-                return Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_STRONG ) );
-            case 2:
-                return Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_GOOD ) );
-            case 1:
-                return Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_WEAK ) );
-            default:
-                return Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_VERY_WEAK ) );
-        }
+        return switch ( zxcvbnScore )
+                {
+                    case 4 -> Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_VERY_STRONG ) );
+                    case 3 -> Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_STRONG ) );
+                    case 2 -> Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_GOOD ) );
+                    case 1 -> Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_WEAK ) );
+                    default -> Integer.parseInt( domainConfig.readAppProperty( AppProperty.PASSWORD_STRENGTH_THRESHOLD_VERY_WEAK ) );
+                };
     }
 
     public static int judgePasswordStrengthUsingTraditionalAlgorithm(
@@ -883,29 +914,29 @@ public class PasswordUtility
 
         // -- Additions --
         // amount of unique chars
-        if ( charCounter.getUniqueChars() > 7 )
+        if ( charCounter.uniqueCharCount() > 7 )
         {
             score = score + 10;
         }
-        score = score + ( ( charCounter.getUniqueChars() ) * 3 );
+        score = score + ( ( charCounter.uniqueCharCount() ) * 3 );
 
         // Numbers
-        if ( charCounter.getNumericCharCount() > 0 )
+        if ( charCounter.hasCharsOfType( PasswordCharType.NUMBER ) )
         {
             score = score + 8;
-            score = score + ( charCounter.getNumericCharCount() ) * 4;
+            score = score + ( charCounter.charTypeCount( PasswordCharType.NUMBER ) ) * 4;
         }
 
         // specials
-        if ( charCounter.getSpecialCharsCount() > 0 )
+        if ( charCounter.hasCharsOfType( PasswordCharType.SPECIAL ) )
         {
             score = score + 14;
-            score = score + ( charCounter.getSpecialCharsCount() ) * 5;
+            score = score + ( charCounter.charTypeCount( PasswordCharType.SPECIAL ) ) * 5;
         }
 
         // mixed case
-        if ( ( charCounter.getAlphaChars().length() != charCounter.getUpperChars().length() )
-                && ( charCounter.getAlphaChars().length() != charCounter.getLowerChars().length() ) )
+        if ( ( charCounter.charTypeCount( PasswordCharType.LETTER ) != charCounter.charTypeCount( PasswordCharType.UPPERCASE ) )
+                && ( charCounter.charTypeCount( PasswordCharType.LETTER ) != charCounter.charTypeCount( PasswordCharType.LOWERCASE ) ) )
         {
             score = score + 10;
         }
@@ -913,9 +944,9 @@ public class PasswordUtility
         // -- Deductions --
 
         // sequential numbers
-        if ( charCounter.getSequentialNumericChars() > 2 )
+        if ( charCounter.sequentialCharCountOfType( PasswordCharType.NUMBER ) > 2 )
         {
-            score = score - ( charCounter.getSequentialNumericChars() - 1 ) * 4;
+            score = score - ( charCounter.sequentialCharCountOfType( PasswordCharType.NUMBER ) - 1 ) * 4;
         }
 
         // sequential chars
@@ -924,7 +955,7 @@ public class PasswordUtility
             score = score - ( charCounter.getSequentialRepeatedChars() ) * 5;
         }
 
-        return score > 100 ? 100 : score < 0 ? 0 : score;
+        return score > 100 ? 100 : Math.max( score, 0 );
     }
 
 
@@ -963,31 +994,31 @@ public class PasswordUtility
                 throw new IllegalStateException( "unknown policy source defined: " + ppSource.name() );
         }
 
-        LOGGER.trace( pwmSession, () -> "readPasswordPolicyForUser completed", () -> TimeDuration.fromCurrent( startTime ) );
+        LOGGER.trace( pwmSession, () -> "readPasswordPolicyForUser completed", TimeDuration.fromCurrent( startTime ) );
         return returnPolicy;
     }
 
     public static PwmPasswordPolicy determineConfiguredPolicyProfileForUser(
             final PwmDomain pwmDomain,
-            final SessionLabel pwmSession,
+            final SessionLabel sessionLabel,
             final UserIdentity userIdentity
     )
             throws PwmUnrecoverableException
     {
-        final List<String> profiles = pwmDomain.getConfig().getPasswordProfileIDs();
+        final List<ProfileID> profiles = pwmDomain.getConfig().getPasswordProfileIDs();
         if ( profiles.isEmpty() )
         {
             throw new PwmUnrecoverableException( new ErrorInformation( PwmError.ERROR_NO_PROFILE_ASSIGNED, "no password profiles are configured" ) );
         }
 
-        for ( final String profile : profiles )
+        for ( final ProfileID profile : profiles )
         {
             final PwmPasswordPolicy loopPolicy = pwmDomain.getConfig().getPasswordPolicy( profile );
             final List<UserPermission> userPermissions = loopPolicy.getUserPermissions();
-            LOGGER.debug( pwmSession, () -> "testing password policy profile '" + profile + "'" );
+            LOGGER.debug( sessionLabel, () -> "testing password policy profile '" + profile + "'" );
             try
             {
-                final boolean match = UserPermissionUtility.testUserPermission( pwmDomain, pwmSession, userIdentity, userPermissions );
+                final boolean match = UserPermissionUtility.testUserPermission( pwmDomain, sessionLabel, userIdentity, userPermissions );
                 if ( match )
                 {
                     return loopPolicy;
@@ -995,7 +1026,7 @@ public class PasswordUtility
             }
             catch ( final PwmUnrecoverableException e )
             {
-                LOGGER.error( pwmSession, () -> "unexpected error while testing password policy profile '" + profile + "', error: " + e.getMessage() );
+                LOGGER.error( sessionLabel, () -> "unexpected error while testing password policy profile '" + profile + "', error: " + e.getMessage() );
             }
         }
 
@@ -1066,7 +1097,7 @@ public class PasswordUtility
         int errorCode = 0;
 
         final boolean passwordIsCaseSensitive = userInfo.getPasswordPolicy() == null
-                || userInfo.getPasswordPolicy().getRuleHelper().readBooleanValue( PwmPasswordRule.CaseSensitive );
+                || userInfo.getPasswordPolicy().ruleHelper().readBooleanValue( PwmPasswordRule.CaseSensitive );
 
         final CachePolicy cachePolicy;
         {
@@ -1114,7 +1145,7 @@ public class PasswordUtility
                 {
                     final PwmPasswordRuleValidator pwmPasswordRuleValidator = PwmPasswordRuleValidator.create( sessionLabel, pwmDomain, userInfo.getPasswordPolicy(), locale );
                     final PasswordData oldPassword = loginInfoBean == null ? null : loginInfoBean.getUserCurrentPassword();
-                    pwmPasswordRuleValidator.testPassword( password, oldPassword, userInfo, user );
+                    pwmPasswordRuleValidator.testPassword( pwmRequestContext.getSessionLabel(), password, oldPassword, userInfo, user );
                     pass = true;
                     if ( cacheService != null && cacheKey != null )
                     {
@@ -1190,7 +1221,7 @@ public class PasswordUtility
     }
 
 
-    public static class PasswordCheckInfo implements Serializable
+    public static class PasswordCheckInfo
     {
         private final String message;
         private final boolean passed;
@@ -1335,7 +1366,7 @@ public class PasswordUtility
         final Instant lastModified = userInfo.getPasswordLastModifiedTime();
         final TimeDuration minimumLifetime;
         {
-            final int minimumLifetimeSeconds = userInfo.getPasswordPolicy().getRuleHelper().readIntValue( PwmPasswordRule.MinimumLifetime );
+            final int minimumLifetimeSeconds = userInfo.getPasswordPolicy().ruleHelper().readIntValue( PwmPasswordRule.MinimumLifetime );
             if ( minimumLifetimeSeconds < 1 )
             {
                 return;
@@ -1399,7 +1430,7 @@ public class PasswordUtility
 
         final TimeDuration minimumLifetime;
         {
-            final int minimumLifetimeSeconds = passwordPolicy.getRuleHelper().readIntValue( PwmPasswordRule.MinimumLifetime );
+            final int minimumLifetimeSeconds = passwordPolicy.ruleHelper().readIntValue( PwmPasswordRule.MinimumLifetime );
             if ( minimumLifetimeSeconds < 1 )
             {
                 return false;

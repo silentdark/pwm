@@ -35,6 +35,8 @@ import password.pwm.AppProperty;
 import password.pwm.PwmConstants;
 import password.pwm.bean.DomainID;
 import password.pwm.bean.EmailItemBean;
+import password.pwm.bean.ProfileID;
+import password.pwm.bean.SessionLabel;
 import password.pwm.config.AppConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.option.SmtpServerType;
@@ -69,10 +71,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public class EmailServerUtil
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( EmailServerUtil.class );
+
+    private static final Pattern EMAIL_ADDRESS_MULTI_MATCH_PATTERN = Pattern.compile( "^.*<.*>$" );
+    private static final Pattern EMAIL_ADDRESS_SPLIT_PATTERN = Pattern.compile( "[<>]" );
 
     static List<EmailServer> makeEmailServersMap( final AppConfig appConfig )
             throws PwmUnrecoverableException
@@ -100,39 +106,41 @@ public class EmailServerUtil
     )
             throws PwmUnrecoverableException
     {
-        final String id = profile.getIdentifier();
+        final ProfileID id = profile.getId();
         final String address = profile.readSettingAsString( PwmSetting.EMAIL_SERVER_ADDRESS );
-        final int port = (int) profile.readSettingAsLong( PwmSetting.EMAIL_SERVER_PORT );
+        final int port = ( int ) profile.readSettingAsLong( PwmSetting.EMAIL_SERVER_PORT );
         final String username = profile.readSettingAsString( PwmSetting.EMAIL_USERNAME );
         final PasswordData password = profile.readSettingAsPassword( PwmSetting.EMAIL_PASSWORD );
 
         final SmtpServerType smtpServerType = profile.readSettingAsEnum( PwmSetting.EMAIL_SERVER_TYPE, SmtpServerType.class );
-        if ( StringUtil.notEmpty( address )
-                && port > 0
-        )
+
+        if ( StringUtil.isEmpty( address ) )
         {
-            final TrustManager[] effectiveTrustManagers = trustManagers == null
-                    ? trustManagerForProfile( appConfig, profile )
-                    : trustManagers;
-            final Properties properties = makeJavaMailProps( appConfig, profile, effectiveTrustManagers );
-            final jakarta.mail.Session session = jakarta.mail.Session.getInstance( properties, null );
-            return Optional.of( EmailServer.builder()
-                    .id( id )
-                    .host( address )
-                    .port( port )
-                    .username( username )
-                    .password( password )
-                    .javaMailProps( properties )
-                    .session( session )
-                    .type( smtpServerType )
-                    .build() );
-        }
-        else
-        {
-            LOGGER.warn( () -> "discarding incompletely configured email address for smtp server profile " + id );
+            LOGGER.debug( () -> "discarding incompletely configured email address for smtp server profile " + id + ", no server address" );
+            return Optional.empty();
         }
 
-        return Optional.empty();
+        if ( port <= 0 )
+        {
+            LOGGER.debug( () -> "discarding incompletely configured email address for smtp server profile " + id + ", missing port number" );
+            return Optional.empty();
+        }
+
+        final TrustManager[] effectiveTrustManagers = trustManagers == null
+                ? trustManagerForProfile( appConfig, profile )
+                : trustManagers;
+        final Properties properties = makeJavaMailProps( appConfig, profile, effectiveTrustManagers );
+        final jakarta.mail.Session session = jakarta.mail.Session.getInstance( properties, null );
+        return Optional.of( EmailServer.builder()
+                .id( id )
+                .host( address )
+                .port( port )
+                .username( username )
+                .password( password )
+                .javaMailProps( properties )
+                .session( session )
+                .type( smtpServerType )
+                .build() );
     }
 
     private static TrustManager[] trustManagerForProfile( final AppConfig appConfig, final EmailServerProfile emailServerProfile )
@@ -149,7 +157,6 @@ public class EmailServerUtil
                         certMatchingTrustManager,
                 };
     }
-
 
     private static Properties makeJavaMailProps(
             final AppConfig config,
@@ -170,51 +177,75 @@ public class EmailServerUtil
         properties.put( "mail.smtp.port", port );
         properties.put( "mail.smtp.socketFactory.port", port );
 
-        //set connection properties
-        properties.put( "mail.smtp.connectiontimeout", JavaHelper.silentParseInt( config.readAppProperty( AppProperty.SMTP_IO_CONNECT_TIMEOUT ), 10_000 ) );
-        properties.put( "mail.smtp.timeout", JavaHelper.silentParseInt( config.readAppProperty( AppProperty.SMTP_IO_CONNECT_TIMEOUT ), 30_000 ) );
-
         properties.put( "mail.smtp.sendpartial", true );
 
+        // add secure mail properties
+        properties.putAll( makeSecureMailProperties( profile, trustManager ) );
+
+        //Specify configured advanced settings.
+        final Map<String, String> advancedSettingValues = StringUtil.convertStringListToNameValuePair(
+                config.readSettingAsStringArray( PwmSetting.EMAIL_ADVANCED_SETTINGS ), "=" );
+
+        properties.putAll( advancedSettingValues );
+
+        return properties;
+    }
+
+    private static Properties makeSecureMailProperties(
+            final EmailServerProfile profile,
+            final TrustManager[] trustManager
+    )
+            throws PwmUnrecoverableException
+    {
+        final Properties properties = new Properties();
+
+        final SmtpServerType smtpServerType = profile.readSettingAsEnum( PwmSetting.EMAIL_SERVER_TYPE, SmtpServerType.class );
+
+        if ( smtpServerType == SmtpServerType.SMTPS )
+        {
+            final int port = (int) profile.readSettingAsLong( PwmSetting.EMAIL_SERVER_PORT );
+
+            properties.putAll( makeSocketFactoryMailProperties( trustManager ) );
+            properties.put( "mail.smtp.ssl.enable", true );
+            properties.put( "mail.smtp.ssl.checkserveridentity", true );
+            properties.put( "mail.smtp.socketFactory.fallback", false );
+            properties.put( "mail.smtp.ssl.socketFactory.port", port );
+        }
+
+        if ( smtpServerType == SmtpServerType.START_TLS )
+        {
+            properties.putAll( makeSocketFactoryMailProperties( trustManager ) );
+            properties.put( "mail.smtp.starttls.enable", true );
+            properties.put( "mail.smtp.starttls.required", true );
+        }
+
+        return properties;
+    }
+
+    private static Properties makeSocketFactoryMailProperties(
+            final TrustManager[] trustManager
+    )
+            throws PwmUnrecoverableException
+    {
         try
         {
-            final SmtpServerType smtpServerType = profile.readSettingAsEnum( PwmSetting.EMAIL_SERVER_TYPE, SmtpServerType.class );
-            if ( smtpServerType == SmtpServerType.SMTP )
-            {
-                return properties;
-            }
-
+            final Properties properties = new Properties();
             final MailSSLSocketFactory mailSSLSocketFactory = new MailSSLSocketFactory();
             mailSSLSocketFactory.setTrustManagers( trustManager );
             properties.put( "mail.smtp.ssl.socketFactory", mailSSLSocketFactory );
-
-            if ( smtpServerType == SmtpServerType.SMTPS )
-            {
-                properties.put( "mail.smtp.ssl.enable", true );
-                properties.put( "mail.smtp.ssl.checkserveridentity", true );
-                properties.put( "mail.smtp.socketFactory.fallback", false );
-                properties.put( "mail.smtp.ssl.socketFactory.port", port );
-            }
-            else if ( smtpServerType == SmtpServerType.START_TLS )
-            {
-                properties.put( "mail.smtp.starttls.enable", true );
-                properties.put( "mail.smtp.starttls.required", true );
-            }
+            return properties;
         }
         catch ( final Exception e )
         {
             final String msg = "unable to create message transport properties: " + e.getMessage();
             throw new PwmUnrecoverableException( PwmError.CONFIG_FORMAT_ERROR, msg );
         }
-
-        //Specify configured advanced settings.
-        final Map<String, String> advancedSettingValues = StringUtil.convertStringListToNameValuePair( config.readSettingAsStringArray( PwmSetting.EMAIL_ADVANCED_SETTINGS ), "=" );
-        properties.putAll( advancedSettingValues );
-
-        return properties;
     }
 
-    private static Optional<InternetAddress> makeInternetAddress( final String input )
+    private static Optional<InternetAddress> makeInternetAddress(
+            final String input,
+            final SessionLabel sessionLabel
+    )
             throws AddressException
     {
         if ( input == null )
@@ -222,10 +253,10 @@ public class EmailServerUtil
             return Optional.empty();
         }
 
-        if ( input.matches( "^.*<.*>$" ) )
+        if ( EMAIL_ADDRESS_MULTI_MATCH_PATTERN.matcher( input ).matches() )
         {
             // check for format like: John Doe <jdoe@example.com>
-            final String[] splitString = input.split( "<|>" );
+            final String[] splitString = EMAIL_ADDRESS_SPLIT_PATTERN.split( input );
             if ( splitString.length < 2 )
             {
                 return Optional.of( new InternetAddress( input ) );
@@ -239,21 +270,22 @@ public class EmailServerUtil
             }
             catch ( final UnsupportedEncodingException e )
             {
-                LOGGER.error( () -> "unsupported encoding error while parsing internet address '" + input + "', error: " + e.getMessage() );
+                LOGGER.error( sessionLabel, () -> "unsupported encoding error while parsing internet address '" + input + "', error: " + e.getMessage() );
             }
             return Optional.of( address );
         }
+
         return Optional.of( new InternetAddress( input ) );
     }
 
     static EmailItemBean applyMacrosToEmail( final EmailItemBean emailItem, final MacroRequest macroRequest )
     {
         return new EmailItemBean(
-                macroRequest.expandMacros( emailItem.getTo() ),
-                macroRequest.expandMacros( emailItem.getFrom() ),
-                macroRequest.expandMacros( emailItem.getSubject() ),
-                macroRequest.expandMacros( emailItem.getBodyPlain() ),
-                macroRequest.expandMacros( emailItem.getBodyHtml() )
+                macroRequest.expandMacros( emailItem.to() ),
+                macroRequest.expandMacros( emailItem.from() ),
+                macroRequest.expandMacros( emailItem.subject() ),
+                macroRequest.expandMacros( emailItem.bodyPlain() ),
+                macroRequest.expandMacros( emailItem.bodyHtml() )
         );
     }
 
@@ -261,62 +293,70 @@ public class EmailServerUtil
     {
         return new EmailItemBean(
                 toAddress,
-                emailItem.getFrom(),
-                emailItem.getSubject(),
-                emailItem.getBodyPlain(),
-                emailItem.getBodyHtml()
+                emailItem.from(),
+                emailItem.subject(),
+                emailItem.bodyPlain(),
+                emailItem.bodyHtml()
         );
     }
 
-    static boolean examineSendFailure( final Exception e, final Set<Integer> retyableStatusCodes )
+    static boolean examineSendFailure(
+            final Exception e,
+            final Set<Integer> retyableStatusCodes,
+            final SessionLabel sessionLabel
+    )
     {
-        if ( e != null )
+        if ( e == null )
         {
+            return false;
+        }
+
+        {
+            final Optional<IOException> optionalIoException = JavaHelper.extractNestedExceptionType( e, IOException.class );
+            if ( optionalIoException.isPresent() )
             {
-                final Optional<IOException> optionalIoException = JavaHelper.extractNestedExceptionType( e, IOException.class );
-                if ( optionalIoException.isPresent() )
+                LOGGER.trace( sessionLabel, () -> "message send failure cause is due to an I/O error: " + optionalIoException.get().getMessage() );
+                return true;
+            }
+        }
+
+        {
+            final Optional<SMTPSendFailedException> optionalSmtpSendFailedException = JavaHelper.extractNestedExceptionType( e, SMTPSendFailedException.class );
+            if ( optionalSmtpSendFailedException.isPresent() )
+            {
+                final SMTPSendFailedException smtpSendFailedException = optionalSmtpSendFailedException.get();
+                final int returnCode = smtpSendFailedException.getReturnCode();
+                LOGGER.trace( sessionLabel, () -> "message send failure cause is due to server response code: " + returnCode );
+                if ( retyableStatusCodes.contains( returnCode ) )
                 {
-                    LOGGER.trace( () -> "message send failure cause is due to an I/O error: " + optionalIoException.get().getMessage() );
                     return true;
                 }
             }
-
-            {
-                final Optional<SMTPSendFailedException> optionalSmtpSendFailedException = JavaHelper.extractNestedExceptionType( e, SMTPSendFailedException.class );
-                if ( optionalSmtpSendFailedException.isPresent() )
-                {
-                    final SMTPSendFailedException smtpSendFailedException = optionalSmtpSendFailedException.get();
-                    final int returnCode = smtpSendFailedException.getReturnCode();
-                    LOGGER.trace( () -> "message send failure cause is due to server response code: " + returnCode );
-                    if ( retyableStatusCodes.contains( returnCode ) )
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            if ( e instanceof PwmUnrecoverableException )
-            {
-                return ( ( PwmUnrecoverableException ) e ).getError() == PwmError.ERROR_SERVICE_UNREACHABLE;
-            }
         }
+
+        if ( e instanceof PwmUnrecoverableException )
+        {
+            return ( ( PwmUnrecoverableException ) e ).getError() == PwmError.ERROR_SERVICE_UNREACHABLE;
+        }
+
         return false;
     }
 
     public static List<Message> convertEmailItemToMessages(
             final EmailItemBean emailItemBean,
             final AppConfig config,
-            final EmailServer emailServer
+            final EmailServer emailServer,
+            final SessionLabel sessionLabel
     )
             throws MessagingException
     {
         final List<Message> messages = new ArrayList<>();
-        final boolean hasPlainText = emailItemBean.getBodyPlain() != null && emailItemBean.getBodyPlain().length() > 0;
-        final boolean hasHtml = emailItemBean.getBodyHtml() != null && emailItemBean.getBodyHtml().length() > 0;
+        final boolean hasPlainText = emailItemBean.bodyPlain() != null && emailItemBean.bodyPlain().length() > 0;
+        final boolean hasHtml = emailItemBean.bodyHtml() != null && emailItemBean.bodyHtml().length() > 0;
         final String subjectEncodingCharset = config.readAppProperty( AppProperty.SMTP_SUBJECT_ENCODING_CHARSET );
 
         // create a new Session object for the messagejavamail
-        final String emailTo = emailItemBean.getTo();
+        final String emailTo = emailItemBean.to();
         if ( emailTo != null )
         {
             final InternetAddress[] recipients = InternetAddress.parse( emailTo );
@@ -324,7 +364,7 @@ public class EmailServerUtil
             {
                 final MimeMessage message = new MimeMessage( emailServer.getSession() );
 
-                final Optional<InternetAddress> fromAddress = makeInternetAddress( emailItemBean.getFrom() );
+                final Optional<InternetAddress> fromAddress = makeInternetAddress( emailItemBean.from(), sessionLabel );
                 if ( fromAddress.isPresent() )
                 {
                     message.setFrom( fromAddress.get() );
@@ -334,11 +374,11 @@ public class EmailServerUtil
                 {
                     if ( subjectEncodingCharset != null && !subjectEncodingCharset.isEmpty() )
                     {
-                        message.setSubject( emailItemBean.getSubject(), subjectEncodingCharset );
+                        message.setSubject( emailItemBean.subject(), subjectEncodingCharset );
                     }
                     else
                     {
-                        message.setSubject( emailItemBean.getSubject() );
+                        message.setSubject( emailItemBean.subject() );
                     }
                 }
                 message.setSentDate( new Date() );
@@ -348,19 +388,19 @@ public class EmailServerUtil
                     final MimeMultipart content = new MimeMultipart( "alternative" );
                     final MimeBodyPart text = new MimeBodyPart();
                     final MimeBodyPart html = new MimeBodyPart();
-                    text.setContent( emailItemBean.getBodyPlain(), HttpContentType.plain.getHeaderValueWithEncoding() );
-                    html.setContent( emailItemBean.getBodyHtml(), HttpContentType.html.getHeaderValueWithEncoding() );
+                    text.setContent( emailItemBean.bodyPlain(), HttpContentType.plain.getHeaderValueWithEncoding() );
+                    html.setContent( emailItemBean.bodyHtml(), HttpContentType.html.getHeaderValueWithEncoding() );
                     content.addBodyPart( text );
                     content.addBodyPart( html );
                     message.setContent( content );
                 }
                 else if ( hasPlainText )
                 {
-                    message.setContent( emailItemBean.getBodyPlain(), HttpContentType.plain.getHeaderValueWithEncoding() );
+                    message.setContent( emailItemBean.bodyPlain(), HttpContentType.plain.getHeaderValueWithEncoding() );
                 }
                 else if ( hasHtml )
                 {
-                    message.setContent( emailItemBean.getBodyHtml(), HttpContentType.html.getHeaderValueWithEncoding() );
+                    message.setContent( emailItemBean.bodyHtml(), HttpContentType.html.getHeaderValueWithEncoding() );
                 }
 
                 messages.add( message );
@@ -370,7 +410,10 @@ public class EmailServerUtil
         return messages;
     }
 
-    static Transport makeSmtpTransport( final EmailServer server )
+    static Transport makeSmtpTransport(
+            final EmailServer server,
+            final SessionLabel sessionLabel
+    )
             throws MessagingException, PwmUnrecoverableException
     {
         final Instant startTime = Instant.now();
@@ -394,14 +437,18 @@ public class EmailServerUtil
             transport.connect();
         }
 
-        LOGGER.debug( () -> "connected to " + server.toDebugString() + " " + ( authenticated ? "(authenticated)" : "(unauthenticated)" ),
-                () -> TimeDuration.fromCurrent( startTime ) );
+        LOGGER.debug( sessionLabel, () -> "connected to " + server.toDebugString() + " " + ( authenticated ? "(authenticated)" : "(unauthenticated)" ),
+                TimeDuration.fromCurrent( startTime ) );
 
         return transport;
     }
 
 
-    public static List<X509Certificate> readCertificates( final AppConfig appConfig, final String profile )
+    public static List<X509Certificate> readCertificates(
+            final AppConfig appConfig,
+            final ProfileID profile,
+            final SessionLabel sessionLabel
+    )
             throws PwmUnrecoverableException
     {
         final EmailServerProfile emailServerProfile = appConfig.getEmailServerProfiles().get( profile );
@@ -415,7 +462,7 @@ public class EmailServerUtil
         final Optional<EmailServer> emailServer = makeEmailServer( appConfig, emailServerProfile, trustManagers );
         if ( emailServer.isPresent() )
         {
-            try ( Transport transport = makeSmtpTransport( emailServer.get() ) )
+            try ( Transport transport = makeSmtpTransport( emailServer.get(), sessionLabel ) )
             {
                 return certReaderTm.getCertificates();
             }
@@ -423,7 +470,7 @@ public class EmailServerUtil
             {
                 final String exceptionMessage = JavaHelper.readHostileExceptionMessage( e );
                 final String errorMsg = "error connecting to secure server while reading SMTP certificates: " + exceptionMessage;
-                LOGGER.debug( () -> errorMsg );
+                LOGGER.debug( sessionLabel, () -> errorMsg );
                 throw new PwmUnrecoverableException( PwmError.ERROR_SERVICE_UNREACHABLE, errorMsg );
             }
         }
@@ -431,20 +478,23 @@ public class EmailServerUtil
         return Collections.emptyList();
     }
 
-    static List<HealthRecord> checkAllConfiguredServers( final List<EmailServer> emailServers )
+    static List<HealthRecord> checkAllConfiguredServers(
+            final List<EmailServer> emailServers,
+            final SessionLabel sessionLabel
+    )
     {
         final List<HealthRecord> records = new ArrayList<>();
         for ( final EmailServer emailServer : emailServers )
         {
             try
             {
-                final Transport transport = EmailServerUtil.makeSmtpTransport( emailServer );
+                final Transport transport = EmailServerUtil.makeSmtpTransport( emailServer, sessionLabel );
                 if ( !transport.isConnected() )
                 {
                     records.add( HealthRecord.forMessage(
                             DomainID.systemId(),
                             HealthMessage.Email_ConnectFailure,
-                            emailServer.getId(),
+                            emailServer.getId().stringValue(),
                             "unable to connect" ) );
                 }
                 transport.close();
@@ -454,7 +504,7 @@ public class EmailServerUtil
                 records.add( HealthRecord.forMessage(
                         DomainID.systemId(),
                         HealthMessage.Email_ConnectFailure,
-                        emailServer.getId(),
+                        emailServer.getId().stringValue(),
                         e.getMessage() ) );
             }
         }

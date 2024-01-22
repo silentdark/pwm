@@ -27,8 +27,11 @@ import password.pwm.PwmApplicationMode;
 import password.pwm.PwmConstants;
 import password.pwm.PwmEnvironment;
 import password.pwm.bean.PasswordStatus;
+import password.pwm.bean.ProfileID;
 import password.pwm.config.PwmSetting;
+import password.pwm.config.option.SelectableContextMode;
 import password.pwm.config.profile.ChangePasswordProfile;
+import password.pwm.config.profile.LdapProfile;
 import password.pwm.config.profile.PeopleSearchProfile;
 import password.pwm.config.profile.ProfileDefinition;
 import password.pwm.error.PwmUnrecoverableException;
@@ -36,12 +39,14 @@ import password.pwm.health.HealthService;
 import password.pwm.health.HealthStatus;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmRequestFlag;
-import password.pwm.ldap.UserInfo;
+import password.pwm.http.servlet.resource.TextFileResource;
 import password.pwm.svc.PwmService;
 import password.pwm.svc.otp.OTPUserRecord;
+import password.pwm.user.UserInfo;
 import password.pwm.util.java.StringUtil;
 
 import java.util.Collections;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -93,11 +98,13 @@ public enum PwmIfTest
     forwardUrlDefined( new ForwardUrlDefinedTest() ),
 
     trialMode( new TrialModeTest() ),
-    appliance( new EnvironmentFlagTest( PwmEnvironment.ApplicationFlag.Appliance ) ),
+    appliance( new DeploymentTypeTest( PwmEnvironment.DeploymentPlatform.Appliance ) ),
 
     healthWarningsVisible( new HealthWarningsVisibleTest() ),
 
     headerMenuIsVisible( new HeaderMenuIsVisibleTest() ),
+
+    textFileExists( new TextFileExists() ),
 
     requestFlag( new RequestFlagTest() ),;
 
@@ -196,7 +203,7 @@ public enum PwmIfTest
         {
             final PwmApplicationMode applicationMode = pwmRequest.getPwmDomain().getApplicationMode();
             final boolean configMode = applicationMode == PwmApplicationMode.CONFIGURATION;
-            final boolean adminUser = pwmRequest.getPwmSession().getSessionManager().checkPermission( pwmRequest.getPwmDomain(), Permission.PWMADMIN );
+            final boolean adminUser = pwmRequest.checkPermission( Permission.PWMADMIN );
             if ( Boolean.parseBoolean( pwmRequest.getDomainConfig().readAppProperty( AppProperty.CLIENT_WARNING_HEADER_SHOW ) ) )
             {
                 if ( configMode || PwmConstants.TRIAL_MODE )
@@ -244,10 +251,7 @@ public enum PwmIfTest
                 return false;
             }
 
-            return pwmRequest != null
-                    && pwmRequest.getPwmSession().getSessionManager().checkPermission(
-                    pwmRequest.getPwmDomain(),
-                    permission );
+            return pwmRequest != null && pwmRequest.checkPermission( permission );
         }
     }
 
@@ -363,7 +367,7 @@ public enum PwmIfTest
                 return true;
             }
 
-            final boolean adminUser = pwmRequest.getPwmSession().getSessionManager().checkPermission( pwmRequest.getPwmDomain(), Permission.PWMADMIN );
+            final boolean adminUser = pwmRequest.checkPermission( Permission.PWMADMIN );
             if ( adminUser )
             {
                 final HealthService healthService = pwmRequest.getPwmApplication().getHealthMonitor();
@@ -407,7 +411,7 @@ public enum PwmIfTest
 
             if ( pwmRequest.isAuthenticated() )
             {
-                if ( pwmRequest.getPwmSession().getSessionManager().checkPermission( pwmRequest.getPwmDomain(), Permission.PWMADMIN ) )
+                if ( pwmRequest.checkPermission( Permission.PWMADMIN ) )
                 {
                     return true;
                 }
@@ -419,7 +423,6 @@ public enum PwmIfTest
 
     private static class ActorHasProfileTest implements Test
     {
-
         private final ProfileDefinition profileDefinition;
 
         ActorHasProfileTest( final ProfileDefinition profileDefinition )
@@ -430,8 +433,7 @@ public enum PwmIfTest
         @Override
         public boolean test( final PwmRequest pwmRequest, final PwmIfOptions options ) throws ChaiUnavailableException, PwmUnrecoverableException
         {
-            final String profileID = pwmRequest.getPwmSession().getUserInfo().getProfileIDs().get( profileDefinition );
-            return StringUtil.notEmpty( profileID );
+            return pwmRequest.getPwmSession().getUserInfo().getProfileIDs().containsKey( profileDefinition );
         }
     }
 
@@ -449,28 +451,25 @@ public enum PwmIfTest
         }
     }
 
-    private static class EnvironmentFlagTest implements Test
-    {
-        private final PwmEnvironment.ApplicationFlag flag;
-
-        EnvironmentFlagTest( final PwmEnvironment.ApplicationFlag flag )
-        {
-            this.flag = flag;
-        }
-
-        @Override
-        public boolean test( final PwmRequest pwmRequest, final PwmIfOptions options ) throws ChaiUnavailableException, PwmUnrecoverableException
-        {
-            return pwmRequest.getPwmApplication().getPwmEnvironment().getFlags().contains( flag );
-        }
-    }
-
     private static class EndUserFunctionalityTest implements Test
     {
         @Override
         public boolean test( final PwmRequest pwmRequest, final PwmIfOptions options ) throws ChaiUnavailableException, PwmUnrecoverableException
         {
-            return pwmRequest.endUserFunctionalityAvailable();
+            final PwmApplicationMode mode = pwmRequest.getPwmApplication().getApplicationMode();
+            if ( mode == PwmApplicationMode.NEW )
+            {
+                return false;
+            }
+            if ( PwmConstants.TRIAL_MODE )
+            {
+                return true;
+            }
+            if ( mode == PwmApplicationMode.RUNNING )
+            {
+                return true;
+            }
+            return false;
         }
 
     }
@@ -537,13 +536,8 @@ public enum PwmIfTest
                 }
             }
 
-            final String profileID = pwmRequest.getPwmSession().getUserInfo().getProfileIDs().get( profileDefinition );
-            if ( StringUtil.isEmpty( profileID ) )
-            {
-                return false;
-            }
-
-            return true;
+            final ProfileID profileID = pwmRequest.getPwmSession().getUserInfo().getProfileIDs().get( profileDefinition );
+            return profileID != null;
         }
     }
 
@@ -562,11 +556,15 @@ public enum PwmIfTest
         @Override
         public boolean test( final PwmRequest pwmRequest, final PwmIfOptions options ) throws PwmUnrecoverableException
         {
-            final ChangePasswordProfile changePasswordProfile = pwmRequest.getChangePasswordProfile();
-            return changePasswordProfile.readSettingAsBoolean( PwmSetting.PASSWORD_SHOW_AUTOGEN );
+            if ( pwmRequest.getURL().isChangePasswordURL() )
+            {
+                final ChangePasswordProfile changePasswordProfile = pwmRequest.getChangePasswordProfile();
+                return changePasswordProfile.readSettingAsBoolean( PwmSetting.PASSWORD_SHOW_AUTOGEN );
+            }
+
+            return false;
         }
     }
-
 
     private static class MultiDomainTest implements Test
     {
@@ -576,5 +574,52 @@ public enum PwmIfTest
             return pwmRequest.getPwmApplication().isMultiDomain();
         }
     }
-}
 
+    private static class DeploymentTypeTest implements Test
+    {
+        private final PwmEnvironment.DeploymentPlatform deploymentPlatform;
+
+        DeploymentTypeTest( final PwmEnvironment.DeploymentPlatform deploymentPlatform )
+        {
+            this.deploymentPlatform = deploymentPlatform;
+        }
+
+        @Override
+        public boolean test( final PwmRequest pwmRequest, final PwmIfOptions options ) throws PwmUnrecoverableException
+        {
+            return pwmRequest.getPwmApplication().getPwmEnvironment().getDeploymentPlatform() == deploymentPlatform;
+        }
+    }
+
+    private static class TextFileExists implements Test
+    {
+        @Override
+        public boolean test( final PwmRequest pwmRequest, final PwmIfOptions options )
+                throws PwmUnrecoverableException
+        {
+            final TextFileResource textFileResource = options.getTextFileResource();
+            return TextFileResource.readTextFileResource( pwmRequest, textFileResource ).isPresent();
+        }
+    }
+
+    private static class ShowSelectableContexts implements Test
+    {
+        @Override
+        public boolean test( final PwmRequest pwmRequest, final PwmIfOptions options )
+                throws ChaiUnavailableException, PwmUnrecoverableException
+        {
+            final SelectableContextMode selectableContextMode = pwmRequest.getDomainConfig()
+                    .readSettingAsEnum( PwmSetting.LDAP_SELECTABLE_CONTEXT_MODE, SelectableContextMode.class );
+
+            final String selectedProfileStr = pwmRequest.readParameterAsString( PwmConstants.PARAM_LDAP_PROFILE );
+
+            final ProfileID selectedProfileID = pwmRequest.getPwmDomain().getConfig().ldapProfileForStringId( selectedProfileStr )
+                    .orElse( pwmRequest.getDomainConfig().getDefaultLdapProfile( ).getId() );
+
+            final LdapProfile selectedProfile = pwmRequest.getDomainConfig().getLdapProfiles().get( selectedProfileID );
+
+            final Map<String, String> selectableContexts = selectedProfile.getSelectableContexts( pwmRequest.getLabel(), pwmRequest.getPwmDomain() );
+            return selectableContextMode == SelectableContextMode.SHOW_CONTEXTS && selectableContexts.size() > 0;
+        }
+    }
+}

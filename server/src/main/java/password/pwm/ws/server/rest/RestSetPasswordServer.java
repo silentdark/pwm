@@ -32,13 +32,12 @@ import password.pwm.http.HttpContentType;
 import password.pwm.http.HttpMethod;
 import password.pwm.http.PwmHttpRequestWrapper;
 import password.pwm.i18n.Message;
-import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.UserInfoFactory;
 import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsClient;
+import password.pwm.user.UserInfo;
 import password.pwm.util.BasicAuthInfo;
 import password.pwm.util.PasswordData;
-import password.pwm.util.password.RandomPasswordGenerator;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.password.PasswordUtility;
 import password.pwm.ws.server.RestMethodHandler;
@@ -50,7 +49,6 @@ import password.pwm.ws.server.RestWebServer;
 
 import javax.servlet.annotation.WebServlet;
 import java.io.IOException;
-import java.io.Serializable;
 import java.util.Optional;
 
 @WebServlet(
@@ -69,7 +67,7 @@ public class RestSetPasswordServer extends RestServlet
     private static final String FIELD_PASSWORD = "password";
 
     @Value
-    public static class JsonInputData implements Serializable
+    public static class JsonInputData
     {
         private String username;
         private String password;
@@ -173,9 +171,10 @@ public class RestSetPasswordServer extends RestServlet
                         restRequest.getSessionLabel(),
                         targetUserIdentity.getUserIdentity(),
                         targetUserIdentity.getChaiUser() );
-                newPassword = RandomPasswordGenerator.createRandomPassword(
+                newPassword = PasswordUtility.generateRandom(
                         restRequest.getSessionLabel(),
-                        passwordPolicy, restRequest.getDomain()
+                        passwordPolicy,
+                        restRequest.getDomain()
                 );
             }
             else
@@ -216,14 +215,14 @@ public class RestSetPasswordServer extends RestServlet
         }
         catch ( final PwmException e )
         {
-            LOGGER.error( () -> "error during set password REST operation: " + e.getMessage() );
+            LOGGER.error( restRequest.getSessionLabel(), () -> "error during set password REST operation: " + e.getMessage() );
             return RestResultBean.fromError( restRequest, e.getErrorInformation() );
         }
         catch ( final Exception e )
         {
             final String errorMessage = "unexpected error executing web service: " + e.getMessage();
             final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_INTERNAL, errorMessage );
-            LOGGER.error( () -> "error during set password REST operation: " + e.getMessage(), e );
+            LOGGER.error( restRequest.getSessionLabel(), () -> "error during set password REST operation: " + e.getMessage(), e );
             return RestResultBean.fromError( restRequest, errorInformation );
         }
     }

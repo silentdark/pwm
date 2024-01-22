@@ -21,8 +21,8 @@
 package password.pwm.config.value;
 
 import lombok.Value;
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.option.IdentityVerificationMethod;
 import password.pwm.config.stored.StoredConfigXmlConstants;
@@ -34,7 +34,6 @@ import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmSecurityKey;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -55,7 +54,7 @@ public class VerificationMethodValue extends AbstractValue implements StoredValu
         optional,
     }
 
-    public static class VerificationMethodSettings implements Serializable
+    public static class VerificationMethodSettings
     {
         private final Map<IdentityVerificationMethod, VerificationMethodSetting> methodSettings;
         private final int minOptionalRequired;
@@ -87,7 +86,7 @@ public class VerificationMethodValue extends AbstractValue implements StoredValu
     }
 
     @Value
-    public static class VerificationMethodSetting implements Serializable
+    public static class VerificationMethodSetting
     {
         private EnabledState enabledState;
     }
@@ -124,7 +123,7 @@ public class VerificationMethodValue extends AbstractValue implements StoredValu
         return new StoredValueFactory()
         {
             @Override
-            public VerificationMethodValue fromJson( final String input )
+            public VerificationMethodValue fromJson( final PwmSetting pwmSetting, final String input )
             {
                 if ( input == null )
                 {
@@ -158,7 +157,7 @@ public class VerificationMethodValue extends AbstractValue implements StoredValu
     @Override
     public List<XmlElement> toXmlValues( final String valueElementName, final XmlOutputProcessData xmlOutputProcessData )
     {
-        final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+        final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
         valueElement.setText( JsonFactory.get().serialize( value ) );
         return Collections.singletonList( valueElement );
     }

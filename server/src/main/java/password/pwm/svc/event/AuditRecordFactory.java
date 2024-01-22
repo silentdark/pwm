@@ -25,13 +25,14 @@ import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
 import password.pwm.PwmDomain;
 import password.pwm.bean.DomainID;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.bean.UserIdentity;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmSession;
 import password.pwm.i18n.PwmDisplayBundle;
-import password.pwm.ldap.UserInfo;
+import password.pwm.user.UserInfo;
 import password.pwm.ldap.UserInfoFactory;
 import password.pwm.svc.userhistory.LdapXmlUserHistory;
 import password.pwm.util.i18n.LocaleHelper;
@@ -79,7 +80,7 @@ public class AuditRecordFactory
                 pwmRequest.getLabel(),
                 pwmRequest.getDomainID(),
                 pwmRequest.getPwmApplication(),
-                pwmRequest.getPwmSession().getSessionManager().getMacroMachine( ) );
+                pwmRequest.getMacroMachine() );
     }
 
     public static AuditRecordFactory make( final SessionLabel sessionLabel, final PwmDomain pwmDomain, final MacroRequest macroRequest )
@@ -289,7 +290,7 @@ public class AuditRecordFactory
     {
         String userDN = null;
         String userID = null;
-        String ldapProfile = null;
+        ProfileID ldapProfile = null;
 
         if ( userIdentity != null )
         {
@@ -306,7 +307,7 @@ public class AuditRecordFactory
             }
             catch ( final Exception e )
             {
-                LOGGER.warn( () -> "unable to read userID for " + userIdentity + ", error: " + e.getMessage() );
+                LOGGER.warn( sessionLabel, () -> "unable to read userID for " + userIdentity + ", error: " + e.getMessage() );
             }
         }
 
@@ -318,7 +319,7 @@ public class AuditRecordFactory
     {
         private final String userID;
         private final String userDN;
-        private final String ldapProfile;
+        private final ProfileID ldapProfile;
     }
 }
 

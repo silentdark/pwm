@@ -24,6 +24,7 @@ import com.novell.ldapchai.exception.ChaiUnavailableException;
 import password.pwm.PwmConstants;
 import password.pwm.PwmDomain;
 import password.pwm.VerificationMethodSystem;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.TokenDestinationItem;
 import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
@@ -49,8 +50,8 @@ import password.pwm.http.servlet.ControlledPwmServlet;
 import password.pwm.http.servlet.PwmServletDefinition;
 import password.pwm.http.servlet.forgottenpw.RemoteVerificationMethod;
 import password.pwm.i18n.Message;
-import password.pwm.ldap.UserInfo;
-import password.pwm.ldap.UserInfoBean;
+import password.pwm.user.UserInfo;
+import password.pwm.user.UserInfoBean;
 import password.pwm.svc.token.TokenPayload;
 import password.pwm.svc.token.TokenService;
 import password.pwm.svc.token.TokenType;
@@ -58,7 +59,7 @@ import password.pwm.svc.token.TokenUtil;
 import password.pwm.util.CaptchaUtility;
 import password.pwm.util.form.FormUtility;
 import password.pwm.util.json.JsonFactory;
-import password.pwm.util.java.Percent;
+import password.pwm.util.Percent;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
@@ -102,6 +103,12 @@ public class NewUserServlet extends ControlledPwmServlet
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( NewUserServlet.class );
 
+    @Override
+    protected PwmLogger getLogger()
+    {
+        return LOGGER;
+    }
+
     static final String FIELD_PASSWORD1 = "password1";
     static final String FIELD_PASSWORD2 = "password2";
     static final String TOKEN_PAYLOAD_ATTR = "p";
@@ -133,9 +140,9 @@ public class NewUserServlet extends ControlledPwmServlet
     }
 
     @Override
-    public Class<? extends ProcessAction> getProcessActionsClass( )
+    public Optional<Class<? extends ProcessAction>> getProcessActionsClass( )
     {
-        return NewUserAction.class;
+        return Optional.of( NewUserAction.class );
     }
 
 
@@ -162,7 +169,8 @@ public class NewUserServlet extends ControlledPwmServlet
         if ( StringUtil.notEmpty( signedFormData ) )
         {
             final Map<String, String> jsonForm = RestFormSigningServer.readSignedFormValue( pwmDomain, signedFormData );
-            LOGGER.trace( () -> "detected signedForm parameter in request, will read and place in bean; keys=" + JsonFactory.get().serializeCollection( jsonForm.keySet() ) );
+            LOGGER.trace( pwmRequest, () -> "detected signedForm parameter in request, will read and place in bean; keys="
+                    + JsonFactory.get().serializeCollection( jsonForm.keySet() ) );
             newUserBean.setRemoteInputData( jsonForm );
         }
 
@@ -204,7 +212,7 @@ public class NewUserServlet extends ControlledPwmServlet
 
         if ( newUserBean.getProfileID() == null )
         {
-            final Set<String> newUserProfileIDs = pwmDomain.getConfig().getNewUserProfiles().keySet();
+            final Set<ProfileID> newUserProfileIDs = pwmDomain.getConfig().getNewUserProfiles().keySet();
             if ( newUserProfileIDs.isEmpty() )
             {
                 pwmRequest.respondWithError( new ErrorInformation( PwmError.ERROR_INVALID_CONFIG, "no new user profiles are defined" ) );
@@ -215,7 +223,7 @@ public class NewUserServlet extends ControlledPwmServlet
 
             if ( visibleProfiles.size() == 1 )
             {
-                final String singleID = newUserProfileIDs.iterator().next();
+                final ProfileID singleID = newUserProfileIDs.iterator().next();
                 LOGGER.trace( pwmRequest, () -> "only one new user profile is defined, auto-selecting profile " + singleID );
                 newUserBean.setProfileID( singleID );
             }
@@ -240,7 +248,7 @@ public class NewUserServlet extends ControlledPwmServlet
         {
             final Instant startTime = Instant.now();
             newUserProfile.getNewUserPasswordPolicy( pwmRequest.getPwmRequestContext() );
-            LOGGER.trace( () -> "read new user password policy in ", () -> TimeDuration.fromCurrent( startTime ) );
+            LOGGER.trace( pwmRequest, () -> "read new user password policy in ", TimeDuration.fromCurrent( startTime ) );
         }
 
         if ( !newUserBean.isFormPassed() )
@@ -351,8 +359,8 @@ public class NewUserServlet extends ControlledPwmServlet
             final List<String> urlSegments = PwmURL.splitPathString( urlRemainder );
             if ( urlSegments.size() == 2 && profileUrlSegment.equals( urlSegments.get( 0 ) ) )
             {
-                final String requestedProfile = urlSegments.get( 1 );
-                final Collection<String> profileIDs = pwmRequest.getDomainConfig().getNewUserProfiles().keySet();
+                final ProfileID requestedProfile = ProfileID.create( urlSegments.get( 1 ) );
+                final Collection<ProfileID> profileIDs = pwmRequest.getDomainConfig().getNewUserProfiles().keySet();
                 if ( profileIDs.contains( requestedProfile ) )
                 {
                     LOGGER.debug( pwmRequest, () -> "detected profile on request uri: " + requestedProfile );
@@ -470,7 +478,7 @@ public class NewUserServlet extends ControlledPwmServlet
             passwordCheckInfo = new PasswordUtility.PasswordCheckInfo( null, true, 0, PasswordUtility.PasswordCheckInfo.MatchStatus.MATCH, 0 );
         }
 
-        LOGGER.trace( () -> "competed form validation in ", () -> TimeDuration.fromCurrent( startTime ) );
+        LOGGER.trace( pwmRequest, () -> "competed form validation in ", TimeDuration.fromCurrent( startTime ) );
         return passwordCheckInfo;
     }
 
@@ -611,19 +619,21 @@ public class NewUserServlet extends ControlledPwmServlet
     public ProcessStatus handleProfileChoiceRequest( final PwmRequest pwmRequest )
             throws PwmUnrecoverableException, ChaiUnavailableException, IOException, ServletException
     {
-        final Set<String> profileIDs = pwmRequest.getDomainConfig().getNewUserProfiles().keySet();
-        final String requestedProfileID = pwmRequest.readParameterAsString( "profile" );
+        final Set<ProfileID> profileIDs = pwmRequest.getDomainConfig().getNewUserProfiles().keySet();
+        final Optional<ProfileID> requestedProfileID = ProfileID.createNullable( pwmRequest.readParameterAsString( "profile" ) );
 
         final NewUserBean newUserBean = getNewUserBean( pwmRequest );
 
-        if ( requestedProfileID == null || requestedProfileID.isEmpty() )
+        if ( requestedProfileID.isPresent() && profileIDs.contains( requestedProfileID.get() ) )
+        {
+            newUserBean.setProfileID( requestedProfileID.get() );
+        }
+        else
         {
             newUserBean.setProfileID( null );
         }
-        if ( profileIDs.contains( requestedProfileID ) )
-        {
-            newUserBean.setProfileID( requestedProfileID );
-        }
+
+
 
         return ProcessStatus.Continue;
     }
@@ -787,7 +797,7 @@ public class NewUserServlet extends ControlledPwmServlet
         final String configuredRedirectUrl = newUserProfile.readSettingAsString( PwmSetting.NEWUSER_REDIRECT_URL );
         if ( StringUtil.notEmpty( configuredRedirectUrl ) && StringUtil.isEmpty( pwmRequest.getPwmSession().getSessionStateBean().getForwardURL() ) )
         {
-            final MacroRequest macroRequest = pwmRequest.getPwmSession().getSessionManager().getMacroMachine();
+            final MacroRequest macroRequest = pwmRequest.getMacroMachine();
             final String macroedUrl = macroRequest.expandMacros( configuredRedirectUrl );
             pwmRequest.getPwmResponse().sendRedirect( macroedUrl );
             return ProcessStatus.Halt;
@@ -806,7 +816,7 @@ public class NewUserServlet extends ControlledPwmServlet
 
     public static NewUserProfile getNewUserProfile( final PwmRequest pwmRequest ) throws PwmUnrecoverableException
     {
-        final String profileID = pwmRequest.getPwmDomain().getSessionStateService().getBean( pwmRequest, NewUserBean.class ).getProfileID();
+        final ProfileID profileID = pwmRequest.getPwmDomain().getSessionStateService().getBean( pwmRequest, NewUserBean.class ).getProfileID();
         if ( profileID == null )
         {
             throw new IllegalStateException( "can not read new user profile until profile is selected" );

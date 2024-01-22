@@ -20,6 +20,10 @@
 
 package password.pwm;
 
+import password.pwm.util.java.EnumUtil;
+
+import java.util.Objects;
+import java.util.Optional;
 import java.util.ResourceBundle;
 
 /**
@@ -56,14 +60,11 @@ public enum AppProperty
     CACHE_FORM_UNIQUE_VALUE_LIFETIME_MS             ( "cache.uniqueFormValueLifetimeMS" ),
     CLIENT_ACTIVITY_MAX_EPS_RATE                    ( "client.ajax.activityMaxEpsRate" ),
     CLIENT_AJAX_PW_WAIT_CHECK_SECONDS               ( "client.ajax.changePasswordWaitCheckSeconds" ),
-    CLIENT_AJAX_TYPING_TIMEOUT                      ( "client.ajax.typingTimeout" ),
-    CLIENT_AJAX_TYPING_WAIT                         ( "client.ajax.typingWait" ),
     CLIENT_FORM_NONCE_ENABLE                        ( "client.formNonce.enable" ),
     CLIENT_FORM_NONCE_LENGTH                        ( "client.formNonce.length" ),
     CLIENT_FORM_CLIENT_REGEX_ENABLED                ( "client.form.clientRegexEnable" ),
     CLIENT_WARNING_HEADER_SHOW                      ( "client.warningHeader.show" ),
     CLIENT_PW_SHOW_REVERT_TIMEOUT                   ( "client.pwShowRevertTimeout" ),
-    CLIENT_JS_ENABLE_HTML5DIALOG                    ( "client.js.enableHtml5Dialog" ),
     CLIENT_JSP_SHOW_ICONS                           ( "client.jsp.showIcons" ),
     CONFIG_MAX_FILEVALUE_SIZE                       ( "config.max.fileValue.size" ),
     CONFIG_RELOAD_ON_CHANGE                         ( "config.reloadOnChange" ),
@@ -76,6 +77,7 @@ public enum AppProperty
     CONFIG_EDITOR_BLOCK_OLD_IE                      ( "configEditor.blockOldIE" ),
     CONFIG_EDITOR_USER_PERMISSION_MATCH_LIMIT       ( "configEditor.userPermission.matchResultsLimit" ),
     CONFIG_EDITOR_IDLE_TIMEOUT                      ( "configEditor.idleTimeoutSeconds" ),
+    CONFIG_EDITOR_SETTING_FUNCTION_TIMEOUT_MS       ( "configEditor.settingFunction.timeoutMs" ),
     CONFIG_GUIDE_IDLE_TIMEOUT                       ( "configGuide.idleTimeoutSeconds" ),
     CONFIG_MANAGER_ZIPDEBUG_MAXLOGBYTES             ( "configManager.zipDebug.maxLogBytes" ),
     CONFIG_MANAGER_ZIPDEBUG_MAXLOGSECONDS           ( "configManager.zipDebug.maxLogSeconds" ),
@@ -86,7 +88,6 @@ public enum AppProperty
     CLUSTER_LDAP_HEARTBEAT_SECONDS                  ( "cluster.ldap.heartbeatSeconds" ),
     CLUSTER_LDAP_NODE_TIMEOUT_SECONDS               ( "cluster.ldap.nodeTimeoutSeconds" ),
     CLUSTER_LDAP_NODE_PURGE_SECONDS                 ( "cluster.ldap.nodePurgeSeconds" ),
-    DB_JDBC_LOAD_STRATEGY                           ( "db.jdbcLoadStrategy" ),
     DB_CONNECTIONS_MAX                              ( "db.connections.max" ),
     DB_CONNECTIONS_TIMEOUT_MS                       ( "db.connections.timeoutMs" ),
     DB_CONNECTIONS_WATCHDOG_FREQUENCY_SECONDS       ( "db.connections.watchdogFrequencySeconds" ),
@@ -109,20 +110,6 @@ public enum AppProperty
     HTTP_RESOURCES_ENABLE_PATH_NONCE                ( "http.resources.pathNonceEnable" ),
     HTTP_RESOURCES_NONCE_PATH_PREFIX                ( "http.resources.pathNoncePrefix" ),
     HTTP_RESOURCES_ZIP_FILES                        ( "http.resources.zipFiles" ),
-    HTTP_COOKIE_DEFAULT_SECURE_FLAG                 ( "http.cookie.default.secureFlag" ),
-    HTTP_COOKIE_HTTPONLY_ENABLE                     ( "http.cookie.httponly.enable" ),
-    HTTP_COOKIE_THEME_NAME                          ( "http.cookie.theme.name" ),
-    HTTP_COOKIE_THEME_AGE                           ( "http.cookie.theme.age" ),
-    HTTP_COOKIE_LOCALE_NAME                         ( "http.cookie.locale.name" ),
-    HTTP_COOKIE_AUTHRECORD_NAME                     ( "http.cookie.authRecord.name" ),
-    HTTP_COOKIE_AUTHRECORD_AGE                      ( "http.cookie.authRecord.age" ),
-    HTTP_COOKIE_MAX_READ_LENGTH                     ( "http.cookie.maxReadLength" ),
-    HTTP_COOKIE_CAPTCHA_SKIP_NAME                   ( "http.cookie.captchaSkip.name" ),
-    HTTP_COOKIE_CAPTCHA_SKIP_AGE                    ( "http.cookie.captchaSkip.age" ),
-    HTTP_COOKIE_LOGIN_NAME                          ( "http.cookie.login.name" ),
-    HTTP_COOKIE_NONCE_NAME                          ( "http.cookie.nonce.name" ),
-    HTTP_COOKIE_NONCE_LENGTH                        ( "http.cookie.nonce.length" ),
-    HTTP_COOKIE_SAMESITE_VALUE                      ( "http.cookie.sameSite.value" ),
     HTTP_BASIC_AUTH_CHARSET                         ( "http.basicAuth.charset" ),
     HTTP_BODY_MAXREAD_LENGTH                        ( "http.body.maxReadLength" ),
     HTTP_CLIENT_ALWAYS_LOG_ENTITIES                 ( "http.client.alwaysLogEntities" ),
@@ -156,18 +143,6 @@ public enum AppProperty
     HTTP_PARAM_NAME_SSO_OVERRIDE                    ( "http.parameter.ssoOverride" ),
     HTTP_PARAM_MAX_READ_LENGTH                      ( "http.parameter.maxReadLength" ),
     HTTP_PARAM_SESSION_VERIFICATION                 ( "http.parameter.sessionVerification" ),
-    HTTP_PARAM_OAUTH_ACCESS_TOKEN                   ( "http.parameter.oauth.accessToken" ),
-    HTTP_PARAM_OAUTH_ATTRIBUTES                     ( "http.parameter.oauth.attributes" ),
-    HTTP_PARAM_OAUTH_CLIENT_ID                      ( "http.parameter.oauth.clientID" ),
-    HTTP_PARAM_OAUTH_CLIENT_SECRET                  ( "http.parameter.oauth.clientSecret" ),
-    HTTP_PARAM_OAUTH_CODE                           ( "http.parameter.oauth.code" ),
-    HTTP_PARAM_OAUTH_EXPIRES                        ( "http.parameter.oauth.expires" ),
-    HTTP_PARAM_OAUTH_RESPONSE_TYPE                  ( "http.parameter.oauth.responseType" ),
-    HTTP_PARAM_OAUTH_REDIRECT_URI                   ( "http.parameter.oauth.redirectUri" ),
-    HTTP_PARAM_OAUTH_REFRESH_TOKEN                  ( "http.parameter.oauth.refreshToken" ),
-    HTTP_PARAM_OAUTH_SCOPE                          ( "http.parameter.oauth.scope" ),
-    HTTP_PARAM_OAUTH_STATE                          ( "http.parameter.oauth.state" ),
-    HTTP_PARAM_OAUTH_GRANT_TYPE                     ( "http.parameter.oauth.grantType" ),
     HTTP_DOWNLOAD_BUFFER_SIZE                       ( "http.download.buffer.size" ),
     HTTP_SESSION_RECYCLE_AT_AUTH                    ( "http.session.recycleAtAuth" ),
     HTTP_SERVLET_ENABLE_POST_REDIRECT_GET           ( "http.servlet.enablePostRedirectGet" ),
@@ -215,37 +190,15 @@ public enum AppProperty
     HELPDESK_TOKEN_VALUE                            ( "helpdesk.token.value" ),
     HELPDESK_VERIFICATION_INVALID_DELAY_MS          ( "helpdesk.verification.invalid.delayMs" ),
     HELPDESK_VERIFICATION_TIMEOUT_SECONDS           ( "helpdesk.verification.timeoutSeconds" ),
-    LDAP_RESOLVE_CANONICAL_DN                       ( "ldap.resolveCanonicalDN" ),
-    LDAP_CACHE_CANONICAL_ENABLE                     ( "ldap.cache.canonical.enable" ),
-    LDAP_CACHE_CANONICAL_SECONDS                    ( "ldap.cache.canonical.seconds" ),
-    LDAP_CACHE_USER_GUID_ENABLE                     ( "ldap.cache.userGuid.enable" ),
-    LDAP_CACHE_USER_GUID_SECONDS                    ( "ldap.cache.userGuid.seconds" ),
-    LDAP_CHAI_SETTINGS                              ( "ldap.chaiSettings" ),
-    LDAP_PROXY_CONNECTION_PER_PROFILE               ( "ldap.proxy.connectionsPerProfile" ),
-    LDAP_PROXY_MAX_CONNECTIONS                      ( "ldap.proxy.maxConnections" ),
-    LDAP_PROXY_USE_THREAD_LOCAL                     ( "ldap.proxy.useThreadLocal" ),
-    LDAP_PROXY_IDLE_THREAD_LOCAL_TIMEOUT_MS         ( "ldap.proxy.idleThreadLocal.timeoutMS" ),
-    LDAP_EXTENSIONS_NMAS_ENABLE                     ( "ldap.extensions.nmas.enable" ),
-    LDAP_CONNECTION_TIMEOUT                         ( "ldap.connection.timeoutMS" ),
-    LDAP_PROFILE_RETRY_DELAY                        ( "ldap.profile.retryDelayMS" ),
-    LDAP_PROMISCUOUS_ENABLE                         ( "ldap.promiscuousEnable" ),
-    LDAP_PASSWORD_REPLICA_CHECK_INIT_DELAY_MS       ( "ldap.password.replicaCheck.initialDelayMS" ),
-    LDAP_PASSWORD_REPLICA_CHECK_CYCLE_DELAY_MS      ( "ldap.password.replicaCheck.cycleDelayMS" ),
-    LDAP_PASSWORD_CHANGE_SELF_ENABLE                ( "ldap.password.change.self.enable" ),
-    LDAP_PASSWORD_CHANGE_HELPDESK_ENABLE            ( "ldap.password.change.helpdesk.enable" ),
-    LDAP_GUID_PATTERN                               ( "ldap.guid.pattern" ),
-    LDAP_BROWSER_MAX_ENTRIES                        ( "ldap.browser.maxEntries" ),
-    LDAP_SEARCH_PAGING_ENABLE                       ( "ldap.search.paging.enable" ),
-    LDAP_SEARCH_PAGING_SIZE                         ( "ldap.search.paging.size" ),
-    LDAP_SEARCH_PARALLEL_ENABLE                     ( "ldap.search.parallel.enable" ),
-    LDAP_SEARCH_PARALLEL_FACTOR                     ( "ldap.search.parallel.factor" ),
-    LDAP_SEARCH_PARALLEL_THREAD_MAX                 ( "ldap.search.parallel.threadMax" ),
-    LDAP_ORACLE_POST_TEMPPW_USE_CURRENT_TIME        ( "ldap.oracle.postTempPasswordUseCurrentTime" ),
-    LOGGING_OUTPUT_CONFIGURATION                    ( "logging.outputConfiguration" ),
-    LOGGING_PATTERN                                 ( "logging.pattern" ),
+    LOGGING_OUTPUT_CONFIGURATION                    ( "logging.output.configuration.enable" ),
+    LOGGING_OUTPUT_HEALTHCHECK                      ( "logging.output.healthCheck.enable" ),
+    LOGGING_OUTPUT_RUNTIME                          ( "logging.output.runtime.enable" ),
+    LOGGING_OUTPUT_MODE                             ( "logging.logOutputMode" ),
+    LOGGING_PACKAGE_LIST                            ( "logging.packageList" ),
     LOGGING_EXTRA_PERIODIC_THREAD_DUMP_INTERVAL     ( "logging.extra.periodicThreadDumpIntervalSeconds" ),
-    LOGGING_FILE_MAX_SIZE                           ( "logging.file.maxSize" ),
-    LOGGING_FILE_MAX_ROLLOVER                       ( "logging.file.maxRollover" ),
+    LOGGING_FILE_MAX_FILE_SIZE                      ( "logging.file.maxFileSize" ),
+    LOGGING_FILE_MAX_TOTAL_SIZE                     ( "logging.file.maxTotalSize" ),
+    LOGGING_FILE_MAX_HISTORY                        ( "logging.file.maxHistory" ),
     LOGGING_FILE_PATH                               ( "logging.file.path" ),
     LOGGING_DEV_OUTPUT                              ( "logging.devOutput.enable" ),
     LOGGING_LOG_CSP_REPORT                          ( "logging.cspReport.enable" ),
@@ -259,11 +212,6 @@ public enum AppProperty
     NMAS_IGNORE_NMASCR_DURING_FORCECHECK            ( "nmas.ignoreNmasCrDuringForceSetupCheck" ),
     NMAS_USE_LOCAL_SASL_FACTORY                     ( "nmas.useLocalSaslFactory" ),
     NMAS_FORCE_SASL_FACTORY_REGISTRATION            ( "nmas.forceSaslFactoryRegistration" ),
-    OAUTH_ID_REQUEST_TYPE                           ( "oauth.id.requestType" ),
-    OAUTH_ID_ACCESS_GRANT_TYPE                      ( "oauth.id.accessGrantType" ),
-    OAUTH_ID_REFRESH_GRANT_TYPE                     ( "oauth.id.refreshGrantType" ),
-    OAUTH_ENABLE_TOKEN_REFRESH                      ( "oauth.enableTokenRefresh" ),
-    OAUTH_RETURN_URL_OVERRIDE                       ( "oauth.returnUrlOverride" ),
 
     /* Allows one older TOTP token - compensate for clock out of sync */
     TOTP_PAST_INTERVALS                             ( "otp.totp.pastIntervals" ),
@@ -282,7 +230,8 @@ public enum AppProperty
     OTP_ENCRYPTION_ALG                              ( "otp.encryptionAlg" ),
     PASSWORD_RANDOMGEN_MAX_ATTEMPTS                 ( "password.randomGenerator.maxAttempts" ),
     PASSWORD_RANDOMGEN_MAX_LENGTH                   ( "password.randomGenerator.maxLength" ),
-    PASSWORD_RANDOMGEN_JITTER_COUNT                 ( "password.randomGenerator.jitter.count" ),
+    PASSWORD_RANDOMGEN_MIN_LENGTH                   ( "password.randomGenerator.minLength" ),
+    PASSWORD_RANDOMGEN_DEFAULT_STRENGTH             ( "password.randomGenerator.defaultStrength" ),
 
     /* Strength thresholds, introduced by the addition of the zxcvbn strength meter library (since it has 5 levels) */
     PASSWORD_STRENGTH_THRESHOLD_VERY_STRONG         ( "password.strength.threshold.veryStrong" ),
@@ -320,8 +269,9 @@ public enum AppProperty
     RECAPTCHA_CLIENT_JS_URL                         ( "recaptcha.clientJsUrl" ),
     RECAPTCHA_CLIENT_IFRAME_URL                     ( "recaptcha.clientIframeUrl" ),
     RECAPTCHA_VALIDATE_URL                          ( "recaptcha.validateUrl" ),
+    REPORTING_LDAP_JOB_THREADS                      ( "reporting.ldap.recordJob.threads" ),
+    REPORTING_LDAP_JOB_TIMEOUT_MS                   ( "reporting.ldap.recordJob.timeoutMs" ),
     REPORTING_LDAP_SEARCH_TIMEOUT_MS                ( "reporting.ldap.searchTimeoutMs" ),
-    REPORTING_LDAP_SEARCH_THREADS                   ( "reporting.ldap.searchThreads" ),
     REPORTING_MAX_REPORT_AGE_SECONDS                ( "reporting.maxReportAgeSeconds" ),
     SECURITY_STRIP_INLINE_JAVASCRIPT                ( "security.html.stripInlineJavascript" ),
     SECURITY_HTTP_FORCE_REQUEST_SEQUENCING          ( "security.http.forceRequestSequencing" ),
@@ -329,6 +279,8 @@ public enum AppProperty
     SECURITY_HTTP_PERFORM_CSRF_HEADER_CHECKS        ( "security.http.performCsrfHeaderChecks" ),
     SECURITY_HTTP_PROMISCUOUS_ENABLE                ( "security.http.promiscuousEnable" ),
     SECURITY_HTTP_CONFIG_CSP_HEADER                 ( "security.http.config.cspHeader" ),
+    SECURITY_HTTP_USER_PHOTO_MIME_TYPES             ( "security.http.permittedUserPhotoMimeTypes" ),
+    SECURITY_HTTP_PERMITTED_URL_PATH_CHARS          ( "security.http.permittedUrlPathCharacters" ),
     SECURITY_HTTPSSERVER_SELF_FUTURESECONDS         ( "security.httpsServer.selfCert.futureSeconds" ),
     SECURITY_HTTPSSERVER_SELF_ALG                   ( "security.httpsServer.selfCert.alg" ),
     SECURITY_HTTPSSERVER_SELF_KEY_SIZE              ( "security.httpsServer.selfCert.keySize" ),
@@ -349,8 +301,6 @@ public enum AppProperty
     SECURITY_DEFAULT_EPHEMERAL_HASH_ALG             ( "security.defaultEphemeralHashAlg" ),
     SECURITY_DEFAULT_EPHEMERAL_HMAC_ALG             ( "security.defaultEphemeralHmacAlg" ),
     SEEDLIST_BUILTIN_PATH                           ( "seedlist.builtin.path" ),
-    SMTP_IO_CONNECT_TIMEOUT                         ( "smtp.io.connectTimeoutMs" ),
-    SMTP_IO_READ_TIMEOUT                            ( "smtp.io.readTimeoutMs" ),
     SMTP_SUBJECT_ENCODING_CHARSET                   ( "smtp.subjectEncodingCharset" ),
     SMTP_RETRYABLE_SEND_RESPONSE_STATUSES           ( "smtp.retryableSendResponseStatus" ),
     TOKEN_CLEANER_INTERVAL_SECONDS                  ( "token.cleaner.intervalSeconds" ),
@@ -375,6 +325,9 @@ public enum AppProperty
 
     /** Regular expression to be used for matching URLs to be shortened by the URL Shortening Service Class. */
     URL_SHORTNER_URL_REGEX                          ( "urlshortener.url.regex" ),
+    VERSION_CHECK_URL                               ( "versionCheck.url" ),
+    VERSION_CHECK_CHECK_INTERVAL_SECONDS            ( "versionCheck.checkIntervalSeconds" ),
+    VERSION_CHECK_CHECK_INTERVAL_ERROR_SECONDS      ( "versionCheck.checkIntervalErrorSeconds" ),
     WORDLIST_BUILTIN_PATH                           ( "wordlist.builtin.path" ),
     WORDLIST_CHAR_LENGTH_MAX                        ( "wordlist.maxCharLength" ),
     WORDLIST_CHAR_LENGTH_MIN                        ( "wordlist.minCharLength" ),
@@ -421,6 +374,11 @@ public enum AppProperty
         return defaultValue;
     }
 
+    public boolean isDefaultValue( final String value )
+    {
+        return Objects.equals( defaultValue, value );
+    }
+
     public String getDescription( )
     {
         return readAppPropertiesBundle( this.getKey() + DESCRIPTION_SUFFIX );
@@ -429,5 +387,10 @@ public enum AppProperty
     private static String readAppPropertiesBundle( final String key )
     {
         return ResourceBundle.getBundle( AppProperty.class.getName() ).getString( key );
+    }
+
+    public static Optional<AppProperty> forKey( final String key )
+    {
+        return EnumUtil.readEnumFromPredicate( AppProperty.class, appProperty -> Objects.equals( appProperty.getKey(), key ) );
     }
 }

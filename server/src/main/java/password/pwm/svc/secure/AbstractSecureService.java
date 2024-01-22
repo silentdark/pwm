@@ -22,6 +22,7 @@ package password.pwm.svc.secure;
 
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
+import password.pwm.PwmConstants;
 import password.pwm.bean.DomainID;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
@@ -31,10 +32,10 @@ import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
 import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.CopyingInputStream;
-import password.pwm.util.java.JavaHelper;
-import password.pwm.util.json.JsonFactory;
+import password.pwm.util.java.EnumUtil;
 import password.pwm.util.java.StatisticCounterBundle;
 import password.pwm.util.java.StringUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.HmacAlgorithm;
 import password.pwm.util.secure.PwmBlockAlgorithm;
@@ -43,10 +44,10 @@ import password.pwm.util.secure.PwmRandom;
 import password.pwm.util.secure.PwmSecurityKey;
 import password.pwm.util.secure.SecureEngine;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.Serializable;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -99,15 +100,18 @@ public abstract class AbstractSecureService extends AbstractPwmService implement
 
         {
             final String defaultBlockAlgString = pwmApplication.getConfig().readAppProperty( AppProperty.SECURITY_DEFAULT_EPHEMERAL_BLOCK_ALG );
-            defaultBlockAlgorithm = JavaHelper.readEnumFromString( PwmBlockAlgorithm.class, PwmBlockAlgorithm.AES, defaultBlockAlgString );
+            defaultBlockAlgorithm = EnumUtil.readEnumFromString( PwmBlockAlgorithm.class, defaultBlockAlgString )
+                    .orElse( PwmBlockAlgorithm.AES );
         }
         {
             final String defaultHashAlgString = pwmApplication.getConfig().readAppProperty( AppProperty.SECURITY_DEFAULT_EPHEMERAL_HASH_ALG );
-            defaultHashAlgorithm = JavaHelper.readEnumFromString( PwmHashAlgorithm.class, PwmHashAlgorithm.SHA512, defaultHashAlgString );
+            defaultHashAlgorithm = EnumUtil.readEnumFromString( PwmHashAlgorithm.class, defaultHashAlgString )
+                    .orElse( PwmHashAlgorithm.SHA512 );
         }
         {
             final String defaultHmacAlgString = pwmApplication.getConfig().readAppProperty( AppProperty.SECURITY_DEFAULT_EPHEMERAL_HMAC_ALG );
-            defaultHmacAlgorithm = JavaHelper.readEnumFromString( HmacAlgorithm.class, HmacAlgorithm.HMAC_SHA_512, defaultHmacAlgString );
+            defaultHmacAlgorithm = EnumUtil.readEnumFromString( HmacAlgorithm.class, defaultHmacAlgString )
+                    .orElse( HmacAlgorithm.HMAC_SHA_512 );
         }
         LOGGER.debug( getSessionLabel(), () -> "using default algorithms: " + StringUtil.mapToString( debugData() ) );
 
@@ -140,7 +144,7 @@ public abstract class AbstractSecureService extends AbstractPwmService implement
     {
         return ServiceInfoBean.builder()
                 .debugProperties( CollectionUtil.combineOrderedMaps( List.of(
-                        stats.debugStats(),
+                        stats.debugStats( PwmConstants.DEFAULT_LOCALE ),
                         CollectionUtil.enumMapToStringMap( debugData() ) ) ) )
                 .build();
     }
@@ -171,17 +175,21 @@ public abstract class AbstractSecureService extends AbstractPwmService implement
         return SecureEngine.encryptToString( value, securityKey, defaultBlockAlgorithm, SecureEngine.Flag.URL_SAFE );
     }
 
-    public String encryptObjectToString( final Serializable serializableObject ) throws PwmUnrecoverableException
+    @Override
+    public String encryptObjectToString( final Object object )
+            throws PwmUnrecoverableException
     {
-        final String jsonValue = JsonFactory.get().serialize( serializableObject );
+        final String jsonValue = JsonFactory.get().serialize( object );
         stats.increment( StatKey.encryptOperations );
         stats.increment( StatKey.encryptBytes, jsonValue.length() );
         return encryptToString( jsonValue );
     }
 
-    public String encryptObjectToString( final Serializable serializableObject, final PwmSecurityKey securityKey ) throws PwmUnrecoverableException
+    @Override
+    public String encryptObjectToString( final Object object, final PwmSecurityKey securityKey )
+            throws PwmUnrecoverableException
     {
-        final String jsonValue = JsonFactory.get().serialize( serializableObject );
+        final String jsonValue = JsonFactory.get().serialize( object );
         stats.increment( StatKey.encryptOperations );
         stats.increment( StatKey.encryptBytes, jsonValue.length() );
         return encryptToString( jsonValue, securityKey );
@@ -208,7 +216,8 @@ public abstract class AbstractSecureService extends AbstractPwmService implement
         return SecureEngine.decryptStringValue( value, securityKey, defaultBlockAlgorithm, SecureEngine.Flag.URL_SAFE );
     }
 
-    public <T extends Serializable> T decryptObject( final String value, final Class<T> returnClass ) throws PwmUnrecoverableException
+    @Override
+    public <T> T decryptObject( final String value, final Class<T> returnClass ) throws PwmUnrecoverableException
     {
         final String decryptedValue = decryptStringValue( value );
         stats.increment( StatKey.decryptOperations );
@@ -216,7 +225,8 @@ public abstract class AbstractSecureService extends AbstractPwmService implement
         return JsonFactory.get().deserialize( decryptedValue, returnClass );
     }
 
-    public <T extends Serializable> T decryptObject( final String value, final PwmSecurityKey securityKey, final Class<T> returnClass ) throws PwmUnrecoverableException
+    @Override
+    public <T> T decryptObject( final String value, final PwmSecurityKey securityKey, final Class<T> returnClass ) throws PwmUnrecoverableException
     {
         final String decryptedValue = decryptStringValue( value, securityKey );
         stats.increment( StatKey.decryptOperations );
@@ -299,12 +309,12 @@ public abstract class AbstractSecureService extends AbstractPwmService implement
 
     @Override
     public String hash(
-            final File file
+            final Path file
     )
             throws IOException, PwmUnrecoverableException
     {
         stats.increment( StatKey.hashOperations );
-        stats.increment( StatKey.hashBytes, file.length() );
+        stats.increment( StatKey.hashBytes, Files.size( file ) );
         return SecureEngine.hash( file, defaultHashAlgorithm );
     }
 

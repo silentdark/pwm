@@ -37,17 +37,17 @@ import password.pwm.http.HttpHeader;
 import password.pwm.http.HttpMethod;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmURL;
-import password.pwm.util.java.ImmutableByteArray;
+import password.pwm.data.ImmutableByteArray;
 import password.pwm.ldap.LdapOperationsHelper;
 import password.pwm.ldap.permission.UserPermissionUtility;
-import password.pwm.ldap.PhotoDataBean;
+import password.pwm.bean.PhotoDataBean;
 import password.pwm.svc.httpclient.PwmHttpClient;
 import password.pwm.svc.httpclient.PwmHttpClientConfiguration;
 import password.pwm.svc.httpclient.PwmHttpClientRequest;
 import password.pwm.svc.httpclient.PwmHttpClientResponse;
 import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.MiscUtil;
+import password.pwm.util.java.PwmUtil;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
@@ -152,13 +152,13 @@ public class PhotoDataReader
 
             case Ldap:
             case ServerHttp:
-                String returnUrl = pwmRequest.getURLwithoutQueryString();
+                String returnUrl = pwmRequest.getUrlWithoutQueryString();
                 returnUrl = PwmURL.appendAndEncodeUrlParameters( returnUrl, PwmConstants.PARAM_ACTION_REQUEST, PeopleSearchServlet.PeopleSearchActions.photo.name() );
-                returnUrl = PwmURL.appendAndEncodeUrlParameters( returnUrl, PwmConstants.PARAM_USERKEY,  userIdentity.toObfuscatedKey( pwmRequest.getPwmApplication() ) );
+                returnUrl = PwmURL.appendAndEncodeUrlParameters( returnUrl, PwmConstants.PARAM_USERKEY,  PeopleSearchServlet.obfuscateUserIdentity( pwmRequest, userIdentity ) );
                 return Optional.of( returnUrl );
 
             default:
-                MiscUtil.unhandledSwitchStatement( method );
+                PwmUtil.unhandledSwitchStatement( method );
 
         }
 
@@ -191,7 +191,7 @@ public class PhotoDataReader
                     break;
 
                 default:
-                    MiscUtil.unhandledSwitchStatement( method );
+                    PwmUtil.unhandledSwitchStatement( method );
             }
         }
         finally
@@ -227,7 +227,7 @@ public class PhotoDataReader
             throws PwmUnrecoverableException, PwmOperationalException
     {
         final Optional<String> overrideURL = getPhotoUrlOverride( userIdentity );
-        if ( !overrideURL.isPresent() )
+        if ( overrideURL.isEmpty() )
         {
             return Optional.empty();
         }
@@ -237,12 +237,12 @@ public class PhotoDataReader
             final PwmHttpClientConfiguration configuration = PwmHttpClientConfiguration.builder()
                     .trustManagerType( PwmHttpClientConfiguration.TrustManagerType.promiscuous )
                     .build();
-            final PwmHttpClient pwmHttpClient = pwmRequest.getPwmDomain().getHttpClientService().getPwmHttpClient( configuration );
+            final PwmHttpClient pwmHttpClient = pwmRequest.getClientConnectionHolder().getPwmHttpClient( configuration );
             final PwmHttpClientRequest clientRequest = PwmHttpClientRequest.builder()
                     .method( HttpMethod.GET )
                     .url( overrideURL.get() )
                     .build();
-            final PwmHttpClientResponse response = pwmHttpClient.makeRequest( clientRequest, pwmRequest.getLabel() );
+            final PwmHttpClientResponse response = pwmHttpClient.makeRequest( clientRequest );
             if ( response != null )
             {
                 final ImmutableByteArray bodyContents = response.getBinaryBody();

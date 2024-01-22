@@ -40,18 +40,22 @@ import password.pwm.http.bean.ShortcutsBean;
 import password.pwm.http.bean.UpdateProfileBean;
 import password.pwm.http.servlet.accountinfo.AccountInformationServlet;
 import password.pwm.http.servlet.activation.ActivateUserServlet;
-import password.pwm.http.servlet.admin.AdminServlet;
+import password.pwm.http.servlet.admin.domain.DomainAdminReportServlet;
+import password.pwm.http.servlet.admin.AdminMenuServlet;
+import password.pwm.http.servlet.admin.SystemAdminServlet;
+import password.pwm.http.servlet.admin.domain.DomainAdminStatisticsServlet;
+import password.pwm.http.servlet.admin.domain.DomainAdminUserDebugServlet;
 import password.pwm.http.servlet.changepw.PrivateChangePasswordServlet;
 import password.pwm.http.servlet.changepw.PublicChangePasswordServlet;
 import password.pwm.http.servlet.command.PrivateCommandServlet;
 import password.pwm.http.servlet.command.PublicCommandServlet;
 import password.pwm.http.servlet.configeditor.ConfigEditorServlet;
 import password.pwm.http.servlet.configguide.ConfigGuideServlet;
-import password.pwm.http.servlet.configmanager.ConfigManagerCertificatesServlet;
-import password.pwm.http.servlet.configmanager.ConfigManagerLocalDBServlet;
-import password.pwm.http.servlet.configmanager.ConfigManagerLoginServlet;
-import password.pwm.http.servlet.configmanager.ConfigManagerServlet;
-import password.pwm.http.servlet.configmanager.ConfigManagerWordlistServlet;
+import password.pwm.http.servlet.admin.system.SystemAdminCertificatesServlet;
+import password.pwm.http.servlet.admin.system.ConfigManagerLocalDBServlet;
+import password.pwm.http.servlet.admin.system.ConfigManagerLoginServlet;
+import password.pwm.http.servlet.admin.system.ConfigManagerServlet;
+import password.pwm.http.servlet.admin.system.ConfigManagerWordlistServlet;
 import password.pwm.http.servlet.newuser.NewUserServlet;
 import password.pwm.http.servlet.oauth.OAuthConsumerServlet;
 import password.pwm.http.servlet.peoplesearch.PrivatePeopleSearchServlet;
@@ -59,7 +63,7 @@ import password.pwm.http.servlet.peoplesearch.PublicPeopleSearchServlet;
 import password.pwm.http.servlet.setupresponses.SetupResponsesServlet;
 import password.pwm.http.servlet.updateprofile.UpdateProfileServlet;
 import password.pwm.util.java.CollectionUtil;
-import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.EnumUtil;
 
 import javax.servlet.annotation.WebServlet;
 import java.lang.annotation.Annotation;
@@ -90,14 +94,21 @@ public enum PwmServletDefinition
     SelfDelete( DeleteAccountServlet.class, DeleteAccountBean.class ),
 
     ClientApi( ClientApiServlet.class, null ),
-    Admin( AdminServlet.class, AdminBean.class ),
+
+    AdminMenu( AdminMenuServlet.class, null, Flag.RequiresUserPasswordAndBind ),
+    SystemAdmin( SystemAdminServlet.class, AdminBean.class, Flag.RequiresUserPasswordAndBind ),
+
+    DomainAdminReport( DomainAdminReportServlet.class, null, Flag.RequiresUserPasswordAndBind ),
+    DomainAdminStatistics( DomainAdminStatisticsServlet.class, null, Flag.RequiresUserPasswordAndBind ),
+    DomainAdminUserDebug( DomainAdminUserDebugServlet.class, null, Flag.RequiresUserPasswordAndBind ),
+
     ConfigGuide( ConfigGuideServlet.class, ConfigGuideBean.class ),
     ConfigEditor( ConfigEditorServlet.class, null, Flag.RequiresConfigAuth ),
     ConfigManager( ConfigManagerServlet.class, ConfigManagerBean.class, Flag.RequiresConfigAuth ),
     ConfigManager_Login( ConfigManagerLoginServlet.class, ConfigManagerBean.class ),
     ConfigManager_Wordlists( ConfigManagerWordlistServlet.class, ConfigManagerBean.class, Flag.RequiresConfigAuth ),
     ConfigManager_LocalDB( ConfigManagerLocalDBServlet.class, ConfigManagerBean.class, Flag.RequiresConfigAuth ),
-    ConfigManager_Certificates( ConfigManagerCertificatesServlet.class, ConfigManagerBean.class, Flag.RequiresConfigAuth ),
+    SystemAdmin_Certificates( SystemAdminCertificatesServlet.class, ConfigManagerBean.class, Flag.RequiresConfigAuth ),
     FullPageHealth( FullPageHealthServlet.class, null ),
 
     NewUser( NewUserServlet.class, NewUserBean.class ),
@@ -194,6 +205,6 @@ public enum PwmServletDefinition
 
     public static Set<PwmServletDefinition> withFlag( final Flag flag )
     {
-        return JavaHelper.readEnumsFromPredicate( PwmServletDefinition.class, e -> e.flags.contains( flag ) );
+        return EnumUtil.readEnumsFromPredicate( PwmServletDefinition.class, e -> e.flags.contains( flag ) );
     }
 }

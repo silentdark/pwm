@@ -31,6 +31,7 @@ import password.pwm.bean.TokenDestinationItem;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.profile.UpdateProfileProfile;
 import password.pwm.config.value.data.FormConfiguration;
+import password.pwm.data.ImmutableByteArray;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmDataValidationException;
 import password.pwm.error.PwmError;
@@ -43,7 +44,7 @@ import password.pwm.http.ProcessStatus;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmRequestAttribute;
 import password.pwm.http.PwmSession;
-import password.pwm.util.java.ImmutableByteArray;
+import password.pwm.http.ServletUtility;
 import password.pwm.http.bean.UpdateProfileBean;
 import password.pwm.http.servlet.ControlledPwmServlet;
 import password.pwm.i18n.Message;
@@ -55,11 +56,10 @@ import password.pwm.svc.token.TokenService;
 import password.pwm.svc.token.TokenType;
 import password.pwm.svc.token.TokenUtil;
 import password.pwm.util.form.FormUtility;
-import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.java.MiscUtil;
-import password.pwm.util.json.JsonFactory;
+import password.pwm.util.java.PwmUtil;
 import password.pwm.util.java.StringUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
 import password.pwm.ws.server.RestResultBean;
@@ -68,12 +68,9 @@ import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.Serializable;
-import java.net.URLConnection;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -94,11 +91,16 @@ import java.util.Optional;
 )
 public class UpdateProfileServlet extends ControlledPwmServlet
 {
-
     private static final PwmLogger LOGGER = PwmLogger.forClass( UpdateProfileServlet.class );
 
+    @Override
+    protected PwmLogger getLogger()
+    {
+        return LOGGER;
+    }
+
     @Data
-    public static class ValidateResponse implements Serializable
+    public static class ValidateResponse
     {
         private String message;
         private boolean success;
@@ -138,9 +140,9 @@ public class UpdateProfileServlet extends ControlledPwmServlet
 
 
     @Override
-    public Class<? extends ProcessAction> getProcessActionsClass( )
+    public Optional<Class<? extends ProcessAction>> getProcessActionsClass( )
     {
-        return UpdateProfileAction.class;
+        return Optional.of( UpdateProfileAction.class );
     }
 
     private static UpdateProfileProfile getProfile( final PwmRequest pwmRequest ) throws PwmUnrecoverableException
@@ -276,7 +278,7 @@ public class UpdateProfileServlet extends ControlledPwmServlet
                 return ProcessStatus.Halt;
 
             default:
-                MiscUtil.unhandledSwitchStatement( resetType );
+                PwmUtil.unhandledSwitchStatement( resetType );
 
         }
 
@@ -359,7 +361,7 @@ public class UpdateProfileServlet extends ControlledPwmServlet
             {
                 if ( !updateProfileBean.isAgreementPassed() )
                 {
-                    final MacroRequest macroRequest = pwmRequest.getPwmSession().getSessionManager().getMacroMachine( );
+                    final MacroRequest macroRequest = pwmRequest.getMacroMachine( );
                     final String expandedText = macroRequest.expandMacros( updateProfileAgreementText );
                     pwmRequest.setAttribute( PwmRequestAttribute.AgreementText, expandedText );
                     pwmRequest.forwardToJsp( JspUrl.UPDATE_ATTRIBUTES_AGREEMENT );
@@ -424,13 +426,13 @@ public class UpdateProfileServlet extends ControlledPwmServlet
         try
         {
             // write the form values
-            final ChaiUser theUser = pwmSession.getSessionManager().getActor( );
+            final ChaiUser theUser = pwmRequest.getClientConnectionHolder().getActor( );
             UpdateProfileUtil.doProfileUpdate(
                     pwmRequest.getPwmDomain(),
                     pwmRequest.getLabel(),
                     pwmRequest.getLocale(),
                     pwmSession.getUserInfo(),
-                    pwmSession.getSessionManager().getMacroMachine( ),
+                    pwmRequest.getMacroMachine( ),
                     updateProfileProfile,
                     updateProfileBean.getFormData(),
                     theUser
@@ -517,27 +519,27 @@ public class UpdateProfileServlet extends ControlledPwmServlet
             final Optional<InputStream> uploadedFile = pwmRequest.readFileUploadStream( PwmConstants.PARAM_FILE_UPLOAD );
             if ( uploadedFile.isPresent() )
             {
-                try ( InputStream inputStream = uploadedFile.get() )
-                {
-                    final ImmutableByteArray bytes = JavaHelper.copyToBytes( inputStream, maxSize );
-                    final String b64String = StringUtil.base64Encode( bytes.copyOf() );
 
-                    if ( !CollectionUtil.isEmpty( formConfiguration.getMimeTypes() ) )
-                    {
-                        final String mimeType = URLConnection.guessContentTypeFromStream( bytes.newByteArrayInputStream() );
-                        if ( !formConfiguration.getMimeTypes().contains( mimeType ) )
-                        {
-                            final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_FILE_TYPE_INCORRECT, "incorrect file type of " + mimeType, new String[]
-                                    {
-                                            mimeType,
-                                    }
-                            );
-                            pwmRequest.outputJsonResult( RestResultBean.fromError( errorInformation, pwmRequest ) );
-                            return ProcessStatus.Halt;
-                        }
-                    }
-                    updateProfileBean.getFormData().put( fieldName, b64String );
+                final ImmutableByteArray bytes = JavaHelper.copyToBytes( uploadedFile.get(), maxSize + 1 );
+
+                if ( bytes.size() > maxSize )
+                {
+                    final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_FILE_TOO_LARGE,
+                            "file size exceeds maximum file size (" + maxSize + ")" );
+                    pwmRequest.outputJsonResult( RestResultBean.fromError( errorInformation, pwmRequest ) );
+                    return ProcessStatus.Halt;
                 }
+
+                if ( ServletUtility.mimeTypeForUserPhoto( pwmRequest.getAppConfig(), bytes ).isEmpty() )
+                {
+                    final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_FILE_TYPE_INCORRECT,
+                            "unsupported mime type" );
+                    pwmRequest.outputJsonResult( RestResultBean.fromError( errorInformation, pwmRequest ) );
+                    return ProcessStatus.Halt;
+                }
+
+                final String b64String = StringUtil.base64Encode( bytes.copyOf() );
+                updateProfileBean.getFormData().put( fieldName, b64String );
             }
         }
 
@@ -559,7 +561,8 @@ public class UpdateProfileServlet extends ControlledPwmServlet
     }
 
     @ActionHandler( action = "readPhoto" )
-    public ProcessStatus readPhotoHandler( final PwmRequest pwmRequest ) throws ServletException, PwmUnrecoverableException, IOException
+    public ProcessStatus readPhotoHandler( final PwmRequest pwmRequest )
+            throws PwmUnrecoverableException, IOException
     {
         final String fieldName = pwmRequest.readParameterAsString( "field" );
         final UpdateProfileBean updateProfileBean = getBean( pwmRequest );
@@ -569,10 +572,11 @@ public class UpdateProfileServlet extends ControlledPwmServlet
         {
             final byte[] bytes = StringUtil.base64Decode( b64value );
 
+            final String mimeType = ServletUtility.mimeTypeForUserPhoto( pwmRequest.getAppConfig(), ImmutableByteArray.of( bytes ) );
+
             try ( OutputStream outputStream = pwmRequest.getPwmResponse().getOutputStream() )
             {
                 final HttpServletResponse resp = pwmRequest.getPwmResponse().getHttpServletResponse();
-                final String mimeType = URLConnection.guessContentTypeFromStream( new ByteArrayInputStream( bytes ) );
                 resp.setContentType( mimeType );
                 outputStream.write( bytes );
                 outputStream.flush();

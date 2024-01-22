@@ -21,47 +21,46 @@
 package password.pwm.svc.db;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import org.xeustechnologies.jcl.JarClassLoader;
-import org.xeustechnologies.jcl.JclObjectFactory;
 import password.pwm.PwmApplication;
-import password.pwm.PwmConstants;
+import password.pwm.data.ImmutableByteArray;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.java.ImmutableByteArray;
-import password.pwm.util.java.JavaHelper;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
+import java.nio.file.Path;
+import java.sql.Connection;
 import java.sql.Driver;
+import java.sql.DriverManager;
+import java.sql.DriverPropertyInfo;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Logger;
 
 public class JDBCDriverLoader
 {
 
     private static final PwmLogger LOGGER = PwmLogger.forClass( JDBCDriverLoader.class, true );
 
-    static DriverWrapper loadDriver(
+    static Driver loadDriver(
             final PwmApplication pwmApplication,
             final DBConfiguration dbConfiguration
     )
             throws DatabaseException
     {
-        final Set<ClassLoaderStrategy> strategies = dbConfiguration.getClassLoaderStrategies();
+        final Set<ClassLoaderStrategy> strategies = Set.of( ClassLoaderStrategy.AppPathFileLoader, ClassLoaderStrategy.Classpath );
         LOGGER.trace( () -> "attempting to load jdbc driver using strategies: " + JsonFactory.get().serializeCollection( strategies ) );
         final List<String> errorMsgs = new ArrayList<>();
         for ( final ClassLoaderStrategy strategy : strategies )
@@ -72,7 +71,7 @@ public class JDBCDriverLoader
                 final Driver driver = loader.loadDriver( pwmApplication, dbConfiguration );
                 if ( driver != null )
                 {
-                    return new DriverWrapper( driver, loader );
+                    return driver;
                 }
             }
             catch ( final PwmUnrecoverableException | DatabaseException e )
@@ -88,9 +87,7 @@ public class JDBCDriverLoader
 
     public enum ClassLoaderStrategy
     {
-        XeusLoader( XeusJarClassDriverLoader.class ),
         AppPathFileLoader( AppPathDriverLoader.class ),
-        TempFile( TempFileDriverLoader.class ),
         Classpath( JavaClasspathLoader.class ),;
 
         private final Class<? extends DriverLoader> jdbcDriverDriverLoaderClass;
@@ -119,25 +116,23 @@ public class JDBCDriverLoader
     interface DriverLoader
     {
         Driver loadDriver( PwmApplication pwmApplication, DBConfiguration dbConfiguration ) throws DatabaseException;
-
-        void unloadDriver( );
     }
 
     private static class JavaClasspathLoader implements DriverLoader
     {
 
-        private static final PwmLogger LOGGER = PwmLogger.forClass( XeusJarClassDriverLoader.class, true );
+        private static final PwmLogger LOGGER = PwmLogger.forClass( JavaClasspathLoader.class, true );
 
         @Override
         public Driver loadDriver( final PwmApplication pwmApplication, final DBConfiguration dbConfiguration )
                 throws DatabaseException
         {
-            final String jdbcClassName = dbConfiguration.getDriverClassname();
+            final String jdbcClassName = dbConfiguration.driverClassname();
 
             try
             {
                 LOGGER.debug( () -> "loading JDBC database driver from classpath: " + jdbcClassName );
-                final Driver driver = ( Driver ) Class.forName( jdbcClassName ).getDeclaredConstructor().newInstance();
+                final Driver driver = DriverManager.getDriver( dbConfiguration.connectionString() );
 
                 LOGGER.debug( () -> "successfully loaded JDBC database driver from classpath: " + jdbcClassName );
                 return driver;
@@ -149,154 +144,16 @@ public class JDBCDriverLoader
                 throw new DatabaseException( errorInformation );
             }
         }
-
-        @Override
-        public void unloadDriver( )
-        {
-        }
     }
 
-
-    private static class XeusJarClassDriverLoader implements DriverLoader
-    {
-
-        private static final PwmLogger LOGGER = PwmLogger.forClass( XeusJarClassDriverLoader.class, true );
-
-
-        @Override
-        public Driver loadDriver( final PwmApplication pwmApplication, final DBConfiguration dbConfiguration )
-                throws DatabaseException
-        {
-            final String jdbcClassName = dbConfiguration.getDriverClassname();
-            final ImmutableByteArray jdbcDriverBytes = dbConfiguration.getJdbcDriver();
-            try
-            {
-                LOGGER.debug( () -> "loading JDBC database driver stored in configuration" );
-
-                final JarClassLoader jarClassLoader = AccessController.doPrivileged(
-                        ( PrivilegedAction<JarClassLoader> ) JarClassLoader::new
-                );
-
-                jarClassLoader.add( jdbcDriverBytes.newByteArrayInputStream() );
-                final JclObjectFactory jclObjectFactory = JclObjectFactory.getInstance( true );
-
-                //Create object of loaded class
-                final Driver driver = ( Driver ) jclObjectFactory.create( jarClassLoader, jdbcClassName );
-
-                LOGGER.debug( () -> "successfully loaded JDBC database driver '" + jdbcClassName + "' from application configuration" );
-
-                return driver;
-            }
-            catch ( final Throwable e )
-            {
-                final String errorMsg = "error registering JDBC database driver stored in configuration: " + e.getMessage();
-                final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_DB_UNAVAILABLE, errorMsg );
-                throw new DatabaseException( errorInformation );
-            }
-        }
-
-        @Override
-        public void unloadDriver( )
-        {
-
-        }
-    }
-
-    private static class TempFileDriverLoader implements DriverLoader
-    {
-
-        private static final PwmLogger LOGGER = PwmLogger.forClass( TempFileDriverLoader.class, true );
-
-        private File tempFile;
-
-        @Override
-
-        // not clear if this is worth it to fix
-        @SuppressFBWarnings( "DP_CREATE_CLASSLOADER_INSIDE_DO_PRIVILEGED" )
-        public Driver loadDriver( final PwmApplication pwmApplication, final DBConfiguration dbConfiguration )
-                throws DatabaseException
-        {
-            final String jdbcClassName = dbConfiguration.getDriverClassname();
-            final ImmutableByteArray jdbcDriverBytes = dbConfiguration.getJdbcDriver();
-
-            if ( jdbcDriverBytes == null || jdbcDriverBytes.size() < 1 )
-            {
-                final String errorMsg = "jdbc driver file not configured, skipping";
-                final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_DB_UNAVAILABLE, errorMsg );
-                throw new DatabaseException( errorInformation );
-            }
-            try
-            {
-                LOGGER.debug( () -> "loading JDBC database driver stored in configuration" );
-
-                if ( tempFile == null )
-                {
-                    final String prefixName = PwmConstants.PWM_APP_NAME.toLowerCase() + "_jdbcJar_";
-                    tempFile = File.createTempFile( prefixName, "jar" );
-                    LOGGER.trace( () -> "created temp file " + tempFile.getAbsolutePath() );
-                }
-
-                try ( OutputStream fos = Files.newOutputStream( tempFile.toPath() ) )
-                {
-                    JavaHelper.copy( jdbcDriverBytes.newByteArrayInputStream(), fos );
-                    fos.close();
-                }
-
-                final URLClassLoader urlClassLoader = new URLClassLoader(
-                        new URL[]
-                                {
-                                        tempFile.toURI().toURL(),
-                                },
-                        this.getClass().getClassLoader()
-                );
-
-                //Create object of loaded class
-                final Class jdbcDriverClass = urlClassLoader.loadClass( jdbcClassName );
-                final Driver driver = ( Driver ) jdbcDriverClass.getDeclaredConstructor().newInstance();
-
-                LOGGER.debug( () -> "successfully loaded JDBC database driver '" + jdbcClassName + "' from application configuration" );
-
-                return driver;
-            }
-            catch ( final Throwable e )
-            {
-                final String errorMsg = "error registering JDBC database driver stored in configuration: " + e.getMessage();
-                final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_DB_UNAVAILABLE, errorMsg );
-                throw new DatabaseException( errorInformation );
-            }
-        }
-
-        @Override
-        public void unloadDriver( )
-        {
-            if ( tempFile != null )
-            {
-                if ( tempFile.delete() )
-                {
-                    LOGGER.trace( () -> "removed temporary file " + tempFile.getAbsolutePath() );
-                }
-            }
-            tempFile = null;
-        }
-    }
 
     private static class AppPathDriverLoader implements DriverLoader
     {
-
         private static final PwmLogger LOGGER = PwmLogger.forClass( AppPathDriverLoader.class, true );
 
-        // static ccache of classloader to prevent classloader memory leak
-        private static Map<String, ClassLoader> driverCache = new ConcurrentHashMap<>();
-
-
-        @Override
-
-        // not clear if this is worth it to fix
-        @SuppressFBWarnings( "DP_CREATE_CLASSLOADER_INSIDE_DO_PRIVILEGED" )
         public Driver loadDriver( final PwmApplication pwmApplication, final DBConfiguration dbConfiguration )
                 throws DatabaseException
         {
-            final String jdbcClassName = dbConfiguration.getDriverClassname();
             final ImmutableByteArray jdbcDriverBytes = dbConfiguration.getJdbcDriver();
 
             if ( jdbcDriverBytes == null || jdbcDriverBytes.size() < 1 )
@@ -306,52 +163,23 @@ public class JDBCDriverLoader
                 throw new DatabaseException( errorInformation );
             }
 
-            final String jdbcDriverHash;
             try
             {
-                jdbcDriverHash = pwmApplication.getSecureService().hash( jdbcDriverBytes.newByteArrayInputStream() );
-            }
-            catch ( final PwmUnrecoverableException e )
-            {
-                throw new DatabaseException( e.getErrorInformation() );
-            }
-
-            final ClassLoader urlClassLoader;
-            if ( driverCache.containsKey( jdbcDriverHash ) )
-            {
-                urlClassLoader = driverCache.get( jdbcDriverHash );
-                LOGGER.trace( () -> "loaded classloader from static cache" );
-            }
-            else
-            {
-                try
+                if ( !createAndRegisterDriverJar( pwmApplication, dbConfiguration ) )
                 {
-                    LOGGER.debug( () -> "loading JDBC database driver stored in configuration" );
-                    final File tempFile = createOrGetTempJarFile( pwmApplication, jdbcDriverBytes );
-                    urlClassLoader = new URLClassLoader(
-                            new URL[]
-                                    {
-                                            tempFile.toURI().toURL(),
-                                    },
-                            this.getClass().getClassLoader()
-                    );
-                    driverCache.put( jdbcDriverHash, urlClassLoader );
+                    return null;
                 }
-                catch ( final Throwable e )
-                {
-                    final String errorMsg = "error establishing classloader for driver: " + e.getMessage();
-                    final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_DB_UNAVAILABLE, errorMsg );
-                    throw new DatabaseException( errorInformation );
-                }
+            }
+            catch ( final Throwable e )
+            {
+                final String errorMsg = "error establishing classloader for driver: " + e.getMessage();
+                final ErrorInformation errorInformation = new ErrorInformation( PwmError.ERROR_DB_UNAVAILABLE, errorMsg );
+                throw new DatabaseException( errorInformation );
             }
 
             try
             {
-                //Create object of loaded class
-                final Class jdbcDriverClass = urlClassLoader.loadClass( jdbcClassName );
-                final Driver driver = ( Driver ) jdbcDriverClass.getDeclaredConstructor().newInstance();
-                LOGGER.debug( () -> "successfully loaded JDBC database driver '" + jdbcClassName + "' from application configuration" );
-                return driver;
+                return DriverManager.getDriver( dbConfiguration.connectionString() );
             }
             catch ( final Throwable e )
             {
@@ -361,65 +189,105 @@ public class JDBCDriverLoader
             }
         }
 
-        @Override
-        public void unloadDriver( )
+        @SuppressFBWarnings( "DP_CREATE_CLASSLOADER_INSIDE_DO_PRIVILEGED" )
+        boolean createAndRegisterDriverJar(
+                final PwmApplication pwmApplication,
+                final DBConfiguration dbConfiguration
+        )
+                throws PwmUnrecoverableException, IOException, ClassNotFoundException, NoSuchMethodException,
+                InvocationTargetException, InstantiationException, IllegalAccessException, SQLException
         {
-        }
+            final Optional<Path> pwmTempDir = pwmApplication.getTempDirectory();
+            if ( pwmTempDir.isEmpty() )
+            {
+                return false;
+            }
 
-        File createOrGetTempJarFile( final PwmApplication pwmApplication, final ImmutableByteArray jarBytes ) throws PwmUnrecoverableException, IOException
-        {
-            final File file = pwmApplication.getTempDirectory();
-            final String jarHash = pwmApplication.getSecureService().hash( jarBytes.newByteArrayInputStream() );
+            final byte[] jarBytes = dbConfiguration.getJdbcDriver().copyOf();
+            final String jarHash = pwmApplication.getSecureService().hash( jarBytes );
             final String tempFileName = "jar-" + jarHash + ".jar";
-            final File tempFile = new File( file.getAbsolutePath() + File.separator + tempFileName );
-            if ( tempFile.exists() )
+            final Path tempFile = pwmTempDir.get().resolve( tempFileName );
+
+            if ( Files.exists( tempFile ) )
             {
-                final String fileHash = pwmApplication.getSecureService().hash( tempFile );
-                if ( !jarHash.equals( fileHash ) )
-                {
-                    LOGGER.debug( () -> "existing temp jar file " + tempFile.getAbsolutePath() + " has wrong contents, will delete" );
-                    if ( !tempFile.delete() )
-                    {
-                        throw new IOException( "unable to delete temp file " + jarHash );
-                    }
-                }
-            }
-            if ( !tempFile.exists() )
-            {
-                LOGGER.debug( () -> "creating temp jar file " + tempFile.getAbsolutePath() );
-                try ( OutputStream fos = Files.newOutputStream( tempFile.toPath() ) )
-                {
-                    JavaHelper.copy( jarBytes.newByteArrayInputStream(), fos );
-                }
-            }
-            else
-            {
-                LOGGER.trace( () -> "reusing existing temp jar file " + tempFile.getAbsolutePath() );
+                LOGGER.trace( () -> "reusing existing temp jar file and registration: " + tempFile );
+                return true;
             }
 
-            return tempFile;
+            LOGGER.debug( () -> "creating temp jar file " + tempFile );
+            Files.write( tempFile, jarBytes );
+
+            // load into classloader
+            final URLClassLoader urlClassLoader = new URLClassLoader(
+                    new URL[]
+                            {
+                                    tempFile.toUri().toURL(),
+                            },
+                    this.getClass().getClassLoader() );
+
+            //Create object of loaded class
+            final Class<?> jdbcDriverClass = urlClassLoader.loadClass( dbConfiguration.driverClassname() );
+            final Driver driver = new DriverShim( ( Driver ) jdbcDriverClass.getDeclaredConstructor().newInstance() );
+            LOGGER.debug( () -> "successfully loaded JDBC database driver '" + dbConfiguration.driverClassname() + "' from application configuration" );
+            DriverManager.registerDriver( driver );
+            return true;
+
         }
     }
 
-    static class DriverWrapper
+    private static class DriverShim implements Driver
     {
         private final Driver driver;
-        private final DriverLoader driverLoader;
 
-        DriverWrapper( final Driver driver, final DriverLoader driverLoader )
+        DriverShim( final Driver driver )
         {
             this.driver = driver;
-            this.driverLoader = driverLoader;
         }
 
-        public Driver getDriver( )
+        @Override
+        public Connection connect( final String url, final Properties info )
+                throws SQLException
         {
-            return driver;
+            return driver.connect( url, info );
         }
 
-        public DriverLoader getDriverLoader( )
+        @Override
+        public boolean acceptsURL( final String url )
+                throws SQLException
         {
-            return driverLoader;
+            return driver.acceptsURL( url );
+        }
+
+        @Override
+        public DriverPropertyInfo[] getPropertyInfo( final String url, final Properties info )
+                throws SQLException
+        {
+            return driver.getPropertyInfo( url, info );
+        }
+
+        @Override
+        public int getMajorVersion()
+        {
+            return driver.getMajorVersion();
+        }
+
+        @Override
+        public int getMinorVersion()
+        {
+            return driver.getMinorVersion();
+        }
+
+        @Override
+        public boolean jdbcCompliant()
+        {
+            return driver.jdbcCompliant();
+        }
+
+        @Override
+        public Logger getParentLogger()
+                throws SQLFeatureNotSupportedException
+        {
+            return driver.getParentLogger();
         }
     }
 }

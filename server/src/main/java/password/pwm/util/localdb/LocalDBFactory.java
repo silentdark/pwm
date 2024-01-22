@@ -30,7 +30,8 @@ import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
-import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
@@ -49,7 +50,7 @@ public class LocalDBFactory
     private static final Lock CREATION_LOCK = new ReentrantLock();
 
     public static LocalDB getInstance(
-            final File dbDirectory,
+            final Path dbDirectory,
             final boolean readonly,
             final PwmEnvironment pwmEnvironment,
             final AppConfig appConfig
@@ -92,8 +93,14 @@ public class LocalDBFactory
 
             if ( !readonly )
             {
-                LOGGER.trace( () -> "clearing TEMP db" );
-                localDB.truncate( LocalDB.DB.TEMP );
+                for ( final LocalDB.DB db : LocalDB.DB.values() )
+                {
+                    if ( db.isPurge() && localDB.size( db ) > 0 )
+                    {
+                        LOGGER.trace( () -> "clearing " + db + " db" );
+                        localDB.truncate( db );
+                    }
+                }
 
                 final LocalDBUtility localDBUtility = new LocalDBUtility( localDB );
                 if ( localDBUtility.readImportInprogressFlag() )
@@ -103,6 +110,20 @@ public class LocalDBFactory
                 }
             }
 
+            logInstanceCreation( dbDirectory, readonly, startTime, localDB );
+
+            return localDB;
+        }
+        finally
+        {
+            CREATION_LOCK.unlock();
+        }
+    }
+
+    private static void logInstanceCreation( final Path dbDirectory, final boolean readonly, final Instant startTime, final LocalDB localDB )
+    {
+        LOGGER.info( () ->
+        {
             final StringBuilder debugText = new StringBuilder();
             debugText.append( "LocalDB open" );
 
@@ -121,14 +142,8 @@ public class LocalDBFactory
                     debugText.append( ", " ).append( StringUtil.formatDiskSize( freeSpace ) ).append( " free" );
                 }
             }
-            LOGGER.info( () -> debugText, () -> TimeDuration.fromCurrent( startTime ) );
-
-            return localDB;
-        }
-        finally
-        {
-            CREATION_LOCK.unlock();
-        }
+            return debugText.toString();
+        }, TimeDuration.fromCurrent( startTime ) );
     }
 
     private static LocalDBProvider createInstance( final String className )
@@ -157,7 +172,7 @@ public class LocalDBFactory
 
     private static void initInstance(
             final LocalDBProvider pwmDBProvider,
-            final File dbFileLocation,
+            final Path dbFileLocation,
             final Map<String, String> initParameters,
             final String theClass,
             final Map<LocalDBProvider.Parameter, String> parameters
@@ -166,11 +181,8 @@ public class LocalDBFactory
     {
         try
         {
-            if ( dbFileLocation.mkdir() )
-            {
-                LOGGER.trace( () -> "created directory at " + dbFileLocation.getAbsolutePath() );
-            }
-
+            Files.createDirectories( dbFileLocation );
+            LOGGER.trace( () -> "created directory at " + dbFileLocation );
 
             pwmDBProvider.init( dbFileLocation, initParameters, parameters );
         }

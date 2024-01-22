@@ -35,12 +35,12 @@ import javax.servlet.ServletContextEvent;
 import javax.servlet.ServletContextListener;
 import javax.servlet.ServletRequestEvent;
 import javax.servlet.ServletRequestListener;
-import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSession;
 import javax.servlet.http.HttpSessionActivationListener;
 import javax.servlet.http.HttpSessionEvent;
 import javax.servlet.http.HttpSessionListener;
 import java.time.Instant;
+import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.logging.Level;
@@ -69,7 +69,7 @@ public class HttpEventManager implements
         final HttpSession httpSession = httpSessionEvent.getSession();
         try
         {
-            final ContextManager contextManager = ContextManager.getContextManager( httpSession );
+            final ContextManager contextManager = ContextManager.getContextManager( httpSession.getServletContext() );
             final PwmApplication pwmApplication = contextManager.getPwmApplication();
             httpSession.setAttribute( PwmConstants.SESSION_ATTR_PWM_APP_NONCE, pwmApplication.getRuntimeNonce() );
 
@@ -96,14 +96,14 @@ public class HttpEventManager implements
                 if ( httpSession.getAttribute( PwmConstants.SESSION_ATTR_PWM_SESSION ) != null )
                 {
                     final String debugMsg = "destroyed session" + ": " + makeSessionDestroyedDebugMsg( pwmSession );
-                    pwmSession.unauthenticateUser( null );
+                    pwmSession.unAuthenticateUser( null );
 
                     final PwmApplication pwmApplication = ContextManager.getPwmApplication( httpSession.getServletContext() );
                     if ( pwmApplication != null )
                     {
                         pwmApplication.getSessionTrackService().removeSessionData( pwmSession );
                     }
-                    LOGGER.trace( pwmSession.getLabel(), () -> debugMsg );
+                    LOGGER.trace( () -> debugMsg );
                 }
                 else
                 {
@@ -115,6 +115,8 @@ public class HttpEventManager implements
                 LOGGER.warn( () -> "error during httpSessionDestroyed: " + e.getMessage() );
             }
         }
+
+        clearSessionAttributes( httpSession );
     }
 
 
@@ -165,11 +167,13 @@ public class HttpEventManager implements
     @Override
     public void sessionWillPassivate( final HttpSessionEvent event )
     {
+        clearSessionAttributes( event.getSession() );
     }
 
     @Override
     public void sessionDidActivate( final HttpSessionEvent event )
     {
+        clearSessionAttributes( event.getSession() );
     }
 
     private static String makeSessionDestroyedDebugMsg( final PwmSession pwmSession )
@@ -192,16 +196,6 @@ public class HttpEventManager implements
     @Override
     public void requestDestroyed( final ServletRequestEvent sre )
     {
-        try
-        {
-            final PwmRequest pwmRequest = PwmRequest.forRequest( ( HttpServletRequest ) sre.getServletRequest(), null );
-            pwmRequest.cleanThreadLocals();
-        }
-        catch ( final Exception e )
-        {
-            LOGGER.debug( () -> "error cleaning request thread locals: " + e.getMessage() );
-        }
-
         ServletRequestListener.super.requestDestroyed( sre );
     }
 
@@ -209,6 +203,20 @@ public class HttpEventManager implements
     public void requestInitialized( final ServletRequestEvent sre )
     {
         ServletRequestListener.super.requestInitialized( sre );
+    }
+
+    private static void clearSessionAttributes( final HttpSession httpSession )
+    {
+        if ( httpSession == null )
+        {
+            return;
+        }
+
+        for ( final Enumeration<String> stringEnumeration = httpSession.getAttributeNames(); stringEnumeration.hasMoreElements(); )
+        {
+            final String attributeName = stringEnumeration.nextElement();
+            httpSession.removeAttribute( attributeName );
+        }
     }
 }
 

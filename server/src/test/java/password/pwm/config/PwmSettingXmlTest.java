@@ -21,15 +21,21 @@
 package password.pwm.config;
 
 import org.jrivard.xmlchai.AccessMode;
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlDocument;
 import org.jrivard.xmlchai.XmlElement;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import password.pwm.util.java.JavaHelper;
+import org.jrivard.xmlchai.XmlFactory;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.xml.sax.SAXParseException;
+import password.pwm.util.java.EnumUtil;
 
+import javax.xml.XMLConstants;
+import javax.xml.transform.stream.StreamSource;
+import javax.xml.validation.Schema;
+import javax.xml.validation.SchemaFactory;
+import javax.xml.validation.Validator;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Optional;
@@ -38,16 +44,16 @@ public class PwmSettingXmlTest
 {
     private static XmlDocument xmlDocument;
 
-    @BeforeClass
+    @BeforeAll
     public static void setUp() throws Exception
     {
         try ( InputStream inputStream = PwmSetting.class.getClassLoader().getResourceAsStream( PwmSettingXml.SETTING_XML_FILENAME ) )
         {
-            xmlDocument = XmlChai.getFactory().parse( inputStream, AccessMode.IMMUTABLE );
+            xmlDocument = XmlFactory.getFactory().parse( inputStream, AccessMode.IMMUTABLE );
         }
     }
 
-    @AfterClass
+    @AfterAll
     public static void tearDown()
     {
         xmlDocument = null;
@@ -59,7 +65,7 @@ public class PwmSettingXmlTest
         for ( final PwmSetting pwmSetting : PwmSetting.values() )
         {
             final XmlElement element = PwmSettingXml.readSettingXml( pwmSetting );
-            Assert.assertNotNull( "no XML settings node in PwmSetting.xml for setting " + pwmSetting.getKey(), element );
+            Assertions.assertNotNull( element, "no XML settings node in PwmSetting.xml for setting " + pwmSetting.getKey() );
         }
     }
 
@@ -67,7 +73,7 @@ public class PwmSettingXmlTest
     public void testXmlElementIsInSettings()
     {
         final List<XmlElement> settingElements = xmlDocument.evaluateXpathToElements( "/settings/setting" );
-        Assert.assertFalse( settingElements.isEmpty() );
+        Assertions.assertFalse( settingElements.isEmpty() );
         for ( final XmlElement element : settingElements )
         {
             final String key = element.getAttribute( "key" )
@@ -75,7 +81,7 @@ public class PwmSettingXmlTest
 
             final String errorMsg = "PwmSetting.xml contains setting key of '"
                     + key + "' which does not exist in PwmSetting.java";
-            Assert.assertNotNull( errorMsg, PwmSetting.forKey( key ) );
+            Assertions.assertNotNull( PwmSetting.forKey( key ), errorMsg );
         }
     }
 
@@ -85,7 +91,7 @@ public class PwmSettingXmlTest
         for ( final PwmSettingCategory pwmSettingCategory : PwmSettingCategory.values() )
         {
             final XmlElement element = PwmSettingXml.readCategoryXml( pwmSettingCategory );
-            Assert.assertNotNull( "no XML category node in PwmSetting.xml for setting " + pwmSettingCategory.getKey(), element );
+            Assertions.assertNotNull( element, "no XML category node in PwmSetting.xml for setting " + pwmSettingCategory.getKey() );
         }
     }
 
@@ -93,17 +99,16 @@ public class PwmSettingXmlTest
     public void testXmlElementIsInCategory()
     {
         final List<XmlElement> categoryElements = xmlDocument.evaluateXpathToElements( "/settings/category" );
-        Assert.assertFalse( categoryElements.isEmpty() );
+        Assertions.assertFalse( categoryElements.isEmpty() );
         for ( final XmlElement element : categoryElements )
         {
             final String key = element.getAttribute( "key" )
                     .orElseThrow( () -> new IllegalStateException( "category element " + element.getName() + " missing key attribute" ) );
 
-            final PwmSettingCategory category = JavaHelper.readEnumFromString( PwmSettingCategory.class, null, key );
+            final Optional<PwmSettingCategory> category = EnumUtil.readEnumFromString( PwmSettingCategory.class, key );
 
-            final String errorMsg = "PwmSetting.xml contains category key of '"
-                    + key + "' which does not exist in PwmSettingCategory.java";
-            Assert.assertNotNull( errorMsg, category );
+            Assertions.assertTrue( category.isPresent(), () -> "PwmSetting.xml contains category key of '"
+                    + key + "' which does not exist in PwmSettingCategory.java" );
         }
     }
 
@@ -111,7 +116,7 @@ public class PwmSettingXmlTest
     public void testXmlCategoryProfileElementIsValidSetting()
     {
         final List<XmlElement> profileElements = xmlDocument.evaluateXpathToElements( "/settings/category/profile" );
-        Assert.assertFalse( profileElements.isEmpty() );
+        Assertions.assertFalse( profileElements.isEmpty() );
         for ( final XmlElement element : profileElements )
         {
             final String settingKey = element.getAttribute( "setting" )
@@ -121,7 +126,26 @@ public class PwmSettingXmlTest
 
             final String errorMsg = "PwmSetting.xml contains category/profile@setting key of '"
                     + settingKey + "' which does not exist in PwmSetting.java";
-            Assert.assertTrue( errorMsg, setting.isPresent() );
+            Assertions.assertTrue( setting.isPresent(), errorMsg );
+        }
+    }
+
+    @Test
+    public void testPwmSettingXmlFileSchema()
+            throws Exception
+    {
+        try
+        {
+            final InputStream xsdInputStream = PwmSetting.class.getClassLoader().getResourceAsStream( "password/pwm/config/PwmSetting.xsd" );
+            final InputStream xmlInputStream = PwmSetting.class.getClassLoader().getResourceAsStream( "password/pwm/config/PwmSetting.xml" );
+            final SchemaFactory factory = SchemaFactory.newInstance( XMLConstants.W3C_XML_SCHEMA_NS_URI );
+            final Schema schema = factory.newSchema( new StreamSource( xsdInputStream ) );
+            final Validator validator = schema.newValidator();
+            validator.validate( new StreamSource( xmlInputStream ) );
+        }
+        catch ( final SAXParseException e )
+        {
+            Assertions.fail( "PwmSetting.xml schema violation: " + e );
         }
     }
 }

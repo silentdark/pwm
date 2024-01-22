@@ -22,7 +22,9 @@ package password.pwm.svc.httpclient;
 
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
+import password.pwm.PwmConstants;
 import password.pwm.bean.DomainID;
+import password.pwm.bean.SessionLabel;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
@@ -39,10 +41,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.WeakHashMap;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class HttpClientService extends AbstractPwmService implements PwmService
 {
@@ -50,8 +50,7 @@ public class HttpClientService extends AbstractPwmService implements PwmService
 
     private Class<PwmHttpClientProvider> httpClientClass;
 
-    private final Map<PwmHttpClientConfiguration, ThreadLocal<PwmHttpClientProvider>> clients = new ConcurrentHashMap<>(  );
-    private final Map<PwmHttpClientProvider, Object> issuedClients = Collections.synchronizedMap( new WeakHashMap<>(  ) );
+    private final Set<PwmHttpClient> issuedClients = Collections.synchronizedSet( Collections.newSetFromMap( new WeakHashMap<>() ) );
 
     private final StatisticCounterBundle<StatsKey> stats = new StatisticCounterBundle<>( StatsKey.class );
 
@@ -61,7 +60,6 @@ public class HttpClientService extends AbstractPwmService implements PwmService
         requestBytes,
         responseBytes,
         createdClients,
-        reusedClients,
     }
 
     public HttpClientService()
@@ -97,7 +95,7 @@ public class HttpClientService extends AbstractPwmService implements PwmService
     @Override
     public void shutdownImpl()
     {
-        for ( final PwmHttpClient pwmHttpClient : new HashSet<>( issuedClients.keySet() ) )
+        for ( final PwmHttpClient pwmHttpClient : new HashSet<>( issuedClients ) )
         {
             try
             {
@@ -108,36 +106,34 @@ public class HttpClientService extends AbstractPwmService implements PwmService
                 LOGGER.debug( () -> "error closing pwmHttpClient instance: " + e.getMessage() );
             }
         }
+        issuedClients.clear();
     }
 
-    public PwmHttpClient getPwmHttpClient()
+    public PwmHttpClient getPwmHttpClient( final SessionLabel sessionLabel )
             throws PwmUnrecoverableException
     {
-        return this.getPwmHttpClient( PwmHttpClientConfiguration.builder().build() );
+        return this.getPwmHttpClient( null, sessionLabel );
     }
 
-    public PwmHttpClient getPwmHttpClient( final PwmHttpClientConfiguration pwmHttpClientConfiguration )
+    public PwmHttpClient getPwmHttpClient(
+            final PwmHttpClientConfiguration pwmHttpClientConfiguration,
+            final SessionLabel sessionLabel
+    )
             throws PwmUnrecoverableException
     {
-        Objects.requireNonNull( pwmHttpClientConfiguration );
-
-        final ThreadLocal<PwmHttpClientProvider> threadLocal = clients.computeIfAbsent(
-                pwmHttpClientConfiguration,
-                clientConfig -> new ThreadLocal<>() );
-
-        final PwmHttpClient existingClient = threadLocal.get();
-        if ( existingClient != null && existingClient.isOpen() )
+        if ( status() != STATUS.OPEN )
         {
-            stats.increment( StatsKey.reusedClients );
-            return existingClient;
+            throw new PwmUnrecoverableException( PwmError.ERROR_SERVICE_NOT_AVAILABLE, "unable to create new pwmHttpClient, service is closed" );
         }
+
+        final PwmHttpClientConfiguration effectiveConfig = pwmHttpClientConfiguration == null
+                ? PwmHttpClientConfiguration.builder().build()
+                : pwmHttpClientConfiguration;
 
         try
         {
             final PwmHttpClientProvider newClient = httpClientClass.getDeclaredConstructor().newInstance();
-            newClient.init( getPwmApplication(), this, pwmHttpClientConfiguration );
-            issuedClients.put( newClient, null );
-            threadLocal.set( newClient );
+            newClient.init( getPwmApplication(), this, effectiveConfig, sessionLabel );
             stats.increment( StatsKey.createdClients );
             return newClient;
         }
@@ -161,12 +157,19 @@ public class HttpClientService extends AbstractPwmService implements PwmService
     @Override
     public ServiceInfoBean serviceInfo()
     {
-        final Map<String, String> debugMap = new HashMap<>( stats.debugStats() );
-        debugMap.put( "weakReferences", Integer.toString( issuedClients.size() ) );
-        debugMap.put( "referencedConfigs", Integer.toString( clients.size() ) );
+        final Map<String, String> debugMap = new HashMap<>( stats.debugStats( PwmConstants.DEFAULT_LOCALE ) );
+        debugMap.put( "issuedClients", Integer.toString( issuedClients.size() ) );
+        debugMap.put( "openClients", Long.toString( openClients() ) );
         return ServiceInfoBean.builder()
                 .debugProperties( debugMap )
                 .build();
 
+    }
+
+    private long openClients()
+    {
+        return new HashSet<>( issuedClients ).stream()
+                .filter( PwmHttpClient::isOpen )
+                .count();
     }
 }

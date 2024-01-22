@@ -20,12 +20,12 @@
 
 package password.pwm.util.localdb;
 
+import password.pwm.PwmConstants;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.util.java.StatisticCounterBundle;
 
-import java.io.File;
-import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -51,7 +51,7 @@ public class LocalDBAdaptor implements LocalDB
     }
 
     @Override
-    public File getFileLocation( )
+    public Path getFileLocation( )
     {
         return innerDB.getFileLocation();
     }
@@ -87,22 +87,23 @@ public class LocalDBAdaptor implements LocalDB
     }
 
     @WriteOperation
-    public void init( final File dbDirectory, final Map<String, String> initParameters, final Map<LocalDBProvider.Parameter, String> parameters ) throws LocalDBException
+    public void init( final Path dbDirectory, final Map<String, String> initParameters, final Map<LocalDBProvider.Parameter, String> parameters )
+            throws LocalDBException
     {
         innerDB.init( dbDirectory, initParameters, parameters );
     }
 
-    public LocalDBIterator<Map.Entry<String, String>> iterator( final DB db ) throws LocalDBException
+    public LocalDBIterator iterator( final DB db ) throws LocalDBException
     {
         ParameterValidator.validateDBValue( db );
         return innerDB.iterator( db );
     }
 
     @Override
-    public Map<String, Serializable> debugInfo( )
+    public Map<String, Object> debugInfo( )
     {
-        final Map<String, Serializable> debugValues = new LinkedHashMap<>( innerDB.debugInfo() );
-        debugValues.putAll( stats.debugStats() );
+        final Map<String, Object> debugValues = new LinkedHashMap<>( innerDB.debugInfo() );
+        debugValues.putAll( stats.debugStats( PwmConstants.DEFAULT_LOCALE ) );
         return Collections.unmodifiableMap( debugValues );
     }
 

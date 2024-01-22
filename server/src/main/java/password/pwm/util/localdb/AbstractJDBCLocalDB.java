@@ -27,8 +27,7 @@ import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
 import java.io.Closeable;
-import java.io.File;
-import java.io.Serializable;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Driver;
 import java.sql.PreparedStatement;
@@ -58,10 +57,10 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
     private static final String WIDTH_KEY = String.valueOf( LocalDB.MAX_KEY_LENGTH );
 
     protected Driver driver;
-    protected File dbDirectory;
+    protected Path dbDirectory;
 
     // cache of dbIterators
-    private final Set<LocalDB.LocalDBIterator<Map.Entry<String, String>>> dbIterators = Collections.newSetFromMap(
+    private final Set<LocalDB.LocalDBIterator> dbIterators = Collections.newSetFromMap(
             new ConcurrentHashMap<>() );
 
     // sql db connection
@@ -280,7 +279,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
     }
 
     @Override
-    public void init( final File dbDirectory, final Map<String, String> initParams, final Map<Parameter, String> parameters )
+    public void init( final Path dbDirectory, final Map<String, String> initParams, final Map<Parameter, String> parameters )
             throws LocalDBException
     {
         this.dbDirectory = dbDirectory;
@@ -297,7 +296,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
     }
 
     @Override
-    public LocalDB.LocalDBIterator<Map.Entry<String, String>> iterator( final LocalDB.DB db )
+    public LocalDB.LocalDBIterator iterator( final LocalDB.DB db )
             throws LocalDBException
     {
         try
@@ -535,7 +534,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
             lock.writeLock().lock();
             try
             {
-                final Set<LocalDB.LocalDBIterator<Map.Entry<String, String>>> copiedIterators = new HashSet<>( dbIterators );
+                final Set<LocalDB.LocalDBIterator> copiedIterators = new HashSet<>( dbIterators );
 
                 for ( final LocalDB.LocalDBIterator dbIterator : copiedIterators )
                 {
@@ -603,13 +602,13 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
     }
 
     abstract Connection openConnection(
-            File databaseDirectory,
+            Path databaseDirectory,
             String driverClasspath,
             Map<String, String> initParams
     ) throws LocalDBException;
 
 
-    private class DbIterator implements Closeable, LocalDB.LocalDBIterator<Map.Entry<String, String>>
+    private class DbIterator implements Closeable, LocalDB.LocalDBIterator
     {
         private Map.Entry<String, String> nextItem;
 
@@ -688,7 +687,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
     }
 
     @Override
-    public File getFileLocation( )
+    public Path getFileLocation( )
     {
         return dbDirectory;
     }
@@ -709,7 +708,7 @@ public abstract class AbstractJDBCLocalDB implements LocalDBProvider
     abstract String getDriverClasspath( );
 
     @Override
-    public Map<String, Serializable> debugInfo( )
+    public Map<String, Object> debugInfo( )
     {
         return Collections.emptyMap();
     }

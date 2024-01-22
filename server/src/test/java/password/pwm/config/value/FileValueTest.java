@@ -22,16 +22,16 @@ package password.pwm.config.value;
 
 import org.apache.commons.io.IOUtils;
 import org.jrivard.xmlchai.AccessMode;
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlDocument;
 import org.jrivard.xmlchai.XmlElement;
-import org.junit.Assert;
-import org.junit.Test;
+import org.jrivard.xmlchai.XmlFactory;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.ConfigurationCleanerTest;
 import password.pwm.config.stored.XmlOutputProcessData;
-import password.pwm.util.java.ImmutableByteArray;
+import password.pwm.data.ImmutableByteArray;
 import password.pwm.util.secure.PwmHashAlgorithm;
 import password.pwm.util.secure.SecureEngine;
 
@@ -58,12 +58,12 @@ public class FileValueTest
             {
                 final FileValue fileValue = FileValue.newFileValue( "filename", "fileType", ImmutableByteArray.of( inputFile ) );
                 final List<XmlElement> valueElements = fileValue.toXmlValues( "value", XmlOutputProcessData.builder().build() );
-                final XmlDocument xmlDocument = XmlChai.getFactory().newDocument( "root" );
-                final XmlElement settingElement = XmlChai.getFactory().newElement( "setting" );
+                final XmlDocument xmlDocument = XmlFactory.getFactory().newDocument( "root" );
+                final XmlElement settingElement = XmlFactory.getFactory().newElement( "setting" );
                 xmlDocument.getRootElement().attachElement( settingElement );
                 settingElement.attachElement( valueElements );
                 final ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                XmlChai.getFactory().output( xmlDocument, byteArrayOutputStream );
+                XmlFactory.getFactory().output( xmlDocument, byteArrayOutputStream );
                 xmlSettingValue = byteArrayOutputStream.toString( PwmConstants.DEFAULT_CHARSET );
             }
 
@@ -72,7 +72,7 @@ public class FileValueTest
 
             // read filevalue from xml string
             {
-                final XmlDocument xmlDocument = XmlChai.getFactory().parseString( xmlSettingValue, AccessMode.IMMUTABLE );
+                final XmlDocument xmlDocument = XmlFactory.getFactory().parseString( xmlSettingValue, AccessMode.IMMUTABLE );
                 final XmlElement settingElement = xmlDocument.getRootElement().getChild( "setting" ).orElseThrow();
                 final FileValue fileValue = ( FileValue ) FileValue.factory().fromXmlElement( PwmSetting.DATABASE_JDBC_DRIVER, settingElement, null );
                 final Map<FileValue.FileInformation, FileValue.FileContent> map = ( Map ) fileValue.toNativeObject();
@@ -80,11 +80,11 @@ public class FileValueTest
                 fileContent = map.values().iterator().next();
             }
 
-            Assert.assertEquals( "filename", fileInformation.getFilename() );
-            Assert.assertEquals( "fileType", fileInformation.getFiletype() );
-            Assert.assertEquals( inputFile.length, fileContent.getContents().size() );
-            Assert.assertArrayEquals( inputFile, fileContent.getContents().copyOf() );
-            Assert.assertEquals( inputHash, fileContent.sha512sum() );
+            Assertions.assertEquals( "filename", fileInformation.getFilename() );
+            Assertions.assertEquals( "fileType", fileInformation.getFiletype() );
+            Assertions.assertEquals( inputFile.length, fileContent.getContents().size() );
+            Assertions.assertArrayEquals( inputFile, fileContent.getContents().copyOf() );
+            Assertions.assertEquals( inputHash, fileContent.sha512sum() );
         }
     }
 }

@@ -23,6 +23,7 @@ package password.pwm.ws.server;
 import com.novell.ldapchai.provider.ChaiProvider;
 import password.pwm.PwmApplication;
 import password.pwm.PwmDomain;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
@@ -65,6 +66,7 @@ public class RestRequest extends PwmHttpRequestWrapper
             final SessionLabel sessionLabel,
             final HttpServletRequest httpServletRequest
     )
+            throws PwmUnrecoverableException
     {
         super( httpServletRequest, pwmDomain.getConfig().getAppConfig() );
         this.pwmDomain = pwmDomain;
@@ -115,7 +117,7 @@ public class RestRequest extends PwmHttpRequestWrapper
         return sessionLabel;
     }
 
-    public ChaiProvider getChaiProvider( final String ldapProfileID )
+    public ChaiProvider getChaiProvider( final ProfileID ldapProfileID )
             throws PwmUnrecoverableException
     {
         if ( getRestAuthentication().getType() == RestAuthenticationType.LDAP )

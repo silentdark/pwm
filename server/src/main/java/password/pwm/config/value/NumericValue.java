@@ -20,8 +20,8 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingProperty;
 import password.pwm.config.stored.StoredConfigXmlConstants;
@@ -47,7 +47,7 @@ public class NumericValue extends AbstractValue implements StoredValue
         return new StoredValueFactory()
         {
             @Override
-            public NumericValue fromJson( final String value )
+            public NumericValue fromJson( final PwmSetting pwmSetting, final String value )
             {
                 return new NumericValue( JsonFactory.get().deserialize( value, Long.class ) );
             }
@@ -91,7 +91,7 @@ public class NumericValue extends AbstractValue implements StoredValue
     @Override
     public List<XmlElement> toXmlValues( final String valueElementName, final XmlOutputProcessData xmlOutputProcessData )
     {
-        final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+        final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
         valueElement.setText( Long.toString( value ) );
         return Collections.singletonList( valueElement );
     }

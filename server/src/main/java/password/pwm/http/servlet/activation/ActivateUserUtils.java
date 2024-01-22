@@ -28,6 +28,7 @@ import com.novell.ldapchai.provider.ChaiProvider;
 import password.pwm.PwmDomain;
 import password.pwm.bean.EmailItemBean;
 import password.pwm.bean.LoginInfoBean;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
@@ -48,7 +49,7 @@ import password.pwm.http.PwmRequest;
 import password.pwm.http.PwmRequestAttribute;
 import password.pwm.http.PwmSession;
 import password.pwm.http.bean.ActivateUserBean;
-import password.pwm.ldap.UserInfo;
+import password.pwm.user.UserInfo;
 import password.pwm.ldap.auth.AuthenticationType;
 import password.pwm.ldap.auth.PwmAuthenticationSource;
 import password.pwm.ldap.auth.SessionAuthenticator;
@@ -252,7 +253,7 @@ class ActivateUserUtils
         pwmDomain.getPwmApplication().getEmailQueue().submitEmail(
                 configuredEmailSetting,
                 pwmSession.getUserInfo(),
-                pwmSession.getSessionManager().getMacroMachine( )
+                pwmRequest.getMacroMachine( )
         );
         return true;
     }
@@ -291,7 +292,7 @@ class ActivateUserUtils
                 toSmsNumber,
                 message,
                 pwmRequest.getLabel(),
-                pwmSession.getSessionManager().getMacroMachine( )
+                pwmRequest.getMacroMachine( )
         );
         return true;
     }
@@ -345,9 +346,9 @@ class ActivateUserUtils
         final PwmDomain pwmDomain = pwmRequest.getPwmDomain();
         final ActivateUserBean activateUserBean = pwmDomain.getSessionStateService().getBean( pwmRequest, ActivateUserBean.class );
 
-        final Optional<String> profileID = ProfileUtility.discoverProfileIDForUser( pwmRequest.getPwmRequestContext(), userIdentity, ProfileDefinition.ActivateUser );
+        final Optional<ProfileID> profileID = ProfileUtility.discoverProfileIDForUser( pwmRequest.getPwmRequestContext(), userIdentity, ProfileDefinition.ActivateUser );
 
-        if ( !profileID.isPresent() || !pwmDomain.getConfig().getUserActivationProfiles().containsKey( profileID.get() ) )
+        if ( !profileID.isPresent() )
         {
             throw PwmUnrecoverableException.newException( PwmError.ERROR_ACTIVATE_NO_PERMISSION, "no matching user activation profile for user" );
         }

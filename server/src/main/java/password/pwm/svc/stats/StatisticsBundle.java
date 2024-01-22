@@ -20,12 +20,12 @@
 
 package password.pwm.svc.stats;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import password.pwm.bean.SessionLabel;
 import password.pwm.util.java.JavaHelper;
-import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StringUtil;
+import password.pwm.util.json.JsonFactory;
+import password.pwm.util.logging.PwmLogger;
 
-import java.io.Serializable;
 import java.math.BigInteger;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -36,6 +36,8 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class StatisticsBundle
 {
+    private static final PwmLogger LOGGER = PwmLogger.forClass( StatisticsBundle.class );
+
     private final Map<Statistic, LongAccumulator> incrementerMap = new EnumMap<>( Statistic.class );
     private final Map<AvgStatistic, AverageBean> avgMap = new EnumMap<>( AvgStatistic.class );
 
@@ -97,8 +99,17 @@ public class StatisticsBundle
             final String value = loadedMap.get( loopStat.name() );
             if ( StringUtil.notEmpty( value ) )
             {
-                final AverageBean avgBean = JsonFactory.get().deserialize( value, AverageBean.class );
-                bundle.avgMap.put( loopStat, avgBean );
+                try
+                {
+                    final AverageBean avgBean = JsonFactory.get().deserialize( value, AverageBean.class );
+                    bundle.avgMap.put( loopStat, avgBean );
+                }
+                catch ( final Exception e )
+                {
+                    LOGGER.error( SessionLabel.SYSTEM_LABEL, () -> "error reading stored stat bundle for key '"
+                            + inputString + "', storedValue: '" + value + " ', error: " + e.getMessage() );
+                }
+
             }
         }
 
@@ -125,14 +136,11 @@ public class StatisticsBundle
         return avgMap.get( statistic ).getAverage().toString();
     }
 
-    private static class AverageBean implements Serializable
+    private static class AverageBean
     {
-        private static final long serialVersionUID = 1L;
-
         private BigInteger total = BigInteger.ZERO;
         private BigInteger count = BigInteger.ZERO;
 
-        @SuppressFBWarnings( "SE_TRANSIENT_FIELD_NOT_RESTORED" )
         private final transient Lock lock = new ReentrantLock();
 
         AverageBean( )

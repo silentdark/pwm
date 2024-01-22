@@ -41,20 +41,19 @@ import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.bean.DisplayElement;
 import password.pwm.http.servlet.accountinfo.AccountInformationBean;
-import password.pwm.http.tag.PasswordRequirementsTag;
+import password.pwm.util.password.PasswordRequirementViewableRuleGenerator;
 import password.pwm.i18n.Display;
-import password.pwm.ldap.UserInfo;
 import password.pwm.ldap.UserInfoFactory;
 import password.pwm.ldap.ViewableUserInfoDisplayReader;
-import password.pwm.util.i18n.LocaleHelper;
+import password.pwm.user.UserInfo;
 import password.pwm.util.form.FormUtility;
+import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.CollectionUtil;
-import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
 
-import java.io.Serializable;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -67,7 +66,7 @@ import java.util.Set;
 
 @Value
 @Builder
-public class HelpdeskDetailInfoBean implements Serializable
+public class HelpdeskDetailInfoBean
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( HelpdeskDetailInfoBean.class );
 
@@ -148,14 +147,14 @@ public class HelpdeskDetailInfoBean implements Serializable
             LOGGER.error( pwmRequest, () -> "unexpected error reading userHistory for user '" + userIdentity + "', " + e.getMessage() );
         }
 
-        builder.userKey( userIdentity.toObfuscatedKey( pwmRequest.getPwmApplication() ) );
+        builder.userKey( HelpdeskServletUtil.obfuscateUserIdentity( pwmRequest, userIdentity ) );
 
         builder.profileData( getProfileData( helpdeskProfile, userInfo, pwmRequest.getLabel(), pwmRequest.getLocale() ) );
 
         builder.passwordPolicyRules( makePasswordPolicyRules( userInfo, pwmRequest.getLocale(), pwmRequest.getDomainConfig() ) );
 
         {
-            final List<String> requirementLines = PasswordRequirementsTag.getPasswordRequirementsStrings(
+            final List<String> requirementLines = PasswordRequirementViewableRuleGenerator.generate(
                     userInfo.getPasswordPolicy(),
                     pwmRequest.getDomainConfig(),
                     pwmRequest.getLocale(),
@@ -177,9 +176,9 @@ public class HelpdeskDetailInfoBean implements Serializable
         }
 
         if ( ( userInfo.getPasswordPolicy() != null )
-                && userInfo.getPasswordPolicy().getIdentifier() != null )
+                && userInfo.getPasswordPolicy().getId() != null )
         {
-            builder.passwordPolicyID( userInfo.getPasswordPolicy().getIdentifier() );
+            builder.passwordPolicyID( userInfo.getPasswordPolicy().getId().toString() );
         }
         else
         {

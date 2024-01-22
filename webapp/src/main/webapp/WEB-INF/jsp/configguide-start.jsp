@@ -26,6 +26,7 @@
 <%@ page import="password.pwm.util.java.JavaHelper" %>
 <%@ page import="password.pwm.util.java.StringUtil" %>
 <%@ page import="password.pwm.util.macro.MacroRequest" %>
+<%@ page import="password.pwm.http.servlet.resource.TextFileResource" %>
 
 <% JspUtility.setFlag(pageContext, PwmRequestFlag.HIDE_LOCALE); %>
 <% JspUtility.setFlag(pageContext, PwmRequestFlag.INCLUDE_CONFIG_CSS); %>
@@ -46,16 +47,14 @@
         <%@ include file="/WEB-INF/jsp/fragment/message.jsp" %>
         <p>
             <pwm:if test="<%=PwmIfTest.appliance%>" negate="true">
-                Application Configuration Path: <code><%=StringUtil.escapeHtml(JspUtility.getPwmRequest(pageContext).getPwmApplication().getPwmEnvironment().getApplicationPath().getAbsolutePath())%></code>
+                Application Configuration Path: <code><%=StringUtil.escapeHtml(JspUtility.getPwmRequest(pageContext).getPwmApplication().getPwmEnvironment().getApplicationPath().toString())%></code>
             </pwm:if>
         </p>
         <br/><br/>
-        <% String welcomeText = ContextManager.readEulaText(ContextManager.getContextManager(session),PwmConstants.RESOURCE_FILE_WELCOME_TXT); %>
-        <% String macroText = MacroRequest.forStatic().expandMacros(welcomeText); %>
-        <% if (!StringUtil.isEmpty(macroText)) { %>
-        <div id="agreementText" class="eulaText"><%=macroText%></div>
+        <pwm:if test="<%=PwmIfTest.textFileExists%>" textFileResource="<%=TextFileResource.welcome%>">
+        <div id="agreementText" class="eulaText"><pwm:textFile textFileResource="<%=TextFileResource.welcome%>"/></div>
         <br/><br/>
-        <% } %>
+        </pwm:if>
         <div class="buttonbar configguide">
             <button class="btn" id="button_next">
                 <pwm:if test="<%=PwmIfTest.showIcons%>"><span class="btn-icon pwm-icon pwm-icon-forward"></span></pwm:if>

@@ -21,22 +21,21 @@
 package password.pwm.util.secure;
 
 import lombok.Value;
-import password.pwm.AppProperty;
+import password.pwm.DomainProperty;
 import password.pwm.error.ErrorInformation;
 import password.pwm.error.PwmError;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.PwmRequestContext;
 import password.pwm.svc.secure.DomainSecureService;
-import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
-import java.io.Serializable;
 import java.time.Instant;
 import java.util.Optional;
 
-public class BeanCryptoMachine<T extends Serializable>
+public class BeanCryptoMachine<T extends Object>
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( BeanCryptoMachine.class );
     private static final String DELIMITER = ".";
@@ -54,7 +53,7 @@ public class BeanCryptoMachine<T extends Serializable>
 
     private String newKey()
     {
-        final int length = Integer.parseInt( pwmRequestContext.getDomainConfig().readAppProperty( AppProperty.HTTP_COOKIE_NONCE_LENGTH ) );
+        final int length = Integer.parseInt( pwmRequestContext.getDomainConfig().readDomainProperty( DomainProperty.HTTP_COOKIE_NONCE_LENGTH ) );
 
         final String random = pwmRequestContext.getPwmDomain().getSecureService().pwmRandom().alphaNumericString( length );
 
@@ -119,7 +118,7 @@ public class BeanCryptoMachine<T extends Serializable>
     }
 
     @Value
-    static class Wrapper implements Serializable
+    static class Wrapper
     {
         private Instant timestamp;
         private String className;

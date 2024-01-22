@@ -22,7 +22,7 @@ package password.pwm.util.debug;
 
 import password.pwm.PwmConstants;
 import password.pwm.PwmDomain;
-import password.pwm.ldap.LdapConnectionService;
+import password.pwm.ldap.LdapDomainService;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.json.JsonProvider;
 
@@ -30,7 +30,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.List;
 
-class LdapConnectionsDebugItemGenerator implements DomainItemGenerator
+final class LdapConnectionsDebugItemGenerator implements DomainItemGenerator
 {
     @Override
     public String getFilename()
@@ -39,11 +39,11 @@ class LdapConnectionsDebugItemGenerator implements DomainItemGenerator
     }
 
     @Override
-    public void outputItem( final DomainDebugItemInput debugItemInput, final OutputStream outputStream )
+    public void outputItem( final DomainDebugItemRequest debugItemInput, final OutputStream outputStream )
             throws IOException
     {
-        final PwmDomain pwmDomain = debugItemInput.getPwmDomain();
-        final List<LdapConnectionService.ConnectionInfo> connectionInfos = pwmDomain.getLdapConnectionService().getConnectionInfos();
+        final PwmDomain pwmDomain = debugItemInput.pwmDomain();
+        final List<LdapDomainService.ConnectionInfo> connectionInfos = pwmDomain.getLdapService().getConnectionInfos();
         final String jsonString = JsonFactory.get().serializeCollection( connectionInfos, JsonProvider.Flag.PrettyPrint );
         outputStream.write( jsonString.getBytes( PwmConstants.DEFAULT_CHARSET ) );
     }

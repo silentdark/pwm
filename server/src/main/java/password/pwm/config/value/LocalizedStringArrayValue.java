@@ -20,8 +20,8 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.XmlOutputProcessData;
@@ -72,7 +72,7 @@ public class LocalizedStringArrayValue extends AbstractValue implements StoredVa
         return new StoredValueFactory()
         {
             @Override
-            public LocalizedStringArrayValue fromJson( final String input )
+            public LocalizedStringArrayValue fromJson( final PwmSetting pwmSetting, final String input )
             {
                 if ( input == null )
                 {
@@ -127,7 +127,7 @@ public class LocalizedStringArrayValue extends AbstractValue implements StoredVa
             final String locale = entry.getKey();
             for ( final String value : entry.getValue() )
             {
-                final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+                final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
                 valueElement.setText( value );
                 if ( locale != null && locale.length() > 0 )
                 {

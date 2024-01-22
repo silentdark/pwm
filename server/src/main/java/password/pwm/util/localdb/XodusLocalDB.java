@@ -44,10 +44,9 @@ import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
-import java.io.Serializable;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.AbstractMap;
@@ -75,7 +74,7 @@ public class XodusLocalDB implements LocalDBProvider
     private static final int DEFAULT_MEMORY_USAGE = 50 * 1024 * 1024;
 
     private Environment environment;
-    private File fileLocation;
+    private Path fileLocation;
     private boolean readOnly;
 
     private enum Property
@@ -111,7 +110,7 @@ public class XodusLocalDB implements LocalDBProvider
 
     @Override
     public void init(
-            final File dbDirectory,
+            final Path dbDirectory,
             final Map<String, String> initParameters,
             final Map<Parameter, String> parameters
     )
@@ -124,7 +123,7 @@ public class XodusLocalDB implements LocalDBProvider
 
         final EnvironmentConfig environmentConfig = makeEnvironmentConfig( initParameters );
 
-        if ( Files.exists( getDirtyFile().toPath() ) )
+        if ( Files.exists( getDirtyFile() ) )
         {
             environmentConfig.setGcUtilizationFromScratch( true );
             LOGGER.warn( () -> "environment not closed cleanly, will re-calculate GC" );
@@ -136,9 +135,9 @@ public class XodusLocalDB implements LocalDBProvider
 
         try
         {
-            if ( !getDirtyFile().exists() )
+            if ( !Files.exists( getDirtyFile() ) )
             {
-                Files.createFile( getDirtyFile().toPath() );
+                Files.createFile( getDirtyFile() );
                 LOGGER.trace( () -> "created openLock file" );
             }
         }
@@ -162,7 +161,7 @@ public class XodusLocalDB implements LocalDBProvider
         readOnly = parameters.containsKey( Parameter.readOnly ) && Boolean.parseBoolean( parameters.get( Parameter.readOnly ) );
 
         LOGGER.trace( () -> "preparing to open with configuration " + JsonFactory.get().serializeMap( environmentConfig.getSettings(), String.class, Object.class ) );
-        environment = Environments.newInstance( dbDirectory.getAbsolutePath() + File.separator + FILE_SUB_PATH, environmentConfig );
+        environment = Environments.newInstance( dbDirectory.resolve( FILE_SUB_PATH ).toFile(), environmentConfig );
 
         LOGGER.trace( () -> "environment open (" + TimeDuration.fromCurrent( startTime ).asCompactString() + ")" );
 
@@ -183,7 +182,7 @@ public class XodusLocalDB implements LocalDBProvider
             LOGGER.trace( () -> "opened " + db + " with " + finalSize + " records" );
         }
 
-        outputReadme( new File( dbDirectory.getPath() + File.separator + FILE_SUB_PATH + File.separator + README_FILENAME ) );
+        outputReadme( dbDirectory.resolve( FILE_SUB_PATH ).resolve( README_FILENAME ) );
     }
 
     @Override
@@ -197,7 +196,7 @@ public class XodusLocalDB implements LocalDBProvider
 
         try
         {
-            Files.deleteIfExists( getDirtyFile().toPath() );
+            Files.deleteIfExists( getDirtyFile() );
             LOGGER.trace( () -> "deleted openLock file" );
         }
         catch ( final IOException e )
@@ -269,12 +268,12 @@ public class XodusLocalDB implements LocalDBProvider
     }
 
     @Override
-    public LocalDB.LocalDBIterator<Map.Entry<String, String>> iterator( final LocalDB.DB db )  throws LocalDBException
+    public LocalDB.LocalDBIterator iterator( final LocalDB.DB db )  throws LocalDBException
     {
         return new InnerIterator( db );
     }
 
-    public class InnerIterator implements LocalDB.LocalDBIterator<Map.Entry<String, String>>
+    public class InnerIterator implements LocalDB.LocalDBIterator
     {
         private final Transaction transaction;
         private final Cursor cursor;
@@ -474,7 +473,7 @@ public class XodusLocalDB implements LocalDBProvider
     }
 
     @Override
-    public File getFileLocation( )
+    public Path getFileLocation( )
     {
         return fileLocation;
     }
@@ -517,9 +516,9 @@ public class XodusLocalDB implements LocalDBProvider
     }
 
     @Override
-    public Map<String, Serializable> debugInfo( )
+    public Map<String, Object> debugInfo( )
     {
-        final Map<String, Serializable> outputStats = new LinkedHashMap<>();
+        final Map<String, Object> outputStats = new LinkedHashMap<>();
         {
             final Statistics statistics = environment.getStatistics();
             for ( final EnvironmentStatistics.Type type : EnvironmentStatistics.Type.values() )
@@ -653,14 +652,14 @@ public class XodusLocalDB implements LocalDBProvider
         return Collections.emptySet();
     }
 
-    private static void outputReadme( final File xodusPath )
+    private static void outputReadme( final Path xodusPath )
     {
         try
         {
             final ResourceBundle resourceBundle = ResourceBundle.getBundle( XodusLocalDB.class.getName() );
             final String contents = resourceBundle.getString( "ReadmeContents" );
             final byte[] byteContents = contents.getBytes( PwmConstants.DEFAULT_CHARSET );
-            Files.write( xodusPath.toPath(), byteContents, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING );
+            Files.write( xodusPath, byteContents, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING );
         }
         catch ( final IOException e )
         {
@@ -668,8 +667,8 @@ public class XodusLocalDB implements LocalDBProvider
         }
     }
 
-    private File getDirtyFile()
+    private Path getDirtyFile()
     {
-        return new File( this.getFileLocation().getAbsolutePath() + File.separator + FILE_SUB_PATH + File.separator + "xodus.open" );
+        return this.getFileLocation().resolve( FILE_SUB_PATH ).resolve( "xodus.open" );
     }
 }

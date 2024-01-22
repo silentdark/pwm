@@ -20,12 +20,17 @@
 
 package password.pwm.receiver;
 
+import password.pwm.util.java.AtomicLoopIntIncrementer;
 import password.pwm.util.java.JavaHelper;
+import password.pwm.util.java.StatisticCounterBundle;
+import password.pwm.util.java.StatisticRateBundle;
 import password.pwm.util.java.StringUtil;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 public class PwmReceiverApp
@@ -36,8 +41,28 @@ public class PwmReceiverApp
     private Storage storage;
     private Settings settings;
 
-    private final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor( THREAD_FACTORY );
     private final Status status = new Status();
+    private final StatisticCounterBundle<CounterStatsKey> statisticCounterBundle = new StatisticCounterBundle<>( CounterStatsKey.class );
+    private final StatisticRateBundle<EpsStatKey> statisticRateBundle = new StatisticRateBundle<>( EpsStatKey.class );
+    private final Instant startupTime = Instant.now();
+
+    private static final ThreadFactory THREAD_FACTORY = makeThreadFactory();
+
+    public enum EpsStatKey
+    {
+        VersionCheckRequests,
+        TelemetryPublishRequests,
+        TelemetryViewRequests,
+    }
+
+    public enum CounterStatsKey
+    {
+        VersionCheckRequests,
+        TelemetryPublishRequests,
+        TelemetryViewRequests,
+    }
+
 
     public PwmReceiverApp( )
     {
@@ -98,7 +123,7 @@ public class PwmReceiverApp
     void close( )
     {
         storage.close();
-        scheduledExecutorService.shutdown();
+        scheduledExecutorService.shutdownNow();
     }
 
     public Status getStatus( )
@@ -106,4 +131,35 @@ public class PwmReceiverApp
         return status;
     }
 
+    public StatisticCounterBundle<CounterStatsKey> getStatisticCounterBundle()
+    {
+        return statisticCounterBundle;
+    }
+
+    public StatisticRateBundle<EpsStatKey> getStatisticEpsBundle()
+    {
+        return statisticRateBundle;
+    }
+
+    public Instant getStartupTime()
+    {
+        return startupTime;
+    }
+
+    private static ThreadFactory makeThreadFactory()
+    {
+        return new ThreadFactory()
+        {
+            private final AtomicLoopIntIncrementer counter = new AtomicLoopIntIncrementer();
+
+            @Override
+            public Thread newThread( final Runnable runnable )
+            {
+                final Thread t = new Thread( runnable );
+                t.setDaemon( true );
+                t.setName( PwmReceiverApp.class.getName() + "-" + counter.next() );
+                return t;
+            }
+        };
+    }
 }

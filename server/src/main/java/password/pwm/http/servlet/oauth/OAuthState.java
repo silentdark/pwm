@@ -23,9 +23,9 @@ package password.pwm.http.servlet.oauth;
 import com.google.gson.annotations.SerializedName;
 import lombok.Builder;
 import lombok.Value;
+import password.pwm.bean.ProfileID;
 import password.pwm.util.java.AtomicLoopIntIncrementer;
 
-import java.io.Serializable;
 import java.time.Instant;
 
 /*
@@ -35,7 +35,7 @@ import java.time.Instant;
 
 @Value
 @Builder
-class OAuthState implements Serializable
+class OAuthState
 {
     private static final AtomicLoopIntIncrementer OAUTH_STATE_ID_COUNTER = new AtomicLoopIntIncrementer();
 
@@ -57,7 +57,7 @@ class OAuthState implements Serializable
     private OAuthUseCase useCase;
 
     @SerializedName( "f" )
-    private String forgottenProfileId;
+    private ProfileID forgottenProfileId;
 
     @SerializedName( "v" )
     private int version = 1;
@@ -71,7 +71,7 @@ class OAuthState implements Serializable
                 .build();
     }
 
-    static OAuthState newForgottenPasswordState( final String sessionID, final String forgottenProfileId )
+    static OAuthState newForgottenPasswordState( final String sessionID, final ProfileID forgottenProfileId )
     {
         return OAuthState.builder()
                 .sessionID( sessionID )

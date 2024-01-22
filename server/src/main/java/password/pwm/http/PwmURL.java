@@ -23,9 +23,13 @@ package password.pwm.http;
 import password.pwm.PwmConstants;
 import password.pwm.bean.SessionLabel;
 import password.pwm.config.AppConfig;
+import password.pwm.error.PwmInternalException;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.servlet.PwmServletDefinition;
+import password.pwm.util.java.EnumUtil;
+import password.pwm.util.java.LazySupplier;
 import password.pwm.util.java.StringUtil;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
 import javax.servlet.http.HttpServletRequest;
@@ -34,11 +38,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class PwmURL
 {
@@ -47,6 +54,40 @@ public class PwmURL
     private final URI uri;
     private final String contextPath;
     private final AppConfig appConfig;
+    private final Supplier<Optional<PwmServletDefinition>> pwmServletDefinition = LazySupplier.create(
+            () -> getServletDefinitionImpl( this ) );
+
+    public enum Scheme
+    {
+        http( 80 ),
+        https( 443 ),
+        file( -1 ),
+        ldap( 389 ),
+        ldaps( 636 ),;
+
+        private final int defaultPort;
+
+        Scheme( final int defaultPort )
+        {
+            this.defaultPort = defaultPort;
+        }
+
+        public int getDefaultPort()
+        {
+            return defaultPort;
+        }
+
+        public static Optional<Scheme> fromUri( final URI uri )
+        {
+            if ( uri == null )
+            {
+                return Optional.empty();
+            }
+
+            return EnumUtil.readEnumFromPredicate(
+                    Scheme.class, ( loopUri ) -> loopUri.name().equals( uri.getScheme() ) );
+        }
+    }
 
     private PwmURL(
             final URI uri,
@@ -152,7 +193,7 @@ public class PwmURL
 
     public boolean isAdminUrl( )
     {
-        return matches( PwmServletDefinition.Admin );
+        return matches( PwmServletDefinition.SystemAdmin );
     }
 
     public boolean isIndexPage( )
@@ -202,16 +243,37 @@ public class PwmURL
                 || matches( PwmServletDefinition.PublicChangePassword );
     }
 
-    public Optional<PwmServletDefinition> forServletDefinition()
+    public Optional<PwmServletDefinition> getServletDefinition()
     {
-        for ( final PwmServletDefinition pwmServletDefinition : PwmServletDefinition.values() )
+        return pwmServletDefinition.get();
+    }
+
+    private static Optional<PwmServletDefinition> getServletDefinitionImpl( final PwmURL pwmURL )
+    {
+        final List<PwmServletDefinition> exactMatch = EnumSet.allOf( PwmServletDefinition.class ).stream()
+                .filter( pwmServletDefinition -> pwmURL.checkIfMatchesURL( pwmServletDefinition.urlPatterns() ) )
+                .collect( Collectors.toList() );
+
+        if ( exactMatch.size() == 1 )
         {
-            if ( checkIfStartsWithURL( pwmServletDefinition.urlPatterns() ) )
-            {
-                return Optional.of( pwmServletDefinition );
-            }
+            return Optional.of( exactMatch.get( 0 ) );
         }
-        return Optional.empty();
+
+        final List<PwmServletDefinition> startsWithMatch = EnumSet.allOf( PwmServletDefinition.class ).stream()
+                .filter( pwmServletDefinition -> pwmURL.checkIfStartsWithURL( pwmServletDefinition.urlPatterns() ) )
+                .collect( Collectors.toList() );
+
+        if ( startsWithMatch.isEmpty() )
+        {
+            return Optional.empty();
+        }
+
+        if ( startsWithMatch.size() == 1 )
+        {
+            return Optional.of( startsWithMatch.get( 0 ) );
+        }
+
+        throw new PwmInternalException( "multiple servlet url matches: " + JsonFactory.get().serializeCollection( startsWithMatch ) );
     }
 
     public boolean matches( final PwmServletDefinition servletDefinition )
@@ -221,7 +283,7 @@ public class PwmURL
 
     public boolean matches( final Collection<PwmServletDefinition> servletDefinitions )
     {
-        final Optional<PwmServletDefinition> foundDefinition = forServletDefinition();
+        final Optional<PwmServletDefinition> foundDefinition = getServletDefinition();
         return foundDefinition.isPresent() && servletDefinitions.contains( foundDefinition.get() );
     }
 
@@ -353,35 +415,11 @@ public class PwmURL
         final int port = uri.getPort();
         if ( port < 1 )
         {
-            return portForUriScheme( uri.getScheme() );
+            return Scheme.fromUri( uri ).map( Scheme::getDefaultPort ).orElse( -1 );
         }
         return port;
     }
 
-    private static int portForUriScheme( final String scheme )
-    {
-        if ( scheme == null )
-        {
-            throw new NullPointerException( "scheme cannot be null" );
-        }
-        switch ( scheme )
-        {
-            case "http":
-                return 80;
-
-            case "https":
-                return 443;
-
-            case "ldap":
-                return 389;
-
-            case "ldaps":
-                return 636;
-
-            default:
-                throw new IllegalArgumentException( "unknown scheme: " + scheme );
-        }
-    }
 
     public String getPostServletPath( final PwmServletDefinition pwmServletDefinition )
     {
@@ -395,6 +433,12 @@ public class PwmURL
             }
         }
         return "";
+    }
+
+    public List<String> getPathSegments()
+    {
+        final String uriPath = uri.getPath();
+        return StringUtil.splitAndTrim( uriPath, "/" );
     }
 
     public String determinePwmServletPath( )
@@ -478,6 +522,31 @@ public class PwmURL
                 {
                     LOGGER.trace( sessionLabel, () -> "negative URL match for pattern: " + loopFragment );
                 }
+            }
+        }
+
+        return false;
+    }
+
+    public static boolean uriSchemeMatches( final URI uri, final Scheme... schemes )
+    {
+        if ( uri == null )
+        {
+            return false;
+        }
+
+        final String schemeStr = uri.getScheme();
+
+        if ( schemeStr == null )
+        {
+            return false;
+        }
+
+        for ( final Scheme loopScheme : schemes )
+        {
+            if ( loopScheme.name().equals( schemeStr ) )
+            {
+                return true;
             }
         }
 

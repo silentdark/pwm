@@ -20,16 +20,15 @@
 
 package password.pwm.receiver;
 
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
+import java.util.function.Supplier;
 
 public class Logger
 {
-    private final String name;
+    private final org.slf4j.Logger logger;
 
     private Logger( final Class<?> classname )
     {
-        this.name = classname.getName();
+        this.logger = org.slf4j.LoggerFactory.getLogger( classname );
     }
 
     public static Logger createLogger( final Class<?> classname )
@@ -37,17 +36,13 @@ public class Logger
         return new Logger( classname );
     }
 
-    public void info( final CharSequence input )
+    public void info( final Supplier<String> input )
     {
-        System.out.println( "PwmReceiver: "
-                + Instant.now().truncatedTo( ChronoUnit.SECONDS ).toString()
-                + ", INFO , " + name + ", " + input );
+        logger.makeLoggingEventBuilder( org.slf4j.event.Level.INFO ).log( input );
     }
 
-    public void debug( final CharSequence input )
+    public void debug( final Supplier<String> input )
     {
-        System.out.println( "PwmReceiver: "
-                + Instant.now().toString()
-                + ", DEBUG, " + name + ", " + input );
+        logger.makeLoggingEventBuilder( org.slf4j.event.Level.DEBUG ).log( input );
     }
 }

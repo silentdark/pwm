@@ -29,6 +29,7 @@ import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.ContextManager;
 import password.pwm.http.HttpHeader;
 import password.pwm.http.HttpMethod;
+import password.pwm.http.PwmURL;
 import password.pwm.svc.httpclient.PwmHttpClient;
 import password.pwm.svc.httpclient.PwmHttpClientConfiguration;
 import password.pwm.svc.httpclient.PwmHttpClientRequest;
@@ -42,6 +43,7 @@ import password.pwm.util.logging.PwmLogger;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.net.URL;
 import java.time.Instant;
 import java.util.Collections;
@@ -95,26 +97,33 @@ class WordlistSource
         final String importUrl = wordlistConfiguration.getAutoImportUrl();
         return new WordlistSource( WordlistSourceType.AutoImport, importUrl, () ->
         {
-            if ( importUrl.startsWith( "http" ) )
+            final URI uri = URI.create( importUrl );
+
+            if ( PwmURL.uriSchemeMatches( uri, PwmURL.Scheme.http, PwmURL.Scheme.https ) )
             {
                 final boolean promiscuous = Boolean.parseBoolean( pwmApplication.getConfig().readAppProperty( AppProperty.HTTP_CLIENT_PROMISCUOUS_WORDLIST_ENABLE ) );
                 final PwmHttpClientConfiguration pwmHttpClientConfiguration = PwmHttpClientConfiguration.builder()
                         .trustManagerType( promiscuous ? PwmHttpClientConfiguration.TrustManagerType.promiscuous : PwmHttpClientConfiguration.TrustManagerType.defaultJava )
                         .build();
-                final PwmHttpClient client = pwmApplication.getHttpClientService().getPwmHttpClient( pwmHttpClientConfiguration );
+                final PwmHttpClient client = pwmApplication.getHttpClientService().getPwmHttpClient( pwmHttpClientConfiguration, pwmApplication.getSessionLabel() );
                 return client.streamForUrl( wordlistConfiguration.getAutoImportUrl() );
             }
 
-            try
+            if ( PwmURL.uriSchemeMatches( uri, PwmURL.Scheme.file ) )
             {
-                final URL url = new URL( importUrl );
-                return url.openStream();
+                try
+                {
+                    final URL url = URI.create( importUrl ).toURL();
+                    return url.openStream();
+                }
+                catch ( final IOException e )
+                {
+                    final String msg = "unable to open auto-import URL: " + e.getMessage();
+                    throw PwmUnrecoverableException.newException( PwmError.ERROR_WORDLIST_IMPORT_ERROR, msg );
+                }
             }
-            catch ( final IOException e )
-            {
-                final String msg = "unable to open auto-import URL: " + e.getMessage();
-                throw PwmUnrecoverableException.newException( PwmError.ERROR_WORDLIST_IMPORT_ERROR, msg );
-            }
+
+            throw new IllegalArgumentException( "can't auto-import protocol scheme '" + uri.getScheme() + "'" );
         }
         );
     }
@@ -162,12 +171,12 @@ class WordlistSource
     {
         final Instant startTime = Instant.now();
 
-        final PwmHttpClient pwmHttpClient = pwmApplication.getHttpClientService().getPwmHttpClient();
+        final PwmHttpClient pwmHttpClient = pwmApplication.getHttpClientService().getPwmHttpClient( pwmApplication.getSessionLabel() );
         final PwmHttpClientRequest request = PwmHttpClientRequest.builder()
                 .method( HttpMethod.HEAD )
                 .url( importUrl )
                 .build();
-        final PwmHttpClientResponse response = pwmHttpClient.makeRequest( request, null );
+        final PwmHttpClientResponse response = pwmHttpClient.makeRequest( request );
         final Map<HttpHeader, String> returnResponses = new EnumMap<>( HttpHeader.class );
         for ( final Map.Entry<String, String> entry : response.getHeaders().entrySet() )
         {
@@ -183,7 +192,7 @@ class WordlistSource
 
         final Map<HttpHeader, String> finalReturnResponses =  Collections.unmodifiableMap( returnResponses );
         pwmLogger.debug( sessionLabel, () -> "read remote header info for " + this.getWordlistSourceType() + " wordlist: "
-                + JsonFactory.get().serializeMap( finalReturnResponses ), () -> TimeDuration.fromCurrent( startTime ) );
+                + JsonFactory.get().serializeMap( finalReturnResponses ), TimeDuration.fromCurrent( startTime ) );
         return finalReturnResponses;
     }
 
@@ -285,7 +294,7 @@ class WordlistSource
                                 + getWordlistSourceType() + " wordlist"
                                 + " " + StringUtil.formatDiskSize( wordlistZipReader.getByteCount() ) + " read"
                                 + bytesPerSecondStr().orElse( "" ),
-                        () -> TimeDuration.fromCurrent( startTime ) );
+                        TimeDuration.fromCurrent( startTime ) );
             }
 
             private Optional<String> bytesPerSecondStr()
@@ -317,7 +326,7 @@ class WordlistSource
             JavaHelper.closeQuietly( inputStream );
         }
         pwmLogger.trace( sessionLabel, () -> processIdLabel( processId ) + "completed close of remote wordlist read process",
-                () -> TimeDuration.fromCurrent( startClose ) );
+                TimeDuration.fromCurrent( startClose ) );
     }
 
     private String processIdLabel( final int processId )

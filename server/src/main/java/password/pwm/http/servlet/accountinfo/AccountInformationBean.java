@@ -32,17 +32,16 @@ import password.pwm.config.value.data.FormConfiguration;
 import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.http.PwmRequest;
 import password.pwm.http.bean.DisplayElement;
-import password.pwm.http.tag.PasswordRequirementsTag;
-import password.pwm.ldap.UserInfo;
+import password.pwm.util.password.PasswordRequirementViewableRuleGenerator;
 import password.pwm.ldap.ViewableUserInfoDisplayReader;
 import password.pwm.svc.event.UserAuditRecord;
+import password.pwm.user.UserInfo;
 import password.pwm.util.form.FormUtility;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.macro.MacroRequest;
 
-import java.io.Serializable;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,12 +51,12 @@ import java.util.Map;
 
 @Value
 @Builder
-public class AccountInformationBean implements Serializable
+public class AccountInformationBean
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( AccountInformationBean.class );
 
     @Value
-    public static class ActivityRecord implements Serializable
+    public static class ActivityRecord
     {
         private Instant timestamp;
         private String label;
@@ -97,7 +96,7 @@ public class AccountInformationBean implements Serializable
         ) );
         builder.passwordRules( makePasswordRules( pwmRequest ) );
 
-        LOGGER.trace( pwmRequest, () -> "generated account information bean in ", () -> TimeDuration.fromCurrent( startTime ) );
+        LOGGER.trace( pwmRequest, () -> "generated account information bean in ", TimeDuration.fromCurrent( startTime ) );
         return builder.build();
     }
 
@@ -106,9 +105,9 @@ public class AccountInformationBean implements Serializable
             throws PwmUnrecoverableException
     {
         final PwmPasswordPolicy pwmPasswordPolicy = pwmRequest.getPwmSession().getUserInfo().getPasswordPolicy();
-        final MacroRequest macroRequest = pwmRequest.getPwmSession().getSessionManager().getMacroMachine();
-        final List<String> rules = PasswordRequirementsTag.getPasswordRequirementsStrings( pwmPasswordPolicy, pwmRequest.getDomainConfig(), pwmRequest.getLocale(), macroRequest );
-        return Collections.unmodifiableList( rules );
+        final MacroRequest macroRequest = pwmRequest.getMacroMachine();
+        return PasswordRequirementViewableRuleGenerator
+                .generate( pwmPasswordPolicy, pwmRequest.getDomainConfig(), pwmRequest.getLocale(), macroRequest );
     }
 
     public static List<ActivityRecord> makeAuditInfo(

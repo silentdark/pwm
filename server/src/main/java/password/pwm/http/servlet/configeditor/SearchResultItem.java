@@ -27,11 +27,10 @@ import password.pwm.config.stored.StoredConfigKey;
 import password.pwm.config.stored.StoredConfiguration;
 import password.pwm.config.stored.StoredConfigurationUtil;
 
-import java.io.Serializable;
 import java.util.Locale;
 
 @Value
-class SearchResultItem implements Serializable
+class SearchResultItem
 {
     private final String category;
     private final String value;
@@ -50,9 +49,9 @@ class SearchResultItem implements Serializable
         return new SearchResultItem(
                 setting.getCategory().toString(),
                 storedConfiguration.readStoredValue( key ).orElseThrow().toDebugString( locale ),
-                setting.getCategory().toMenuLocationDebug( key.getProfileID(), locale ),
+                setting.getCategory().toMenuLocationDebug( key.getProfileID().orElse( null ), locale ),
                 StoredConfigurationUtil.isDefaultValue( storedConfiguration, key ),
-                key.getProfileID()
+                key.getProfileID().map( v -> v.stringValue() ).orElse( null )
         );
     }
 }

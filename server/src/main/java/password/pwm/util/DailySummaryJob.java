@@ -25,8 +25,8 @@ import lombok.Value;
 import org.apache.commons.text.WordUtils;
 import password.pwm.AppProperty;
 import password.pwm.PwmApplication;
-import password.pwm.PwmDomain;
 import password.pwm.PwmConstants;
+import password.pwm.PwmDomain;
 import password.pwm.bean.EmailItemBean;
 import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
@@ -34,7 +34,6 @@ import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthRecord;
 import password.pwm.i18n.Display;
 import password.pwm.svc.PwmService;
-import password.pwm.svc.report.ReportSummaryData;
 import password.pwm.util.java.CollectionUtil;
 import password.pwm.util.java.PwmTimeUtil;
 import password.pwm.util.java.StringUtil;
@@ -114,13 +113,13 @@ public class DailySummaryJob implements Runnable
             return;
         }
 
-        if ( pwmDomain.getStatisticsManager().status() != PwmService.STATUS.OPEN )
+        if ( pwmDomain.getStatisticsService().status() != PwmService.STATUS.OPEN )
         {
             LOGGER.debug( () -> "skipping daily summary alert job, statistics service is not open" );
             return;
         }
 
-        final Map<String, String> dailyStatistics = pwmDomain.getStatisticsManager().dailyStatisticsAsLabelValueMap();
+        final Map<String, String> dailyStatistics = pwmDomain.getStatisticsService().dailyStatisticsAsLabelValueMap();
 
         final Locale locale = PwmConstants.DEFAULT_LOCALE;
 
@@ -218,6 +217,7 @@ public class DailySummaryJob implements Runnable
         textBody.append( '\n' );
         htmlBody.append( "<br/>" );
 
+        /*
         if ( settings.isReportingEnableDailyJob() )
         {
             final List<ReportSummaryData.PresentationRow> summaryData = pwmDomain.getPwmApplication().getReportService()
@@ -246,6 +246,8 @@ public class DailySummaryJob implements Runnable
             }
             htmlBody.append( "</table>" );
         }
+
+         */
 
         textBody.append( '\n' );
         htmlBody.append( "<br/>" );

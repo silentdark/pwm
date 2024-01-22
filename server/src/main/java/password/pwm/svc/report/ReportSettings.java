@@ -29,13 +29,12 @@ import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.value.data.UserPermission;
 import password.pwm.error.PwmUnrecoverableException;
-import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.secure.PwmHashAlgorithm;
 import password.pwm.util.secure.SecureEngine;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -44,8 +43,8 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 @Value
-@Builder
-class ReportSettings implements Serializable
+@Builder( toBuilder = true )
+public class ReportSettings
 {
     private static final PwmLogger LOGGER = PwmLogger.forClass( ReportSettings.class );
 
@@ -76,6 +75,12 @@ class ReportSettings implements Serializable
     @Builder.Default
     private JobIntensity reportJobIntensity = JobIntensity.LOW;
 
+    @Builder.Default
+    private int maxErrorRecords = 1_000;
+
+    @Builder.Default
+    private TimeDuration reportJobTimeout = TimeDuration.MINUTE;
+
     public enum JobIntensity
     {
         LOW,
@@ -96,7 +101,7 @@ class ReportSettings implements Serializable
         builder.maxSearchSize ( ( int ) config.readSettingAsLong( PwmSetting.REPORTING_MAX_QUERY_SIZE ) );
         builder.dailyJobEnabled( config.readSettingAsBoolean( PwmSetting.REPORTING_ENABLE_DAILY_JOB ) );
         builder.searchTimeout( TimeDuration.of( Long.parseLong( config.readAppProperty( AppProperty.REPORTING_LDAP_SEARCH_TIMEOUT_MS ) ), TimeDuration.Unit.MILLISECONDS ) );
-
+        builder.reportJobTimeout( TimeDuration.of( Long.parseLong( config.readAppProperty( AppProperty.REPORTING_LDAP_JOB_TIMEOUT_MS ) ), TimeDuration.Unit.SECONDS ) );
 
         {
             int reportJobOffset = ( int ) config.readSettingAsLong( PwmSetting.REPORTING_JOB_TIME_OFFSET );
@@ -110,7 +115,7 @@ class ReportSettings implements Serializable
 
         builder.trackDays( parseDayIntervalStr( config ) );
 
-        builder.reportJobThreads( Integer.parseInt( config.readAppProperty( AppProperty.REPORTING_LDAP_SEARCH_THREADS ) ) );
+        builder.reportJobThreads( Integer.parseInt( config.readAppProperty( AppProperty.REPORTING_LDAP_JOB_THREADS ) ) );
 
         builder.reportJobIntensity( config.readSettingAsEnum( PwmSetting.REPORTING_JOB_INTENSITY, JobIntensity.class ) );
 

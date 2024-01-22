@@ -28,10 +28,9 @@ import password.pwm.util.localdb.LocalDB;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.Serializable;
 import java.util.Map;
 
-class LocalDBDebugGenerator implements AppItemGenerator
+final class LocalDBDebugGenerator implements AppItemGenerator
 {
     @Override
     public String getFilename()
@@ -40,12 +39,12 @@ class LocalDBDebugGenerator implements AppItemGenerator
     }
 
     @Override
-    public void outputItem( final AppDebugItemInput debugItemInput, final OutputStream outputStream )
+    public void outputItem( final AppDebugItemRequest debugItemInput, final OutputStream outputStream )
             throws IOException
     {
-        final PwmApplication pwmApplication = debugItemInput.getPwmApplication();
+        final PwmApplication pwmApplication = debugItemInput.pwmApplication();
         final LocalDB localDB = pwmApplication.getLocalDB();
-        final Map<String, Serializable> serializableMap = localDB.debugInfo();
+        final Map<String, Object> serializableMap = localDB.debugInfo();
         outputStream.write( JsonFactory.get().serializeMap( serializableMap, JsonProvider.Flag.PrettyPrint ).getBytes( PwmConstants.DEFAULT_CHARSET ) );
     }
 }

@@ -22,23 +22,25 @@ package password.pwm;
 
 import password.pwm.bean.DomainID;
 import password.pwm.config.AppConfig;
-import password.pwm.config.DomainConfig;
+import password.pwm.config.stored.StoredConfigKey;
+import password.pwm.config.stored.StoredConfigurationUtil;
 import password.pwm.error.PwmUnrecoverableException;
+import password.pwm.util.java.CollectionUtil;
+import password.pwm.util.java.EnumUtil;
 import password.pwm.util.java.TimeDuration;
 import password.pwm.util.logging.PwmLogger;
 
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 class PwmDomainUtil
@@ -76,14 +78,18 @@ class PwmDomainUtil
             throws PwmUnrecoverableException
     {
         final Instant domainInitStartTime = Instant.now();
-        LOGGER.trace( () -> "beginning domain initializations" );
+        LOGGER.trace( pwmApplication.getSessionLabel(), () -> "beginning domain initializations" );
 
         final List<Callable<Optional<PwmUnrecoverableException>>> callables = domains.stream()
-                .map( DomainInitializingCallable::new )
-                .collect( Collectors.toUnmodifiableList() );
+                .map( PwmDomainUtil::makeCallableDomainInit )
+                .toList();
 
-        final  List<Optional<PwmUnrecoverableException>> domainStartException = pwmApplication.getPwmScheduler()
-                .executeImmediateThreadPerJobAndAwaitCompletion( PwmApplication.DOMAIN_STARTUP_THREADS, callables, pwmApplication.getSessionLabel(), PwmDomainUtil.class );
+        final List<Optional<PwmUnrecoverableException>> domainStartException = pwmApplication.getPwmScheduler()
+                .executeImmediateThreadPerJobAndAwaitCompletion(
+                        PwmApplication.DOMAIN_STARTUP_THREAD_COUNT,
+                        callables,
+                        pwmApplication.getSessionLabel(),
+                        PwmDomainUtil.class );
 
         final Optional<PwmUnrecoverableException> domainStartupException = domainStartException.stream()
                 .filter( Optional::isPresent )
@@ -95,20 +101,13 @@ class PwmDomainUtil
             throw domainStartupException.get();
         }
 
-        LOGGER.trace( () -> "completed domain initialization for domains", () -> TimeDuration.fromCurrent( domainInitStartTime ) );
+        LOGGER.trace( pwmApplication.getSessionLabel(), () -> "completed domain initialization for domains",
+                TimeDuration.fromCurrent( domainInitStartTime ) );
     }
 
-    private static class DomainInitializingCallable implements Callable<Optional<PwmUnrecoverableException>>
+    private static Callable<Optional<PwmUnrecoverableException>> makeCallableDomainInit( final PwmDomain pwmDomain )
     {
-        private final PwmDomain pwmDomain;
-
-        DomainInitializingCallable( final PwmDomain pwmDomain )
-        {
-            this.pwmDomain = pwmDomain;
-        }
-
-        @Override
-        public Optional<PwmUnrecoverableException> call()
+        return () ->
         {
             try
             {
@@ -119,10 +118,10 @@ class PwmDomainUtil
             {
                 return Optional.of( e );
             }
-        }
+        };
     }
 
-    static Map<DomainID, PwmDomain> reInitDomains(
+    static void reInitDomains(
             final PwmApplication pwmApplication,
             final AppConfig newConfig,
             final AppConfig oldConfig
@@ -131,13 +130,19 @@ class PwmDomainUtil
     {
         final Map<DomainModifyCategory, Set<DomainID>> categorizedDomains = categorizeDomainModifications( newConfig, oldConfig );
 
+        categorizedDomains.forEach( (  modifyCategory, domainIDSet ) -> domainIDSet.forEach( domainID ->
+                LOGGER.trace( pwmApplication.getSessionLabel(), () -> "domain '" + domainID
+                        + "' configuration modification detected as: " + modifyCategory ) ) );
+
         final Set<PwmDomain> deletedDomains = pwmApplication.domains().entrySet().stream()
-                .filter( e -> categorizedDomains.get( DomainModifyCategory.obsolete ).contains( e.getKey() ) )
+                .filter( e -> categorizedDomains.get( DomainModifyCategory.removed ).contains( e.getKey() ) )
                 .map( Map.Entry::getValue ).collect( Collectors.toSet() );
+
 
         final Set<PwmDomain> newDomains = pwmApplication.domains().entrySet().stream()
                 .filter( e -> categorizedDomains.get( DomainModifyCategory.created ).contains( e.getKey() ) )
                 .map( Map.Entry::getValue ).collect( Collectors.toSet() );
+
 
         final Map<DomainID, PwmDomain> returnDomainMap = new TreeMap<>( pwmApplication.domains().entrySet().stream()
                 .filter( e -> categorizedDomains.get( DomainModifyCategory.unchanged ).contains( e.getKey() ) )
@@ -145,18 +150,31 @@ class PwmDomainUtil
 
         for ( final DomainID modifiedDomainID : categorizedDomains.get( DomainModifyCategory.modified ) )
         {
+            LOGGER.trace( pwmApplication.getSessionLabel(), () -> "domain '" + modifiedDomainID
+                    + "' configuration has changed and requires a restart" );
             deletedDomains.add( pwmApplication.domains().get( modifiedDomainID ) );
             final PwmDomain newDomain = new PwmDomain( pwmApplication, modifiedDomainID );
             newDomains.add( newDomain );
             returnDomainMap.put( modifiedDomainID, newDomain );
         }
 
+        pwmApplication.setDomains( returnDomainMap );
 
-        initDomains( pwmApplication, newDomains );
+        if ( newDomains.isEmpty() && deletedDomains.isEmpty() )
+        {
+            LOGGER.debug( pwmApplication.getSessionLabel(),
+                    () -> "no domain-level settings have been changed, restart of domain services is not required" );
+        }
 
-        processDeletedDomains( pwmApplication, deletedDomains );
+        if ( !newDomains.isEmpty() )
+        {
+            initDomains( pwmApplication, newDomains );
+        }
 
-        return Collections.unmodifiableMap( returnDomainMap );
+        if ( !deletedDomains.isEmpty() )
+        {
+            processDeletedDomains( pwmApplication, deletedDomains );
+        }
     }
 
     private static void processDeletedDomains(
@@ -164,69 +182,122 @@ class PwmDomainUtil
             final Set<PwmDomain> deletedDomains
     )
     {
-        // 1 minute later ( to avoid interrupting any in-progress requests, shutdown any obsoleted domains
-        if ( !deletedDomains.isEmpty() )
+        if ( deletedDomains.isEmpty() )
         {
-            pwmApplication.getPwmScheduler().immediateExecuteRunnableInNewThread( () ->
-                    {
-                        TimeDuration.MINUTE.pause();
-                        final Instant startTime = Instant.now();
-                        LOGGER.trace( pwmApplication.getSessionLabel(), () -> "shutting down obsoleted domain services" );
-                        deletedDomains.forEach( PwmDomain::shutdown );
-                        LOGGER.debug( pwmApplication.getSessionLabel(), () -> "shut down obsoleted domain services completed",
-                                () -> TimeDuration.fromCurrent( startTime ) );
-                    },
-                    pwmApplication.getSessionLabel(),
-                    "obsoleted domain cleanup" );
+            return;
         }
 
+        final Instant startTime = Instant.now();
+        LOGGER.trace( pwmApplication.getSessionLabel(), () -> "shutting down obsoleted domain services" );
+        deletedDomains.forEach( PwmDomain::shutdown );
+        LOGGER.debug( pwmApplication.getSessionLabel(), () -> "shut down obsoleted domain services completed",
+                TimeDuration.fromCurrent( startTime ) );
     }
 
     enum DomainModifyCategory
     {
-        obsolete,
-        unchanged,
-        modified,
-        created,
+        removed( new RemovalClassifier() ),
+        unchanged( new UnchangedClassifier() ),
+        modified( new ModifiedClassifier() ),
+        created( new CreationClassifier() ),;
+
+        private final DomainModificationClassifier classifier;
+
+        DomainModifyCategory( final DomainModificationClassifier classifier )
+        {
+            this.classifier = classifier;
+        }
+
+        public DomainModificationClassifier classifier()
+        {
+            return classifier;
+        }
     }
 
-    private static Map<DomainModifyCategory, Set<DomainID>> categorizeDomainModifications(
+    public static Map<DomainModifyCategory, Set<DomainID>> categorizeDomainModifications(
             final AppConfig newConfig,
             final AppConfig oldConfig
     )
     {
-        final Map<DomainModifyCategory, Set<DomainID>> types = new EnumMap<>( DomainModifyCategory.class );
+        final Set<StoredConfigKey> modifiedValues = StoredConfigurationUtil.changedValues(
+                newConfig.getStoredConfiguration(),
+                oldConfig.getStoredConfiguration() );
 
+        return EnumUtil.enumStream( DomainModifyCategory.class )
+                .collect( Collectors.toUnmodifiableMap(
+                        Function.identity(),
+                        entry -> entry.classifier().categorize( newConfig, oldConfig, modifiedValues )
+                ) );
+    }
+
+    interface DomainModificationClassifier
+    {
+        Set<DomainID> categorize( AppConfig newConfig, AppConfig oldConfig, Set<StoredConfigKey> modifiedValues );
+    }
+
+    private static class RemovalClassifier implements DomainModificationClassifier
+    {
+        @Override
+        public Set<DomainID> categorize(
+                final AppConfig newConfig,
+                final AppConfig oldConfig,
+                final Set<StoredConfigKey> modifiedValues
+        )
         {
-            final Set<DomainID> obsoleteDomains = new HashSet<>( oldConfig.getDomainConfigs().keySet() );
-            obsoleteDomains.removeAll( newConfig.getDomainConfigs().keySet() );
-            types.put( DomainModifyCategory.obsolete, Collections.unmodifiableSet( obsoleteDomains ) );
+            final Set<DomainID> removedDomains = new HashSet<>( oldConfig.getDomainConfigs().keySet() );
+            removedDomains.removeAll( newConfig.getDomainConfigs().keySet() );
+            return CollectionUtil.stripNulls( removedDomains );
         }
+    }
 
+    private static class CreationClassifier implements DomainModificationClassifier
+    {
+        @Override
+        public Set<DomainID> categorize(
+                final AppConfig newConfig,
+                final AppConfig oldConfig,
+                final Set<StoredConfigKey> modifiedValues
+        )
         {
             final Set<DomainID> createdDomains = new HashSet<>( newConfig.getDomainConfigs().keySet() );
             createdDomains.removeAll( oldConfig.getDomainConfigs().keySet() );
-            types.put( DomainModifyCategory.created, Collections.unmodifiableSet( createdDomains ) );
+            return CollectionUtil.stripNulls( createdDomains );
         }
+    }
 
-        final Set<DomainID> unchangedDomains = new HashSet<>();
-        final Set<DomainID> modifiedDomains = new HashSet<>();
-        for ( final DomainID domainID : newConfig.getDomainConfigs().keySet() )
+    private static class UnchangedClassifier implements DomainModificationClassifier
+    {
+        @Override
+        public Set<DomainID> categorize(
+                final AppConfig newConfig,
+                final AppConfig oldConfig,
+                final Set<StoredConfigKey> modifiedValues
+        )
         {
-            final DomainConfig newDomainConfig = newConfig.getDomainConfigs().get( domainID );
-            final String oldValueHash = oldConfig.getDomainConfigs().get( newDomainConfig.getDomainID() ).getValueHash();
-
-            if ( Objects.equals( oldValueHash, newDomainConfig.getValueHash() ) )
-            {
-                unchangedDomains.add( domainID );
-            }
-            else
-            {
-                modifiedDomains.add( domainID );
-            }
+            final Set<DomainID> persistentDomains = new HashSet<>(
+                    CollectionUtil.setUnion(
+                            newConfig.getDomainConfigs().keySet(),
+                            oldConfig.getDomainConfigs().keySet() ) );
+            persistentDomains.removeAll( StoredConfigKey.uniqueDomains( modifiedValues ) );
+            return Set.copyOf( persistentDomains );
         }
-        types.put( DomainModifyCategory.unchanged, Collections.unmodifiableSet( unchangedDomains ) );
-        types.put( DomainModifyCategory.modified, Collections.unmodifiableSet( modifiedDomains ) );
-        return Collections.unmodifiableMap( types );
+    }
+
+    private static class ModifiedClassifier implements DomainModificationClassifier
+    {
+        @Override
+        public Set<DomainID> categorize(
+                final AppConfig newConfig,
+                final AppConfig oldConfig,
+                final Set<StoredConfigKey> modifiedValues
+        )
+        {
+            final Set<DomainID> modifiedDomains = new HashSet<>(
+                    CollectionUtil.setUnion(
+                            newConfig.getDomainConfigs().keySet(),
+                            oldConfig.getDomainConfigs().keySet() ) );
+            modifiedDomains.retainAll( StoredConfigKey.uniqueDomains( modifiedValues ) );
+            return Set.copyOf( modifiedDomains );
+        }
     }
 }

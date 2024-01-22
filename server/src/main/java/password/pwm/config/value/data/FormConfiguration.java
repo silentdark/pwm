@@ -34,10 +34,8 @@ import password.pwm.i18n.Display;
 import password.pwm.util.i18n.LocaleHelper;
 import password.pwm.util.java.StringUtil;
 
-import java.io.Serializable;
 import java.math.BigInteger;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -50,7 +48,7 @@ import java.util.regex.PatternSyntaxException;
 
 @Value
 @Builder( toBuilder = true )
-public class FormConfiguration implements Serializable
+public class FormConfiguration
 {
     public enum Type
     {
@@ -121,15 +119,6 @@ public class FormConfiguration implements Serializable
 
     @Builder.Default
     private Map<String, String> selectOptions = Collections.emptyMap();
-
-    @Builder.Default
-    private List<String> mimeTypes = Arrays.asList(
-            "image/gif",
-            "image/png",
-            "image/jpeg",
-            "image/bmp",
-            "image/webp"
-    );
 
     @Builder.Default
     private int maximumSize = 65000;

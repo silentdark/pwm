@@ -22,6 +22,7 @@ package password.pwm.http.servlet;
 
 import com.novell.ldapchai.exception.ChaiUnavailableException;
 import password.pwm.PwmConstants;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.UserIdentity;
 import password.pwm.config.PwmSetting;
 import password.pwm.error.ErrorInformation;
@@ -53,6 +54,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * User interaction servlet for form-based authentication.   Depending on how PWM is deployed,
@@ -72,6 +74,13 @@ import java.util.Map;
 public class LoginServlet extends ControlledPwmServlet
 {
     private static final PwmLogger LOGGER = PwmLogger.getLogger( LoginServlet.class.getName() );
+
+    @Override
+    protected PwmLogger getLogger()
+    {
+        return LOGGER;
+    }
+
 
     public enum LoginServletAction implements ProcessAction
     {
@@ -94,9 +103,9 @@ public class LoginServlet extends ControlledPwmServlet
     }
 
     @Override
-    public Class<? extends ProcessAction> getProcessActionsClass( )
+    public Optional<Class<? extends ProcessAction>> getProcessActionsClass( )
     {
-        return LoginServletAction.class;
+        return Optional.of( LoginServletAction.class );
     }
 
     private boolean passwordOnly( final PwmRequest pwmRequest )
@@ -219,7 +228,10 @@ public class LoginServlet extends ControlledPwmServlet
                 ? new PasswordData( passwordStr )
                 : null;
         final String context = valueMap.get( PwmConstants.PARAM_CONTEXT );
-        final String ldapProfile = valueMap.get( PwmConstants.PARAM_LDAP_PROFILE );
+
+        final Optional<ProfileID> ldapProfile = pwmRequest.getPwmDomain().getConfig()
+                .ldapProfileForStringId( valueMap.get( PwmConstants.PARAM_LDAP_PROFILE ) );
+
         final String recaptchaResponse = valueMap.get( CaptchaUtility.PARAM_RECAPTCHA_FORM_NAME );
 
 
@@ -254,7 +266,7 @@ public class LoginServlet extends ControlledPwmServlet
         }
         else
         {
-            sessionAuthenticator.searchAndAuthenticateUser( username, password, context, ldapProfile );
+            sessionAuthenticator.searchAndAuthenticateUser( username, password, context, ldapProfile.orElse( null ) );
         }
 
         // if here then login was successful

@@ -212,6 +212,10 @@ html[dir="rtl"] table td.key {
     display: none;
 }
 
+.noopacity {
+    opacity: 0;
+}
+
 /* disable ie password reveal */
 input[type=password]::-ms-reveal {
     display: none;
@@ -317,7 +321,6 @@ input[type=password]::-ms-reveal {
     width: 165px;
     height: 165px;
     overflow: hidden;
-    z-index: 600;
     font-weight: normal;
 }
 
@@ -572,23 +575,21 @@ html[dir="rtl"] #header-center-right {
     position: absolute;
 }
 
-#header-warning-backdrop {
-    bottom: 0;
-    left: 0;
-    position: absolute;
-    right: 0;
-    top: 0;
-    z-index: 1000;
-}
-
 #header-warning {
+    color: black;
     text-align: center;
     position: absolute;
-    width: 200px;
+    z-index: 100;
+    min-width: 200px;
     border: 2px solid #aaaaaa;
     background-color: #DDDDDD;
     padding: 15px;
-    z-index: 1000;
+    right: 0;
+}
+
+#header-warning-content {
+    position: relative;
+    text-align: center;
 }
 
 #header-warning span {
@@ -643,6 +644,7 @@ html[dir="rtl"] #header-center-right {
 }
 
 .header-error {
+    text-align: center;
     color: #fff;
     white-space: normal;
     max-width: 600px;
@@ -783,6 +785,7 @@ html[dir="rtl"] #header-center-right {
     overflow: auto;
     font-family: monospace;
     white-space: pre-wrap;
+    height: 400px;
 }
 
 /* hide recaptcha iframe near footer */
@@ -819,18 +822,6 @@ img.qrcodeimage {
 .action-icon {
     margin-left: 3px;
     cursor: pointer;
-}
-
-.pageOverlay {
-    top: 0;
-    left: 0;
-    position: absolute;
-    height: 100%;
-    width: 100%;
-    z-index: 1001;
-    display: none;
-    opacity: 0.6;
-    background-color: black;
 }
 
 .grid.tall {
@@ -891,6 +882,14 @@ select {
 .icon-likeUserSearch {
     cursor: pointer;
     float: right;
+}
+
+.locale-select-table {
+    width: auto;
+    margin-right: auto;
+    margin-left: auto;
+    overflow-x: scroll;
+    cursor: pointer;
 }
 
 #localeSelectionMenu {
@@ -968,6 +967,10 @@ input[type=search] {
     font-size: 13px;
 }
 
+.formFieldDescription {
+    margin: 5px;
+}
+
 .formFieldLabel {
     font-size: 13px;
     font-weight: bold;
@@ -1023,15 +1026,35 @@ input[type=search] {
     padding-bottom: 10px;
 }
 
+.formFieldRequiredAsterisk {
+    font-style: italic;
+    font-size: smaller;
+}
+
+.headerProgressBar {
+    width: 600px;
+    padding: 5px;
+    margin-top: 20px;
+    position: relative;
+    margin-left: auto;
+    margin-right: auto;
+    clear: both;
+}
+
 progress:not([value]) {
     width: 100%;
     height: 20px;
+    transition: all 1s;
 }
 
 progress[value] {
     height: 20px;
     width: 100%;
     color: orange;
+}
+
+progress::-webkit-progress-value {
+    transition: all 1s;
 }
 
 .blink {
@@ -1116,6 +1139,7 @@ dialog {
     border-radius: 3px;
     padding: 0;
     max-width: 100%;
+    z-index: 3;
 }
 
 dialog .titleBar {
@@ -1387,13 +1411,8 @@ dialog .closeIcon {
     content: "";
 }
 
-​
 .center {
     text-align: center;
-}
-
-.display-none {
-    display: none;
 }
 
 #header-menu-icon::after {
@@ -1481,14 +1500,6 @@ dialog .closeIcon {
     z-index: 1002;
 }
 
-html[dir="rtl"] .nihilo .dijitTabContainerTop-tabs {
-    text-align: right;
-}
-
-html[dir="rtl"] .nihilo .dijitTabContainerTop-tabs > .dijitTabContent:first-child {
-    margin-right: 10px;
-}
-
 @keyframes wait-fadein {
     0% {
         opacity: 0
@@ -1561,14 +1572,72 @@ html[dir="rtl"] .errorDetail {
     direction: ltr;
     text-align: right;
     unicode-bidi: bidi-override;
+    max-height: 250px;
+    overflow-y: auto
 }
 
 html[dir="rtl"] .message.message-error .errorDetail {
     display: inline-block;
+    max-height: 250px;
+    overflow-y: auto
+}
+
+.pwm-icon-button {
+    cursor: pointer;
 }
 
 #strengthLabel {
     white-space: nowrap;
+    margin: 0;
+}
+
+#strength-tooltip-icon {
+    display: inline-block;
+}
+
+#strengthLabelText {
+    display: inline-block;
+}
+
+#strengthBox {
+    display: inline-block;
+    vertical-align: top;
+    margin-left: 10px;
+    min-width: 140px;
+    transition: opacity 0.5s linear;
+}
+
+#passwordStrengthProgress {
+    display: block;
+    left: 0;
+    height: 12px;
+    width: 100px;
+    border: 1px solid #697374;
+}
+
+#passwordStrengthProgress::-webkit-progress-bar {
+    border-radius: 0;
+    background-color: white;
+}
+
+#passwordStrengthProgress::-webkit-progress-value {
+    border-radius: 0;
+    transition: all 1s;
+}
+#passwordStrengthProgress[data-strength="VeryLow"]::-webkit-progress-value{
+    background: linear-gradient(to right, rgba(200, 25, 62, .1), rgba(200, 25, 62, 1));
+}
+#passwordStrengthProgress[data-strength="Low"]::-webkit-progress-value{
+    background: linear-gradient(to right, rgba(177, 107, 62, .1), rgba(177, 107, 62, 1));
+}
+#passwordStrengthProgress[data-strength="Medium"]::-webkit-progress-value{
+    background: linear-gradient(to right, rgba(170, 124, 62, .1), rgba(170, 124, 62, 1));
+}
+#passwordStrengthProgress[data-strength="High"]::-webkit-progress-value{
+    background: linear-gradient(to right, rgba(163, 154, 62, .1), rgba(163, 154, 62, 1));
+}
+#passwordStrengthProgress[data-strength="VeryHigh"]::-webkit-progress-value{
+    background: linear-gradient(to right, rgba(140, 237, 63, .1), rgba(140, 237, 63, 1));
 }
 
 /*** TABS ****/
@@ -1769,7 +1838,7 @@ table.ias-table, table.ias-table td {
 }
 
 .hidden {
-   display: none;
+    visibility: hidden;
 }
 
 .logViewer {
@@ -1791,4 +1860,27 @@ table.ias-table, table.ias-table td {
 
 .pre-whitespace {
     white-space: pre;
+}
+
+#confirmMarkBox {
+    display: inline-block;
+    vertical-align: top;
+    margin-left: 10px;
+    margin-top: 10px;
+    min-width: 140px;
+    transition: opacity 0.5s linear;
+}
+
+.confirmCheckMark {
+    background-image: url("greenCheck.png");
+    background-size: cover;
+    width: 15px;
+    height: 15px;
+}
+
+.confirmCrossMark {
+    background-image: url("redX.png");
+    background-size: cover;
+    width: 15px;
+    height: 15px;
 }

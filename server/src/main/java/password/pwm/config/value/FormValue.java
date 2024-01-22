@@ -20,8 +20,8 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.PwmSettingSyntax;
 import password.pwm.config.stored.XmlOutputProcessData;
@@ -54,7 +54,7 @@ public class FormValue extends AbstractValue implements StoredValue
         return new StoredValueFactory()
         {
             @Override
-            public FormValue fromJson( final String input )
+            public FormValue fromJson( final PwmSetting pwmSetting, final String input )
             {
                 if ( input == null )
                 {
@@ -101,7 +101,7 @@ public class FormValue extends AbstractValue implements StoredValue
         final List<XmlElement> returnList = new ArrayList<>( values.size() );
         for ( final FormConfiguration value : values )
         {
-            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
             valueElement.setText( JsonFactory.get().serialize( value ) );
             returnList.add( valueElement );
         }
@@ -185,7 +185,6 @@ public class FormValue extends AbstractValue implements StoredValue
             }
             if ( formRow.getType() == FormConfiguration.Type.photo )
             {
-                sb.append( " MimeTypes: " ).append( StringUtil.collectionToString( formRow.getMimeTypes() ) ).append( '\n' );
                 sb.append( " MaxSize: " ).append( formRow.getMaximumSize() ).append( '\n' );
             }
         }

@@ -23,17 +23,20 @@ package password.pwm.util.cli.commands;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import password.pwm.PwmApplication;
 import password.pwm.PwmConstants;
+import password.pwm.bean.DomainID;
+import password.pwm.bean.SessionLabel;
+import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthRecord;
 import password.pwm.svc.PwmService;
-import password.pwm.svc.report.ReportCsvUtility;
+import password.pwm.svc.report.ReportProcess;
+import password.pwm.svc.report.ReportProcessRequest;
 import password.pwm.svc.report.ReportService;
 import password.pwm.util.cli.CliParameters;
 
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -47,18 +50,18 @@ public class UserReportCommand extends AbstractCliCommand
     void doCommand( )
             throws IOException
     {
-        final File outputFile = ( File ) cliEnvironment.getOptions().get( OUTPUT_FILE_OPTIONNAME );
+        final Path outputFile = ( Path ) cliEnvironment.getOptions().get( OUTPUT_FILE_OPTIONNAME );
 
-        try ( OutputStream outputFileStream = new BufferedOutputStream( new FileOutputStream( outputFile ) ) )
+        try ( OutputStream outputFileStream = Files.newOutputStream( outputFile ) )
         {
 
             final PwmApplication pwmApplication = cliEnvironment.getPwmApplication();
 
-            final ReportService userReport = pwmApplication.getReportService();
-            if ( userReport.status() != PwmService.STATUS.OPEN )
+            final ReportService reportService = pwmApplication.domains().get( DomainID.DOMAIN_ID_DEFAULT ).getReportService();
+            if ( reportService.status() != PwmService.STATUS.OPEN )
             {
                 out( "report service is not open or enabled" );
-                final List<HealthRecord> healthIssues = userReport.healthCheck();
+                final List<HealthRecord> healthIssues = reportService.healthCheck();
                 if ( healthIssues != null )
                 {
                     for ( final HealthRecord record : healthIssues )
@@ -69,12 +72,19 @@ public class UserReportCommand extends AbstractCliCommand
                 return;
             }
 
-            final ReportCsvUtility reportCsvUtility = new ReportCsvUtility( pwmApplication );
-            reportCsvUtility.outputToCsv( outputFileStream, true, PwmConstants.DEFAULT_LOCALE );
+            final ReportProcessRequest reportProcessRequest = ReportProcessRequest.builder()
+                    .locale( PwmConstants.DEFAULT_LOCALE )
+                    .sessionLabel( SessionLabel.CLI_SESSION_LABEL )
+                    .build();
+
+            try ( ReportProcess reportProcess = reportService.createReportProcess( reportProcessRequest ) )
+            {
+                reportProcess.startReport( outputFileStream );
+            }
         }
-        catch ( final IOException e )
+        catch ( final IOException | PwmUnrecoverableException e )
         {
-            out( "unable to open file '" + outputFile.getAbsolutePath() + "' for writing" );
+            out( "unable to open file '" + outputFile + "' for writing" );
             System.exit( -1 );
         }
 

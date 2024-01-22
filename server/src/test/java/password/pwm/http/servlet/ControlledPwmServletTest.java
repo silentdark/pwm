@@ -20,8 +20,8 @@
 
 package password.pwm.http.servlet;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.reflections.Reflections;
 import org.reflections.scanners.Scanners;
 import org.reflections.util.ClasspathHelper;
@@ -30,6 +30,7 @@ import password.pwm.PwmConstants;
 import password.pwm.http.ProcessStatus;
 import password.pwm.http.PwmRequest;
 import password.pwm.util.java.JavaHelper;
+import password.pwm.util.localdb.TestHelper;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -41,6 +42,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public class ControlledPwmServletTest
@@ -52,17 +55,21 @@ public class ControlledPwmServletTest
 
         for ( final Class<? extends ControlledPwmServlet> controlledPwmServlet : dataMap.keySet() )
         {
-            final Class<? extends AbstractPwmServlet.ProcessAction> processActionsClass = controlledPwmServlet
+            final Optional<Class<? extends AbstractPwmServlet.ProcessAction>> optionalProcessActionsClass = controlledPwmServlet
                     .getDeclaredConstructor()
                     .newInstance()
                     .getProcessActionsClass();
 
-            if ( !processActionsClass.isEnum() )
+            optionalProcessActionsClass.ifPresent( processActionClass ->
             {
-                Assert.fail( controlledPwmServlet.getName() + " process action class must be an enum" );
-            }
+                if ( !processActionClass.isEnum() )
+                {
+                    Assertions.fail( controlledPwmServlet.getName() + " process action class must be an enum" );
+                }
+            } );
         }
     }
+
 
     @Test
     public void testActionHandlerAccessibility()
@@ -77,7 +84,7 @@ public class ControlledPwmServletTest
                 final Method method = dataMap.get( controlledPwmServlet ).get( methodName );
                 if ( !Modifier.isPublic( method.getModifiers() ) )
                 {
-                    Assert.fail( servletName + "#" + method.getName() + " must be public " );
+                    Assertions.fail( servletName + "#" + method.getName() + " must be public " );
                 }
             }
         }
@@ -96,7 +103,7 @@ public class ControlledPwmServletTest
                 final Method method = dataMap.get( controlledPwmServlet ).get( methodName );
                 if ( method.getReturnType() != ProcessStatus.class )
                 {
-                    Assert.fail( servletName + "#" + method.getName() + " must have return type of " + ProcessStatus.class.getName() );
+                    Assertions.fail( servletName + "#" + method.getName() + " must have return type of " + ProcessStatus.class.getName() );
                 }
             }
         }
@@ -116,15 +123,34 @@ public class ControlledPwmServletTest
                 final Class[] returnTypes = method.getParameterTypes();
                 if ( returnTypes.length != 1 )
                 {
-                    Assert.fail( servletName + "#" + method.getName() + " must have exactly one parameter" );
+                    Assertions.fail( servletName + "#" + method.getName() + " must have exactly one parameter" );
                 }
                 if ( !returnTypes[0].equals( PwmRequest.class ) )
                 {
-                    Assert.fail( servletName + "#" + method.getName() + " must have exactly one parameter of type " + PwmRequest.class.getName() );
+                    Assertions.fail( servletName + "#" + method.getName() + " must have exactly one parameter of type " + PwmRequest.class.getName() );
                 }
             }
         }
     }
+
+    @Test
+    public void testDuplicateActionHandlers()
+    {
+        final Map<Class<? extends ControlledPwmServlet>, Map<String, Method>> dataMap = getClassAndMethods();
+
+        for ( final Class<? extends ControlledPwmServlet> controlledPwmServlet : dataMap.keySet() )
+        {
+            TestHelper.testAttributeUniqueness(
+                    List.of( controlledPwmServlet ),
+                    servlet -> JavaHelper.getAllMethodsForClass( controlledPwmServlet ).stream()
+                            .map( method -> method.getAnnotation( ControlledPwmServlet.ActionHandler.class ) )
+                            .filter( Objects::nonNull )
+                            .map( ControlledPwmServlet.ActionHandler::action )
+                            .toList(),
+                    "action handler attribution" );
+        }
+    }
+
 
     @Test
     public void testActionHandlerMethodNaming()
@@ -143,7 +169,7 @@ public class ControlledPwmServletTest
                     final String actionName = actionHandler.action();
                     if ( !methodName.toLowerCase().contains( actionName.toLowerCase() ) )
                     {
-                        Assert.fail( "method " + servletName + "#" + methodName + " must have the ActionHandler name '"
+                        Assertions.fail( "method " + servletName + "#" + methodName + " must have the ActionHandler name '"
                                 + actionName + "' as part of the method name." );
                     }
                 }
@@ -162,32 +188,37 @@ public class ControlledPwmServletTest
         {
             final String servletName = controlledPwmServlet.getName();
 
-            final Class<? extends AbstractPwmServlet.ProcessAction> processActionsClass = controlledPwmServlet
-                    .getDeclaredConstructor(  )
-                    .newInstance().getProcessActionsClass();
-            final List<String> names = new ArrayList<>();
-            for ( final Object enumObject : processActionsClass.getEnumConstants() )
-            {
-                names.add( ( ( Enum ) enumObject ).name() );
-            }
+            final Optional<Class<? extends AbstractPwmServlet.ProcessAction>> optionalProcessActionsClass = controlledPwmServlet
+                    .getDeclaredConstructor()
+                    .newInstance()
+                    .getProcessActionsClass();
 
+            optionalProcessActionsClass.ifPresent( processActionsClass ->
             {
-                final Collection<String> missingActionHandlers = new HashSet<>( names );
-                missingActionHandlers.removeAll( dataMap.get( controlledPwmServlet ).keySet() );
-                if ( !missingActionHandlers.isEmpty() )
+                final List<String> names = new ArrayList<>();
+                for ( final Object enumObject : processActionsClass.getEnumConstants() )
                 {
-                    Assert.fail( servletName + " does not have an action handler for action " + missingActionHandlers.iterator().next() );
+                    names.add( ( ( Enum ) enumObject ).name() );
                 }
-            }
 
-            {
-                final Collection<String> superflousActionHandlers = new HashSet<>( dataMap.get( controlledPwmServlet ).keySet() );
-                superflousActionHandlers.removeAll( names );
-                if ( !superflousActionHandlers.isEmpty() )
                 {
-                    Assert.fail( servletName + " has an action handler for action " + superflousActionHandlers.iterator().next() + " but no such ProcessAction exists" );
+                    final Collection<String> missingActionHandlers = new HashSet<>( names );
+                    missingActionHandlers.removeAll( dataMap.get( controlledPwmServlet ).keySet() );
+                    if ( !missingActionHandlers.isEmpty() )
+                    {
+                        Assertions.fail( servletName + " does not have an action handler for action " + missingActionHandlers.iterator().next() );
+                    }
                 }
-            }
+
+                {
+                    final Collection<String> superflousActionHandlers = new HashSet<>( dataMap.get( controlledPwmServlet ).keySet() );
+                    superflousActionHandlers.removeAll( names );
+                    if ( !superflousActionHandlers.isEmpty() )
+                    {
+                        Assertions.fail( servletName + " has an action handler for action " + superflousActionHandlers.iterator().next() + " but no such ProcessAction exists" );
+                    }
+                }
+            } );
         }
     }
 

@@ -21,8 +21,8 @@
 package password.pwm.config.value;
 
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.StoredConfigXmlConstants;
@@ -37,7 +37,6 @@ import password.pwm.util.java.LazySupplier;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmSecurityKey;
 
-import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -45,9 +44,7 @@ import java.util.Optional;
 
 public class PasswordValue implements StoredValue
 {
-    private static final long serialVersionUID = 1L;
-
-    private final transient LazySupplier<String> valueHashSupplier = new LazySupplier<>( () -> AbstractValue.valueHashComputer( PasswordValue.this ) );
+    private final transient LazySupplier<String> valueHashSupplier = LazySupplier.create( () -> AbstractValue.valueHashComputer( PasswordValue.this ) );
 
     private final PasswordData value;
 
@@ -66,7 +63,7 @@ public class PasswordValue implements StoredValue
         return new StoredValueFactory()
         {
             @Override
-            public PasswordValue fromJson( final String value )
+            public PasswordValue fromJson( final PwmSetting pwmSetting, final String value )
             {
                 final String strValue = JsonFactory.get().deserialize( value, String.class );
                 if ( strValue != null && !strValue.isEmpty() )
@@ -160,10 +157,10 @@ public class PasswordValue implements StoredValue
     {
         if ( value == null )
         {
-            final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+            final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
             return Collections.singletonList( valueElement );
         }
-        final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+        final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
         try
         {
             final String encodedValue = StoredValueEncoder.encode(
@@ -192,7 +189,7 @@ public class PasswordValue implements StoredValue
     }
 
     @Override
-    public Serializable toDebugJsonObject( final Locale locale )
+    public Object toDebugJsonObject( final Locale locale )
     {
         return PwmConstants.LOG_REMOVED_VALUE_REPLACEMENT;
     }

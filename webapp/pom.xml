@@ -9,6 +9,7 @@
 
     <modelVersion>4.0.0</modelVersion>
 
+    <url>https://github.com/pwm-project/pwm</url>
     <artifactId>pwm-webapp</artifactId>
     <packaging>war</packaging>
 
@@ -33,34 +34,6 @@
                 <webXmlForJspPreCompiledInjection>${basedir}/src/main/webapp/WEB-INF/web.xml</webXmlForJspPreCompiledInjection>
             </properties>
         </profile>
-        <profile>
-            <!-- Builds a zip file containing the built war file, along with the supplemental directory -->
-            <id>release</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-assembly-plugin</artifactId>
-                        <version>3.3.0</version>
-                        <configuration>
-                            <descriptors>
-                                <descriptor>src/build/assembly/release-bundle.xml</descriptor>
-                            </descriptors>
-                            <finalName>${project.build.finalName}-${timestamp.iso}</finalName>
-                        </configuration>
-                        <executions>
-                            <execution>
-                                <id>make-release-bundle</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>single</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
     </profiles>
 
     <build>
@@ -68,43 +41,53 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-assembly-plugin</artifactId>
-                <version>3.3.0</version>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.0</version>
                 <executions>
                     <execution>
-                        <id>make-ldif-schema-zip</id>
+                        <id>copy-ldif-zip</id>
                         <phase>prepare-package</phase>
-                        <configuration>
-                            <finalName>${project.build.finalName}/public/reference/ldif-schema</finalName>
-                            <appendAssemblyId>false</appendAssemblyId>
-                            <descriptors>
-                                <descriptor>src/build/assembly/ldif-schema-zip.xml</descriptor>
-                            </descriptors>
-                        </configuration>
                         <goals>
-                            <goal>single</goal>
+                            <goal>copy</goal>
                         </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <artifactId>pwm-ldif</artifactId>
+                                    <groupId>${project.groupId}</groupId>
+                                    <version>${project.version}</version>
+                                    <type>jar</type>
+                                    <outputDirectory>${project.build.directory}/${project.build.finalName}/public/reference</outputDirectory>
+                                    <destFileName>ldif-schema.zip</destFileName>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
                     </execution>
                     <execution>
-                        <id>make-source-reference-zip</id>
+                        <id>copy-source-zip</id>
                         <phase>prepare-package</phase>
-                        <configuration>
-                            <finalName>${project.build.finalName}/public/reference/source</finalName>
-                            <appendAssemblyId>false</appendAssemblyId>
-                            <descriptors>
-                                <descriptor>src/build/assembly/source-reference.xml</descriptor>
-                            </descriptors>
-                        </configuration>
                         <goals>
-                            <goal>single</goal>
+                            <goal>copy</goal>
                         </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <artifactId>pwm-source</artifactId>
+                                    <groupId>${project.groupId}</groupId>
+                                    <version>${project.version}</version>
+                                    <type>jar</type>
+                                    <outputDirectory>${project.build.directory}/${project.build.finalName}/public/reference</outputDirectory>
+                                    <destFileName>source.zip</destFileName>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-war-plugin</artifactId>
-                <version>3.3.2</version>
+                <version>3.4.0</version>
                 <configuration>
                     <archiveClasses>false</archiveClasses>
                     <packagingExcludes>**/*.jsp</packagingExcludes>
@@ -112,21 +95,25 @@
 
                     <webXml>${webXmlForJspPreCompiledInjection}</webXml>
                     <archive>
+                        <manifest>
+                            <addDefaultEntries>false</addDefaultEntries>
+                            <addDefaultImplementationEntries>false</addDefaultImplementationEntries>
+                        </manifest>
                         <manifestEntries>
-                            <Implementation-Archive-Name>pwm.war</Implementation-Archive-Name>
+                            <Artifact-ID>${project.artifactId}</Artifact-ID>
                             <Implementation-Title>${project.name}</Implementation-Title>
                             <Implementation-Version>${project.version}</Implementation-Version>
                             <Implementation-Vendor>${project.organization.name}</Implementation-Vendor>
                             <Implementation-URL>${project.organization.url}</Implementation-URL>
-                            <Implementation-Build-Java-Spec-Version>${java.specification.version}</Implementation-Build-Java-Spec-Version>
-                            <Implementation-Revision>${build.revision}</Implementation-Revision>
-                            <Implementation-Version-Display>v${project.version} b${build.number} r${build.revision}</Implementation-Version-Display>
+                            <Implementation-Build-Java-Version>${maven.compiler.target}</Implementation-Build-Java-Version>
                             <SCM-Git-Branch>${git.branch}</SCM-Git-Branch>
                             <SCM-Git-Commit-ID>${git.commit.id}</SCM-Git-Commit-ID>
                             <SCM-Git-Commit-ID-Abbrev>${git.commit.id.abbrev}</SCM-Git-Commit-ID-Abbrev>
                             <SCM-Git-Commit-ID-Description>${git.commit.id.describe}</SCM-Git-Commit-ID-Description>
                             <SCM-Git-Commit-Timestamp>${git.commit.time}</SCM-Git-Commit-Timestamp>
-                            <SCM-Git-Commit-Dirty>${git.dirty}</SCM-Git-Commit-Dirty>                        </manifestEntries>
+                            <SCM-Git-Commit-Dirty>${git.dirty}</SCM-Git-Commit-Dirty>
+                            <SCM-Git-Remote-Origin-URL>${git.remote.origin.url}</SCM-Git-Remote-Origin-URL>
+                        </manifestEntries>
                     </archive>
                 </configuration>
             </plugin>
@@ -142,8 +129,8 @@
                         <phase>compile</phase>
                         <configuration>
                             <trimSpaces>true</trimSpaces>
-                            <compilerVersion>${maven.compiler.source}</compilerVersion>
                             <keepSources>false</keepSources>
+                            <threads>20</threads>
                         </configuration>
                     </execution>
                 </executions>
@@ -151,7 +138,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-deploy-plugin</artifactId>
-                <version>3.0.0-M2</version>
+                <version>3.1.1</version>
                 <executions>
                     <execution>
                         <phase>deploy</phase>
@@ -170,30 +157,11 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- builds xml file of dependencies and licenses for use in about page -->
             <plugin>
-                <!-- creates the classes directory early in the build so the attribution plugin doesn't fail -->
-                <artifactId>maven-antrun-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>generate-sources</id>
-                        <phase>generate-sources</phase>
-                        <configuration>
-                            <tasks>
-                                <mkdir dir="${project.build.directory}/classes"/>
-                            </tasks>
-                        </configuration>
-                        <goals>
-                            <goal>run</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-
-            <plugin>
-                <!-- builds xml file of dependencies and licenses for use in about page -->
                 <groupId>com.github.jinnovations</groupId>
                 <artifactId>attribution-maven-plugin</artifactId>
-                <version>0.9.8</version>
+                <version>0.9.9</version>
                 <executions>
                     <execution>
                         <goals>
@@ -297,17 +265,17 @@
         <dependency>
             <groupId>org.webjars.npm</groupId>
             <artifactId>dojo</artifactId>
-            <version>1.17.2</version>
+            <version>1.17.3</version>
         </dependency>
         <dependency>
             <groupId>org.webjars.npm</groupId>
             <artifactId>dijit</artifactId>
-            <version>1.17.2</version>
+            <version>1.17.3</version>
         </dependency>
         <dependency>
             <groupId>org.webjars.npm</groupId>
             <artifactId>dojox</artifactId>
-            <version>1.17.2</version>
+            <version>1.17.3</version>
         </dependency>
         <dependency>
             <groupId>org.webjars.npm</groupId>

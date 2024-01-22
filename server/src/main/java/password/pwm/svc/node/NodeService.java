@@ -34,7 +34,7 @@ import password.pwm.health.HealthMessage;
 import password.pwm.health.HealthRecord;
 import password.pwm.svc.AbstractPwmService;
 import password.pwm.svc.PwmService;
-import password.pwm.util.java.MiscUtil;
+import password.pwm.util.java.PwmUtil;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.logging.PwmLogger;
 
@@ -89,12 +89,13 @@ public class NodeService extends AbstractPwmService implements PwmService
 
                     default:
                         LOGGER.debug( () -> "no suitable storage method configured " );
-                        MiscUtil.unhandledSwitchStatement( dataStore );
+                        PwmUtil.unhandledSwitchStatement( dataStore );
                         return STATUS.CLOSED;
 
                 }
 
-                nodeMachine = new NodeMachine( pwmApplication, getExecutorService(), clusterDataServiceProvider, nodeServiceSettings );
+                nodeMachine = new NodeMachine( this, clusterDataServiceProvider, nodeServiceSettings );
+                scheduleFixedRateJob( nodeMachine.getHeartbeatProcess(), nodeServiceSettings.getHeartbeatInterval(), nodeServiceSettings.getHeartbeatInterval() );
             }
         }
         catch ( final PwmUnrecoverableException e )
@@ -106,7 +107,7 @@ public class NodeService extends AbstractPwmService implements PwmService
         catch ( final Exception e )
         {
             setStartupError( new ErrorInformation( PwmError.ERROR_NODE_SERVICE_ERROR, "error starting up node service: " + e.getMessage() ) );
-            LOGGER.error( getStartupError() );
+            LOGGER.error( getSessionLabel(), getStartupError() );
             return STATUS.CLOSED;
         }
 
@@ -205,5 +206,10 @@ public class NodeService extends AbstractPwmService implements PwmService
                 setStartupError( new ErrorInformation( PwmError.ERROR_NODE_SERVICE_ERROR, msg ) );
             }
         }
+    }
+
+    public PwmApplication getPwmApp()
+    {
+        return getPwmApplication();
     }
 }

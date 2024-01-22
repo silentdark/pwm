@@ -45,7 +45,7 @@ import password.pwm.svc.PwmService;
 import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.util.i18n.LocaleHelper;
-import password.pwm.util.java.MiscUtil;
+import password.pwm.util.java.PwmUtil;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.java.StatisticCounterBundle;
 import password.pwm.util.java.StringUtil;
@@ -73,7 +73,7 @@ public class AuditService extends AbstractPwmService implements PwmService
     private SyslogAuditService syslogManager;
     private ErrorInformation lastError;
     private AuditVault auditVault;
-    private final StatisticCounterBundle<DebugKey> statisticCounterBundle = new StatisticCounterBundle( DebugKey.class );
+    private final StatisticCounterBundle<DebugKey> statisticCounterBundle = new StatisticCounterBundle<>( DebugKey.class );
 
     enum DebugKey
     {
@@ -93,13 +93,13 @@ public class AuditService extends AbstractPwmService implements PwmService
 
         if ( pwmApplication.getApplicationMode() == null || pwmApplication.getApplicationMode() == PwmApplicationMode.READ_ONLY )
         {
-            LOGGER.warn( () -> "unable to start - Application is in read-only mode" );
+            LOGGER.warn( getSessionLabel(), () -> "unable to start - Application is in read-only mode" );
             return STATUS.CLOSED;
         }
 
         if ( pwmApplication.getLocalDB() == null || pwmApplication.getLocalDB().status() != LocalDB.Status.OPEN )
         {
-            LOGGER.warn( () -> "unable to start - LocalDB is not available" );
+            LOGGER.warn( getSessionLabel(), () -> "unable to start - LocalDB is not available" );
             return STATUS.CLOSED;
         }
 
@@ -182,7 +182,7 @@ public class AuditService extends AbstractPwmService implements PwmService
                 break;
 
             default:
-                MiscUtil.unhandledSwitchStatement( record.getEventCode().getType() );
+                PwmUtil.unhandledSwitchStatement( record.getEventCode().getType() );
 
         }
     }
@@ -327,7 +327,7 @@ public class AuditService extends AbstractPwmService implements PwmService
     {
         final AppConfig config = getPwmApplication().getConfig();
 
-        final CSVPrinter csvPrinter = MiscUtil.makeCsvPrinter( outputStream );
+        final CSVPrinter csvPrinter = PwmUtil.makeCsvPrinter( outputStream );
 
         csvPrinter.printComment( " " + PwmConstants.PWM_APP_NAME + " audit record output " );
         csvPrinter.printComment( " " + StringUtil.toIsoDate( Instant.now() ) );
@@ -401,7 +401,7 @@ public class AuditService extends AbstractPwmService implements PwmService
     {
         return ServiceInfoBean.builder()
                 .storageMethod( DataStorageMethod.LOCALDB )
-                .debugProperties( statisticCounterBundle.debugStats() )
+                .debugProperties( statisticCounterBundle.debugStats( PwmConstants.DEFAULT_LOCALE ) )
                 .build();
     }
 

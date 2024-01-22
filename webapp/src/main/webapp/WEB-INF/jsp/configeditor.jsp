@@ -33,10 +33,10 @@
 <%@ taglib uri="pwm" prefix="pwm" %>
 <html lang="<pwm:value name="<%=PwmValue.localeCode%>"/>" dir="<pwm:value name="<%=PwmValue.localeDir%>"/>">
 <% JspUtility.setFlag(pageContext, PwmRequestFlag.HIDE_LOCALE); %>
+<% JspUtility.setFlag(pageContext, PwmRequestFlag.INCLUDE_DOJO);%>
 <% JspUtility.setFlag(pageContext, PwmRequestFlag.HIDE_FOOTER_TEXT); %>
 <% JspUtility.setFlag(pageContext, PwmRequestFlag.INCLUDE_CONFIG_CSS); %>
 <% JspUtility.setFlag(pageContext, PwmRequestFlag.NO_MOBILE_CSS); %>
-<link href="<pwm:url url='/public/resources/webjars/dijit/themes/nihilo/nihilo.css' addContext="true"/>" rel="stylesheet" type="text/css"/>
 <%@ include file="fragment/header.jsp" %>
 <body class="nihilo">
 <style nonce="<pwm:value name="<%=PwmValue.cspNonce%>"/>" type="text/css">
@@ -210,11 +210,6 @@
 <pwm:script-ref url="/public/resources/js/configeditor.js"/>
 <pwm:script-ref url="/public/resources/js/admin.js"/>
 
-<%--Provide the angular code we made specifically for this page:--%>
-<link rel="stylesheet" type="text/css" href="<pwm:url url='/public/resources/webjars/pwm-client/vendor/textangular/textAngular.css' addContext="true"/>"/>
-<link rel="stylesheet" type="text/css" href="<pwm:url url='/public/resources/html-editor.css' addContext="true"/>"/>
-<pwm:script-ref url="/public/resources/webjars/pwm-client/vendor.js" />
-<pwm:script-ref url="/public/resources/webjars/pwm-client/configeditor.ng.js" />
 <%--/ Provide the angular code we made specifically for this page:--%>
 
 <%@ include file="fragment/footer.jsp" %>

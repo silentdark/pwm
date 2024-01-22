@@ -20,7 +20,6 @@
 
 package password.pwm;
 
-import com.novell.ldapchai.ChaiConstant;
 import org.apache.commons.csv.CSVFormat;
 import password.pwm.util.java.StringUtil;
 
@@ -60,6 +59,7 @@ public abstract class PwmConstants
     public static final String CHAI_API_VERSION = com.novell.ldapchai.ChaiConstant.CHAI_API_VERSION;
 
     public static final String DEFAULT_CONFIG_FILE_FILENAME = readPwmConstantsBundle( "defaultConfigFilename" );
+    public static final String DEFAULT_ENVIRONMENT_PROPERTIES_FILENAME = readPwmConstantsBundle( "defaultEnvironmentPropertiesFilename" );
     public static final String DEFAULT_PROPERTIES_CONFIG_FILE_FILENAME = readPwmConstantsBundle( "defaultPropertiesConfigFilename" );
 
     public static final String PWM_APP_NAME = readPwmConstantsBundle( "pwm.appName" );
@@ -74,7 +74,7 @@ public abstract class PwmConstants
     public static final Charset DEFAULT_CHARSET = StandardCharsets.UTF_8;
     public static final List<String> HIGHLIGHT_LOCALES = StringUtil.splitAndTrim( readPwmConstantsBundle( "locale.highlightList" ), "," );
 
-    public static final CSVFormat DEFAULT_CSV_FORMAT = CSVFormat.DEFAULT;
+    public static final CSVFormat DEFAULT_CSV_FORMAT = CSVFormat.Builder.create( CSVFormat.DEFAULT ).setCommentMarker( '#' ).build();
 
     public static final String DEFAULT_DATETIME_FORMAT_STR = readPwmConstantsBundle( "locale.defaultDateTimeFormat" );
     public static final TimeZone DEFAULT_TIMEZONE = TimeZone.getTimeZone( readPwmConstantsBundle( "locale.defaultTimeZone" ) );
@@ -92,8 +92,6 @@ public abstract class PwmConstants
             .getDefinedPackage( "password.pwm" );
 
     public static final String LDAP_AD_PASSWORD_POLICY_CONTROL_ASN = "1.2.840.113556.1.4.2066";
-    public static final String PROFILE_ID_ALL = "all";
-    public static final String PROFILE_ID_DEFAULT = "default";
 
     public static final String TOKEN_KEY_PWD_CHG_DATE = "_lastPwdChange";
 
@@ -111,6 +109,8 @@ public abstract class PwmConstants
     public static final String REQUEST_ATTR_FORGOTTEN_PW_AVAIL_TOKEN_DEST_CACHE = "ForgottenPw-AvailableTokenDestCache";
     public static final String REQUEST_ATTR_DOMAIN = "domain";
     public static final String REQUEST_ATTR_PWM_APPLICATION = "PwmApplication";
+    public static final String REQUEST_ATTR_SRC_ADDRESS = "SourceAddress";
+    public static final String REQUEST_ATTR_SRC_HOSTNAME = "SourceAddress";
 
     public static final String LOG_REMOVED_VALUE_REPLACEMENT = readPwmConstantsBundle( "log.removedValue" );
 
@@ -150,6 +150,7 @@ public abstract class PwmConstants
 
     public static final String VALUE_REPLACEMENT_USERNAME = "%USERNAME%";
 
+    public static final String LOGBACK_APP_PATH_FILENAME = "logback.xml";
     public static final String RESOURCE_FILE_EULA_TXT = "eula.txt";
     public static final String RESOURCE_FILE_PRIVACY_TXT = "privacy.txt";
     public static final String RESOURCE_FILE_WELCOME_TXT = "welcome.txt";
@@ -227,7 +228,7 @@ public abstract class PwmConstants
         final Map<String, String> returnMap = new TreeMap<>();
         try
         {
-            final Enumeration<URL> resources = ChaiConstant.class.getClassLoader().getResources( manifestFileName );
+            final Enumeration<URL> resources = PwmConstants.class.getClassLoader().getResources( manifestFileName );
             while ( resources.hasMoreElements() )
             {
                 try ( InputStream inputStream = resources.nextElement().openStream() )

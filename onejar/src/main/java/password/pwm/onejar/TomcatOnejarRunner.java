@@ -28,20 +28,16 @@ import org.apache.coyote.http2.Http2Protocol;
 
 import javax.servlet.ServletException;
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -81,28 +77,26 @@ public class TomcatOnejarRunner
             throw new OnejarException( "error generating keystore: " + e.getMessage() );
         }
 
-        outputPwmAppProperties( onejarConfig );
-
         setupEnv( onejarConfig );
 
         tomcat = new Tomcat();
         tomcat.setSilent( true );
 
         {
-            final File basePath = new File( onejarConfig.getWorkingPath().getPath() + File.separator + "b" );
-            ArgumentParser.mkdirs( basePath );
-            tomcat.setBaseDir( basePath.getAbsolutePath() );
+            final Path basePath = onejarConfig.getWorkingPath().resolve( "b" );
+            Files.createDirectories( basePath );
+            tomcat.setBaseDir( basePath.toString() );
         }
         {
-            final File basePath = new File( onejarConfig.getWorkingPath().getPath() + File.separator + "a" );
-            ArgumentParser.mkdirs( basePath );
-            tomcat.getServer().setCatalinaBase( basePath );
-            tomcat.getServer().setCatalinaHome( basePath );
+            final Path basePath = onejarConfig.getWorkingPath().resolve( "a" );
+            Files.createDirectories( basePath );
+            tomcat.getServer().setCatalinaBase( basePath.toFile() );
+            tomcat.getServer().setCatalinaHome( basePath.toFile() );
         }
         {
-            final File workPath = new File( onejarConfig.getWorkingPath().getPath() + File.separator + "w" );
-            ArgumentParser.mkdirs( workPath );
-            tomcat.getHost().setAppBase( workPath.getAbsolutePath() );
+            final Path workPath = onejarConfig.getWorkingPath().resolve( "w" );
+            Files.createDirectories( workPath );
+            tomcat.getHost().setAppBase( workPath.toString() );
         }
 
         tomcat.getHost().setAutoDeploy( false );
@@ -110,7 +104,7 @@ public class TomcatOnejarRunner
 
         deployRedirectConnector( tomcat, onejarConfig );
 
-        final String warPath = onejarConfig.getWarFolder().getAbsolutePath();
+        final String warPath = onejarConfig.getWarFolder().toString();
         tomcat.addWebapp( "/" + onejarConfig.getContext(), warPath );
 
         try
@@ -127,26 +121,27 @@ public class TomcatOnejarRunner
     }
 
     private void deployRedirectConnector( final Tomcat tomcat, final OnejarConfig onejarConfig )
-            throws IOException, ServletException
+            throws IOException
     {
         final String srcRootWebXml = "ROOT-redirect-webapp/WEB-INF/web.xml";
         final String srcRootIndex = "ROOT-redirect-webapp/WEB-INF/index.jsp";
 
-        final File redirBase = new File( onejarConfig.getWorkingPath().getAbsoluteFile() + File.separator + "redirectBase" );
-        ArgumentParser.mkdirs( redirBase );
+        final Path redirBase = onejarConfig.getWorkingPath().resolve( "redirectBase" );
+        Files.createDirectories( redirBase );
         {
-            ArgumentParser.mkdirs( new File ( redirBase.getAbsolutePath() + File.separator + "WEB-INF" ) );
+            final Path webInfPath = redirBase.resolve( "WEB-INF" );
+            Files.createDirectories( webInfPath );
             copyFileAndReplace(
                     srcRootWebXml,
-                    redirBase.getPath() + File.separator + "WEB-INF" + File.separator + "web.xml",
+                    webInfPath.resolve( "web.xml" ).toString(),
                     onejarConfig.getContext() );
             copyFileAndReplace(
                     srcRootIndex,
-                    redirBase.getPath() + File.separator +  "WEB-INF" + File.separator + "index.jsp",
+                    webInfPath.resolve( "index.jsp" ).toString(),
                     onejarConfig.getContext() );
         }
 
-        tomcat.addWebapp( "", redirBase.getAbsolutePath() );
+        tomcat.addWebapp( "", redirBase.toString() );
     }
 
 
@@ -160,12 +155,13 @@ public class TomcatOnejarRunner
         {
             connector.setProperty( "address", onejarConfig.getLocalAddress() );
         }
+
+        final Http2Protocol http2Protocol = new Http2Protocol();
+
         connector.setSecure( true );
         connector.setScheme( "https" );
-        connector.addUpgradeProtocol( new Http2Protocol() );
         connector.setProperty( "SSLEnabled", "true" );
-       // connector.setAttribute( "truststoreType", "PKCS12" );
-        connector.setProperty( "keystoreFile", onejarConfig.getKeystoreFile().getAbsolutePath() );
+        connector.setProperty( "keystoreFile", onejarConfig.getKeystoreFile().toString() );
         connector.setProperty( "keystorePass", onejarConfig.getKeystorePass() );
         connector.setProperty( "keyAlias", OnejarMain.KEYSTORE_ALIAS );
         connector.setProperty( "clientAuth", "false" );
@@ -175,21 +171,39 @@ public class TomcatOnejarRunner
 
         if ( tlsProperties != null )
         {
-            for ( final String key : tlsProperties.stringPropertyNames() )
+            tlsProperties.stringPropertyNames().forEach( key ->
             {
                 final String value = tlsProperties.getProperty( key );
-                connector.setProperty( key, value );
-            }
+                applyTlsProperty( key, value, connector, http2Protocol );
+            } );
         }
 
+        connector.addUpgradeProtocol( http2Protocol );
+
         return connector;
+    }
+
+    static void applyTlsProperty( final String key, final String value, final Connector connector, final Http2Protocol http2Protocol )
+    {
+        if ( "enableCompression".equals( key ) )
+        {
+            if ( Boolean.parseBoolean( value ) )
+            {
+                connector.setProperty( "compression", "on" );
+                http2Protocol.setCompression( "on" );
+            }
+        }
+        else
+        {
+            connector.setProperty( key, value );
+        }
     }
 
     static String getVersion( ) throws OnejarException
     {
         try
         {
-            final Class clazz = TomcatOnejarRunner.class;
+            final Class<?> clazz = TomcatOnejarRunner.class;
             final String className = clazz.getSimpleName() + ".class";
             final String classPath = clazz.getResource( className ).toString();
             if ( !classPath.startsWith( "jar" ) )
@@ -228,7 +242,7 @@ public class TomcatOnejarRunner
         try ( URLClassLoader classLoader = warClassLoaderFromConfig( onejarConfig ) )
         {
             final Class<?> pwmMainClass = classLoader.loadClass( "password.pwm.util.OnejarHelper" );
-            final String keystoreFile = onejarConfig.getKeystoreFile().getAbsolutePath();
+            final String keystoreFile = onejarConfig.getKeystoreFile().toString();
             final Method mainMethod = pwmMainClass.getMethod(
                     "onejarHelper",
                     String.class,
@@ -238,7 +252,7 @@ public class TomcatOnejarRunner
             );
 
             final String[] arguments = new String[] {
-                    onejarConfig.getApplicationPath().getAbsolutePath(),
+                    onejarConfig.getApplicationPath().toString(),
                     keystoreFile,
                     OnejarMain.KEYSTORE_ALIAS,
                     onejarConfig.getKeystorePass(),
@@ -253,24 +267,15 @@ public class TomcatOnejarRunner
 
     private void setupEnv( final OnejarConfig onejarConfig )
     {
-        final String envVarPrefix = Resource.envVarPrefix.getValue();
-        System.setProperty( envVarPrefix + "_APPLICATIONPATH", onejarConfig.getApplicationPath().getAbsolutePath() );
-        System.setProperty( envVarPrefix + "_APPLICATIONFLAGS", "ManageHttps" );
-        System.setProperty( envVarPrefix + "_APPLICATIONPARAMFILE", onejarConfig.getPwmAppPropertiesFile().getAbsolutePath() );
+        final String envVarPrefix = Resource.envVarPrefix.getValue() + ".";
+        System.setProperty( envVarPrefix + "applicationPath", onejarConfig.getApplicationPath().toString() );
+        System.setProperty( envVarPrefix + "ManageHttps", Boolean.TRUE.toString() );
+        System.setProperty( envVarPrefix + "OnejarInstance", Boolean.TRUE.toString() );
+        System.setProperty( envVarPrefix + "AutoExportHttpsKeyStoreFile", onejarConfig.getKeystoreFile().toString() );
+        System.setProperty( envVarPrefix + "AutoExportHttpsKeyStorePassword", onejarConfig.getKeystorePass() );
+        System.setProperty( envVarPrefix + "AutoExportHttpsKeyStoreAlias", OnejarMain.KEYSTORE_ALIAS );
     }
 
-    private void outputPwmAppProperties( final OnejarConfig onejarConfig ) throws IOException
-    {
-        final Properties properties = new Properties();
-        properties.setProperty( "AutoExportHttpsKeyStoreFile", onejarConfig.getKeystoreFile().getAbsolutePath() );
-        properties.setProperty( "AutoExportHttpsKeyStorePassword", onejarConfig.getKeystorePass() );
-        properties.setProperty( "AutoExportHttpsKeyStoreAlias", OnejarMain.KEYSTORE_ALIAS );
-        final File propFile = onejarConfig.getPwmAppPropertiesFile( );
-        try ( Writer writer = new OutputStreamWriter( new FileOutputStream( propFile ), StandardCharsets.UTF_8 ) )
-        {
-            properties.store( writer, "auto-generated file" );
-        }
-    }
 
     private void copyFileAndReplace(
             final String srcPath,
@@ -285,7 +290,7 @@ public class TomcatOnejarRunner
             {
                 String contents = reader.lines().collect( Collectors.joining( "\n" ) );
                 contents = contents.replace( "[[[ROOT_CONTEXT]]]", rootcontext );
-                Files.write( Paths.get( destPath ), contents.getBytes( StandardCharsets.UTF_8 ) );
+                Files.write( Path.of( destPath ), contents.getBytes( StandardCharsets.UTF_8 ) );
             }
         }
     }
@@ -293,19 +298,20 @@ public class TomcatOnejarRunner
     URLClassLoader warClassLoaderFromConfig( final OnejarConfig onejarConfig )
             throws IOException
     {
-        final File warPath = onejarConfig.getWarFolder();
-        final File webInfPath = new File( warPath.getAbsolutePath() + File.separator + "WEB-INF" + File.separator + "lib" );
-        final File[] jarFiles = webInfPath.listFiles();
-        final List<URL> jarURLList = new ArrayList<>();
-        if ( jarFiles != null )
+        final Path warPath = onejarConfig.getWarFolder();
+        final Path webInfLibPath = warPath.resolve( "WEB-INF" ).resolve( "lib" );
+        final List<Path> jarFiles = Files.list( webInfLibPath )
+                .filter( path -> path.getFileName().toString().endsWith( ".jar" ) )
+                .collect( Collectors.toList() );
+
+        final List<URL> jarURLList = new ArrayList<>( jarFiles.size() );
+        for ( final Path jarFile : jarFiles )
         {
-            for ( final File jarFile : jarFiles )
-            {
-                jarURLList.add( jarFile.toURI().toURL() );
-            }
+            jarURLList.add( jarFile.toUri().toURL() );
         }
         return URLClassLoader.newInstance( jarURLList.toArray( new URL[0] ) );
     }
+
 
     public void shutdown() throws LifecycleException
     {

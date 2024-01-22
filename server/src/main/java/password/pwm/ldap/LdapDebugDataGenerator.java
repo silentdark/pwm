@@ -31,6 +31,7 @@ import com.novell.ldapchai.util.ChaiUtility;
 import lombok.Builder;
 import lombok.Value;
 import password.pwm.PwmDomain;
+import password.pwm.bean.ProfileID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.config.DomainConfig;
 import password.pwm.config.PwmSetting;
@@ -38,7 +39,6 @@ import password.pwm.config.profile.LdapProfile;
 import password.pwm.error.PwmException;
 import password.pwm.util.logging.PwmLogger;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -59,14 +59,18 @@ public class LdapDebugDataGenerator
     )
 
     {
+        final DomainConfig nonObfuscatedDomainConf = pwmDomain.getConfig();
+
         final List<LdapDebugInfo> returnList = new ArrayList<>();
-        for ( final LdapProfile ldapProfile : domainConfig.getLdapProfiles().values() )
+        for ( final LdapProfile ldapProfile : nonObfuscatedDomainConf.getLdapProfiles().values() )
         {
             final List<LdapDebugServerInfo> ldapDebugServerInfos = new ArrayList<>();
 
             try
             {
-                final ChaiConfiguration profileChaiConf = LdapOperationsHelper.createChaiConfiguration( domainConfig, ldapProfile );
+                final ChaiConfiguration profileChaiConf = LdapOperationsHelper.createChaiConfiguration(
+                        nonObfuscatedDomainConf,
+                        ldapProfile );
                 final Collection<ChaiConfiguration> chaiConfigurations = ChaiUtility.splitConfigurationPerReplica( profileChaiConf, null );
 
                 for ( final ChaiConfiguration chaiConfiguration : chaiConfigurations )
@@ -77,7 +81,7 @@ public class LdapDebugDataGenerator
                                 pwmDomain,
                                 sessionLabel,
                                 ldapProfile,
-                                domainConfig,
+                                nonObfuscatedDomainConf,
                                 ldapProfile.readSettingAsString( PwmSetting.LDAP_PROXY_USER_DN ),
                                 ldapProfile.readSettingAsPassword( PwmSetting.LDAP_PROXY_USER_PASSWORD )
                         );
@@ -93,7 +97,7 @@ public class LdapDebugDataGenerator
                 }
 
                 final LdapDebugInfo ldapDebugInfo = LdapDebugInfo.builder()
-                        .profileName( ldapProfile.getIdentifier() )
+                        .profileName( ldapProfile.getId() )
                         .displayName( ldapProfile.getDisplayName( locale ) )
                         .serverInfo( ldapDebugServerInfos )
                         .build();
@@ -120,6 +124,7 @@ public class LdapDebugDataGenerator
         final LdapDebugServerInfo.LdapDebugServerInfoBuilder builder = LdapDebugServerInfo.builder();
 
         builder.ldapServerlUrl( chaiConfiguration.getSetting( ChaiSetting.BIND_URLS ) );
+        builder.vendorName( chaiProvider.getDirectoryVendor().name() );
         final ChaiProvider loopProvider = chaiProvider.getProviderFactory().newProvider( chaiConfiguration );
 
         {
@@ -176,18 +181,19 @@ public class LdapDebugDataGenerator
 
     @Value
     @Builder
-    public static class LdapDebugInfo implements Serializable
+    public static class LdapDebugInfo
     {
-        private String profileName;
+        private ProfileID profileName;
         private String displayName;
         private List<LdapDebugServerInfo> serverInfo;
     }
 
     @Value
     @Builder
-    public static class LdapDebugServerInfo implements Serializable
+    public static class LdapDebugServerInfo
     {
         private String ldapServerlUrl;
+        private String vendorName;
         private String testUserDN;
         private Map<String, List<String>> testUserAttributes;
         private String proxyDN;

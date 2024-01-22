@@ -20,8 +20,8 @@
 
 package password.pwm.config.value;
 
-import org.jrivard.xmlchai.XmlChai;
 import org.jrivard.xmlchai.XmlElement;
+import org.jrivard.xmlchai.XmlFactory;
 import password.pwm.PwmConstants;
 import password.pwm.config.PwmSetting;
 import password.pwm.config.stored.StoredConfigXmlConstants;
@@ -30,7 +30,6 @@ import password.pwm.i18n.Display;
 import password.pwm.util.json.JsonFactory;
 import password.pwm.util.secure.PwmSecurityKey;
 
-import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -58,7 +57,7 @@ public class BooleanValue implements StoredValue
         return new StoredValueFactory()
         {
             @Override
-            public BooleanValue fromJson( final String value )
+            public BooleanValue fromJson( final PwmSetting pwmSetting, final String value )
             {
                 return BooleanValue.of( JsonFactory.get().deserialize( value, Boolean.class ) );
             }
@@ -90,7 +89,7 @@ public class BooleanValue implements StoredValue
     @Override
     public List<XmlElement> toXmlValues( final String valueElementName, final XmlOutputProcessData xmlOutputProcessData )
     {
-        final XmlElement valueElement = XmlChai.getFactory().newElement( valueElementName );
+        final XmlElement valueElement = XmlFactory.getFactory().newElement( valueElementName );
         valueElement.setText( String.valueOf( value ) );
         return Collections.singletonList( valueElement );
     }
@@ -113,7 +112,7 @@ public class BooleanValue implements StoredValue
     }
 
     @Override
-    public Serializable toDebugJsonObject( final Locale locale )
+    public Object toDebugJsonObject( final Locale locale )
     {
         return value;
     }

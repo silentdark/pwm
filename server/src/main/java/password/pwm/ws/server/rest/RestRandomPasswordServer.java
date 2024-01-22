@@ -22,6 +22,7 @@ package password.pwm.ws.server.rest;
 
 import lombok.Data;
 import password.pwm.PwmConstants;
+import password.pwm.PwmDomain;
 import password.pwm.config.option.WebServiceUsage;
 import password.pwm.config.profile.PwmPasswordPolicy;
 import password.pwm.error.ErrorInformation;
@@ -34,10 +35,11 @@ import password.pwm.http.PwmHttpRequestWrapper;
 import password.pwm.svc.stats.Statistic;
 import password.pwm.svc.stats.StatisticsClient;
 import password.pwm.util.PasswordData;
-import password.pwm.util.password.RandomPasswordGenerator;
 import password.pwm.util.java.StringUtil;
 import password.pwm.util.logging.PwmLogger;
 import password.pwm.util.password.PasswordUtility;
+import password.pwm.util.password.RandomGeneratorConfig;
+import password.pwm.util.password.RandomGeneratorConfigRequest;
 import password.pwm.ws.server.RestMethodHandler;
 import password.pwm.ws.server.RestRequest;
 import password.pwm.ws.server.RestResultBean;
@@ -47,7 +49,6 @@ import password.pwm.ws.server.RestWebServer;
 
 import javax.servlet.annotation.WebServlet;
 import java.io.IOException;
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -62,13 +63,13 @@ public class RestRandomPasswordServer extends RestServlet
     private static final PwmLogger LOGGER = PwmLogger.forClass( RestRandomPasswordServer.class );
 
     @Data
-    public static class JsonOutput implements Serializable
+    public static class JsonOutput
     {
         private String password;
     }
 
     @Data
-    public static class JsonInput implements Serializable
+    public static class JsonInput
     {
         private String username;
         private int strength;
@@ -76,7 +77,6 @@ public class RestRandomPasswordServer extends RestServlet
         private int maxLength;
         private String chars;
         private boolean noUser;
-
     }
 
     @Override
@@ -211,23 +211,28 @@ public class RestRandomPasswordServer extends RestServlet
                     targetUserIdentity.getChaiUser() );
         }
 
-        final RandomPasswordGenerator.RandomGeneratorConfig randomConfig = jsonInputToRandomConfig( jsonInput, pwmPasswordPolicy );
-        final PasswordData randomPassword = RandomPasswordGenerator.createRandomPassword( restRequest.getSessionLabel(), randomConfig, restRequest.getDomain() );
+        final RandomGeneratorConfig randomConfig = jsonInputToRandomConfig( jsonInput, restRequest.getDomain(), pwmPasswordPolicy );
+        final PasswordData randomPassword = PasswordUtility.generateRandom(
+                restRequest.getSessionLabel(),
+                randomConfig,
+                restRequest.getDomain() );
         final JsonOutput outputMap = new JsonOutput();
         outputMap.password = randomPassword.getStringValue();
 
-        StatisticsClient.incrementStat( restRequest.getDomain(), Statistic.REST_SETPASSWORD );
+        StatisticsClient.incrementStat( restRequest.getDomain(), Statistic.REST_RANDOMPASSWORD );
 
         return outputMap;
     }
 
-    public static RandomPasswordGenerator.RandomGeneratorConfig jsonInputToRandomConfig(
+    public static RandomGeneratorConfig jsonInputToRandomConfig(
             final JsonInput jsonInput,
+            final PwmDomain pwmDomain,
             final PwmPasswordPolicy pwmPasswordPolicy
     )
+            throws PwmUnrecoverableException
     {
-        final RandomPasswordGenerator.RandomGeneratorConfig.RandomGeneratorConfigBuilder randomConfigBuilder
-                = RandomPasswordGenerator.RandomGeneratorConfig.builder();
+        final RandomGeneratorConfigRequest.RandomGeneratorConfigRequestBuilder randomConfigBuilder
+                = RandomGeneratorConfigRequest.builder();
 
         if ( jsonInput.getStrength() > 0 && jsonInput.getStrength() <= 100 )
         {
@@ -252,9 +257,7 @@ public class RestRandomPasswordServer extends RestServlet
             randomConfigBuilder.seedlistPhrases( charValues );
         }
 
-        randomConfigBuilder.passwordPolicy( pwmPasswordPolicy );
-
-        return randomConfigBuilder.build();
+        return RandomGeneratorConfig.make( pwmDomain, pwmPasswordPolicy, randomConfigBuilder.build() );
     }
 }
 

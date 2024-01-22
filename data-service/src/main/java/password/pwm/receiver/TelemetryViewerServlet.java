@@ -22,11 +22,11 @@ package password.pwm.receiver;
 
 import password.pwm.util.java.StringUtil;
 
-import javax.servlet.ServletException;
-import javax.servlet.annotation.WebServlet;
-import javax.servlet.http.HttpServlet;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
@@ -39,7 +39,6 @@ import java.time.temporal.ChronoUnit;
 )
 public class TelemetryViewerServlet extends HttpServlet
 {
-    private static final Logger LOGGER = Logger.createLogger( TelemetryViewerServlet.class );
     private static final String PARAM_DAYS = "days";
 
     public static final String SUMMARY_ATTR = "SummaryBean";
@@ -48,19 +47,19 @@ public class TelemetryViewerServlet extends HttpServlet
     protected void doGet( final HttpServletRequest req, final HttpServletResponse resp )
             throws ServletException, IOException
     {
-        LOGGER.debug( "http request for viewer" );
         final String daysString = req.getParameter( PARAM_DAYS );
         final int days = StringUtil.isEmpty( daysString ) ? 30 : Integer.parseInt( daysString );
         final ContextManager contextManager = ContextManager.getContextManager( req.getServletContext() );
+
         final PwmReceiverApp app = contextManager.getApp();
+        app.getStatisticCounterBundle().increment( PwmReceiverApp.CounterStatsKey.TelemetryViewRequests );
+        app.getStatisticEpsBundle().markEvent( PwmReceiverApp.EpsStatKey.TelemetryViewRequests );
 
         {
             final String errorState = app.getStatus().getErrorState();
             if ( StringUtil.notEmpty( errorState ) )
             {
                 resp.sendError( 500, errorState );
-                final String htmlBody = "<html>Error: " + errorState + "</html>";
-                resp.getWriter().print( htmlBody );
                 return;
             }
         }

@@ -24,13 +24,16 @@ import password.pwm.PwmApplication;
 import password.pwm.bean.DomainID;
 import password.pwm.bean.SessionLabel;
 import password.pwm.error.ErrorInformation;
+import password.pwm.error.PwmError;
 import password.pwm.error.PwmException;
+import password.pwm.error.PwmUnrecoverableException;
 import password.pwm.health.HealthMessage;
 import password.pwm.health.HealthRecord;
 import password.pwm.util.PwmScheduler;
-import password.pwm.util.java.JavaHelper;
 import password.pwm.util.java.LazySupplier;
 import password.pwm.util.java.TimeDuration;
+import password.pwm.util.logging.PwmLogManager;
+import password.pwm.util.logging.PwmLogger;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -38,7 +41,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.Supplier;
+import java.util.concurrent.ScheduledFuture;
 
 public abstract class AbstractPwmService implements PwmService
 {
@@ -48,12 +51,20 @@ public abstract class AbstractPwmService implements PwmService
     private DomainID domainID;
     private SessionLabel sessionLabel;
 
-    private Supplier<ScheduledExecutorService> executorService;
+    private LazySupplier<ScheduledExecutorService> executorService;
 
 
     public final PwmService.STATUS status()
     {
         return status;
+    }
+
+    @Override
+    public String name()
+    {
+        return "[" + this.getClass().getSimpleName()
+                + ( domainID == null || domainID.isSystem() ? "" : "/" + domainID.stringValue() )
+                + "]";
     }
 
     public final void init( final PwmApplication pwmApplication, final DomainID domainID )
@@ -65,7 +76,7 @@ public abstract class AbstractPwmService implements PwmService
                 ? pwmApplication.getSessionLabel()
                 : pwmApplication.domains().get( domainID ).getSessionLabel();
 
-        executorService = new LazySupplier<>( () -> PwmScheduler.makeBackgroundServiceExecutor( pwmApplication, getSessionLabel(), getClass() ) );
+        executorService = LazySupplier.create( () -> PwmScheduler.makeBackgroundServiceExecutor( pwmApplication, getSessionLabel(), getClass() ) );
 
         if ( pwmApplication.checkConditions( openConditions() ) )
         {
@@ -90,9 +101,9 @@ public abstract class AbstractPwmService implements PwmService
     public void shutdown()
     {
         this.status = STATUS.CLOSED;
-        if ( executorService != null )
+        if ( executorService != null && executorService.isSupplied() )
         {
-            JavaHelper.closeAndWaitExecutor( executorService.get(), TimeDuration.SECONDS_10 );
+            PwmScheduler.closeAndWaitExecutor( executorService.get(), TimeDuration.SECONDS_10,  PwmLogger.forClass( this.getClass() ), getSessionLabel() );
         }
         shutdownImpl();
     }
@@ -119,6 +130,15 @@ public abstract class AbstractPwmService implements PwmService
         return startupError;
     }
 
+    protected void checkOpenStatus()
+            throws PwmUnrecoverableException
+    {
+        if ( this.status() != STATUS.OPEN )
+        {
+            throw new PwmUnrecoverableException( PwmError.ERROR_SERVICE_NOT_AVAILABLE, name() + " service is not open" );
+        }
+    }
+
     public final List<HealthRecord> healthCheck( )
     {
         final List<HealthRecord> returnRecords = new ArrayList<>(  );
@@ -129,6 +149,7 @@ public abstract class AbstractPwmService implements PwmService
             returnRecords.add( HealthRecord.forMessage(
                     DomainID.systemId(),
                     HealthMessage.ServiceClosed,
+                    name(),
                     startupError.toDebugStr() ) );
         }
 
@@ -151,8 +172,46 @@ public abstract class AbstractPwmService implements PwmService
         return EnumSet.of( PwmApplication.Condition.RunningMode, PwmApplication.Condition.LocalDBOpen, PwmApplication.Condition.NotInternalInstance );
     }
 
-    protected ScheduledExecutorService getExecutorService()
+    protected void scheduleFixedRateJob( final Runnable runnable, final TimeDuration initialDelay, final TimeDuration repeatInterval )
     {
-        return executorService.get();
+        PwmScheduler.scheduleFixedRateJob( new WrappedRunnable( runnable ),
+                executorService.get(),
+                initialDelay,
+                repeatInterval );
+    }
+
+    protected ScheduledFuture<?> scheduleJob( final Runnable runnable )
+    {
+        return scheduleJob( runnable, TimeDuration.ZERO );
+    }
+
+    protected ScheduledFuture<?> scheduleJob( final Runnable runnable, final TimeDuration initialDelay )
+    {
+        return pwmApplication.getPwmScheduler().scheduleJob( new WrappedRunnable( runnable ),
+                executorService.get(),
+                initialDelay );
+    }
+
+    protected void scheduleDailyZuluZeroStartJob( final Runnable runnable, final TimeDuration zuluOffset )
+    {
+        PwmScheduler.scheduleDailyZuluZeroStartJob( new WrappedRunnable( runnable ),
+                executorService.get(),
+                zuluOffset );
+    }
+
+    private class WrappedRunnable implements Runnable
+    {
+        private final Runnable runnable;
+
+        WrappedRunnable( final Runnable runnable )
+        {
+            this.runnable = runnable;
+        }
+
+        @Override
+        public void run()
+        {
+            PwmLogManager.executeWithThreadSessionData( getSessionLabel(), runnable );
+        }
     }
 }
