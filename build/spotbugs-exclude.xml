@@ -82,9 +82,12 @@
     </Match>
 
     <Match>
-        <!-- introduced with spotbugs 4.8 and require code refactoring -->
+        <!-- introduced with spotbugs 4.9.1.0 and require code refactoring -->
         <Bug pattern="AT_STALE_THREAD_WRITE_OF_PRIMITIVE"/>
     </Match>
 
-
+    <Match>
+        <!-- introduced with spotbugs 4.9.1.0 and require code refactoring -->
+        <Bug pattern="AT_NONATOMIC_64BIT_PRIMITIVE"/>
+    </Match>
 </FindBugsFilter>
